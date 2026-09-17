@@ -88,62 +88,6 @@
     "./*": {
       "types": "./lib/esm/*.d.ts",
       "import": "./lib/esm/*.js"
-    },
-    "./components/*.js": {
-      "types": "./lib/esm/components/*.d.ts",
-      "import": "./lib/esm/components/*.js"
-    },
-    "./components/*": {
-      "types": "./lib/esm/components/*.d.ts",
-      "import": "./lib/esm/components/*.js"
-    },
-    "./helpers/*.js": {
-      "types": "./lib/esm/helpers/*.d.ts",
-      "import": "./lib/esm/helpers/*.js"
-    },
-    "./helpers/*": {
-      "types": "./lib/esm/helpers/*.d.ts",
-      "import": "./lib/esm/helpers/*.js"
-    },
-    "./hooks/*.js": {
-      "types": "./lib/esm/hooks/*.d.ts",
-      "import": "./lib/esm/hooks/*.js"
-    },
-    "./hooks/*": {
-      "types": "./lib/esm/hooks/*.d.ts",
-      "import": "./lib/esm/hooks/*.js"
-    },
-    "./ontologies/*.js": {
-      "types": "./lib/esm/ontologies/*.d.ts",
-      "import": "./lib/esm/ontologies/*.js"
-    },
-    "./ontologies/*": {
-      "types": "./lib/esm/ontologies/*.d.ts",
-      "import": "./lib/esm/ontologies/*.js"
-    },
-    "./shapes/*.js": {
-      "types": "./lib/esm/shapes/*.d.ts",
-      "import": "./lib/esm/shapes/*.js"
-    },
-    "./shapes/*": {
-      "types": "./lib/esm/shapes/*.d.ts",
-      "import": "./lib/esm/shapes/*.js"
-    },
-    "./types/*.js": {
-      "types": "./lib/esm/types/*.d.ts",
-      "import": "./lib/esm/types/*.js"
-    },
-    "./types/*": {
-      "types": "./lib/esm/types/*.d.ts",
-      "import": "./lib/esm/types/*.js"
-    },
-    "./utils/*.js": {
-      "types": "./lib/esm/utils/*.d.ts",
-      "import": "./lib/esm/utils/*.js"
-    },
-    "./utils/*": {
-      "types": "./lib/esm/utils/*.d.ts",
-      "import": "./lib/esm/utils/*.js"
     }
   },
   "publishConfig": {
