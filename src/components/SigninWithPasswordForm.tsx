@@ -14,7 +14,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Authentication } from '../shapes/Authentication.js';
 import type { AuthenticationResponse, AuthSession } from '../types/auth.js';
 import { asset } from '@_linked/core/utils/LinkedFileStorage';
-import { useTranslate } from '@tolgee/react';
+import { useTranslate } from '@_linked/translation/react';
 
 interface SigninWithPasswordFormProps {
   onCreateAccount?: () => void;
