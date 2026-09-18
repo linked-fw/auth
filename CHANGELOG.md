@@ -1,5 +1,19 @@
 # @\_linked/auth
 
+## 1.3.0
+
+### Minor Changes
+
+- [#19](https://github.com/linked-cm/auth/pull/19) [`4b1689e`](https://github.com/linked-cm/auth/commit/4b1689e1a1095063d01c5f0b171f751c2f7a2082) Thanks [@flyon](https://github.com/flyon)! - Rename `IdentityToken.subject` to `IdentityToken.sub`.
+
+  `subject` is a field of the query builder, so `IdentityToken.select(t => [t.subject])` and
+  `.where(t => t.subject.equals(...))` resolved to that field instead of the property and failed.
+  This broke `getTokenByEmailOrSubject`, `getTokenByAccount` and `hasToken`.
+
+  The RDF predicate is unchanged (`auth:subject`), so stored tokens need no migration. Update
+  any code that reads `token.subject` from query results or passes `subject` to
+  `IdentityToken.create`/`update` to use `sub`.
+
 ## 1.2.3
 
 ### Patch Changes

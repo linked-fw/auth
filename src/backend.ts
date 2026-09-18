@@ -842,7 +842,7 @@ export default class AuthBackendProvider extends BackendProvider {
           appleSubject
         ),
         email,
-        subject: appleSubject,
+        sub: appleSubject,
         account,
       } as any);
     };
