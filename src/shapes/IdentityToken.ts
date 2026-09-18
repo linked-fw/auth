@@ -114,6 +114,15 @@ export class IdentityToken extends Shape {
     return existingToken;
   }
 
+  static async getTokensBySubject(sub: string): Promise<IdentityTokenResult[]> {
+    if (!sub) return [];
+    return await IdentityToken.select((token) => [
+      token.email,
+      token.sub,
+      token.account.select((account) => [account.email, account.accountOf]),
+    ]).where((token) => token.sub.equals(sub));
+  }
+
   static async getTokenByAccount(
     account: UserAccountData
   ): Promise<IdentityTokenResult> {

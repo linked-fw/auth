@@ -28,6 +28,46 @@ export type AuthenticationResult =
  */
 export type OAuthProvider = 'facebook' | 'google' | 'apple';
 
+export type OAuthProfilePayload = {
+  email?: string;
+  name?: string;
+  familyName?: string;
+  givenName?: string;
+  fullName?: string;
+  imageUrl?: string;
+};
+
+export type GoogleOAuthPayload = OAuthProfilePayload & {
+  authentication: { idToken: string };
+};
+
+export type AppleOAuthPayload = OAuthProfilePayload & {
+  identityToken: string;
+  authorizationCode?: string;
+  nonce: string;
+};
+
+export type FacebookOAuthPayload = {
+  accessToken: string;
+};
+
+export type OAuthPayloadMap = {
+  google: GoogleOAuthPayload;
+  apple: AppleOAuthPayload;
+  facebook: FacebookOAuthPayload;
+};
+
+export type VerifiedOAuthIdentity = {
+  provider: OAuthProvider;
+  subject: string;
+  email?: string;
+  emailVerified?: boolean;
+  name?: string;
+  givenName?: string;
+  familyName?: string;
+  imageUrl?: string;
+};
+
 /**
  * Create a new account signin with email and password.
  */

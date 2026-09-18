@@ -9,10 +9,14 @@ import { packageName } from '../package.js';
 import { useAuth } from '../hooks/useAuth.js';
 import type { AuthenticationResponse } from '../types/auth.js';
 import { useTranslate } from '@tolgee/react';
+import { cl } from '@_linked/react/utils/ClassNames';
+import { isCleanName } from '../utils/name-validation.js';
 
 interface CreateAccountFormProps {
   className?: string;
   onAccountCreated?: (authentication?: AuthenticationResponse) => void; //props to redirect after account successfully created.
+  submitButtonColor?: 'primary' | 'secondary' | 'tertiary';
+  submitButtonClassName?: string;
 }
 interface CreateAccountFormData {
   firstName: string;
@@ -25,6 +29,8 @@ interface CreateAccountFormData {
 
 export function CreateAccountForm({
   onAccountCreated,
+  submitButtonColor = 'primary',
+  submitButtonClassName,
   ...restProps
 }: CreateAccountFormProps) {
   const {
@@ -102,11 +108,18 @@ export function CreateAccountForm({
             prefix + '.firstNamePlaceholder',
             'Enter your first name'
           )}
-          {...register('firstName', { required: true })}
+          {...register('firstName', {
+            required: true,
+            validate: (value: string) =>
+              isCleanName(value) ||
+              t(prefix + '.firstNameProfane', 'Please enter your real name.'),
+          })}
         />
         {errors.firstName && (
           <p className={style.ErrorMessage}>
-            {t(prefix + '.firstNameError', 'First name is required')}
+            {errors.firstName.type === 'validate'
+              ? (errors.firstName.message as string)
+              : t(prefix + '.firstNameError', 'First name is required')}
           </p>
         )}
 
@@ -116,8 +129,18 @@ export function CreateAccountForm({
             prefix + '.lastNamePlaceholder',
             'Enter your last name'
           )}
-          {...register('lastName')}
+          {...register('lastName', {
+            validate: (value: string) =>
+              !value ||
+              isCleanName(value) ||
+              t(prefix + '.lastNameProfane', 'Please enter your real name.'),
+          })}
         />
+        {errors.lastName && (
+          <p className={style.ErrorMessage}>
+            {errors.lastName.message as string}
+          </p>
+        )}
 
         <TextField
           type={'email'}
@@ -200,9 +223,9 @@ export function CreateAccountForm({
         ) : null}
       </div>
       <Button
-        color="primary"
+        color={submitButtonColor}
         fullWidth={true}
-        className={style.FormButton}
+        className={cl(style.FormButton, submitButtonClassName)}
         disabled={loading}
         onClick={handleSubmit(createAccount)}
       >
