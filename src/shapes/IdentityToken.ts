@@ -10,7 +10,7 @@ import { literalProperty, objectProperty } from '@_linked/core/shapes/SHACL';
 export type IdentityTokenResult = QResult<
   IdentityToken,
   {
-    subject: string;
+    sub: string;
     token: string;
     phoneIdentifier: string;
     email: string;
@@ -22,11 +22,14 @@ export type IdentityTokenResult = QResult<
 export class IdentityToken extends Shape {
   static targetClass = auth.IdentityToken;
 
+  // The OIDC `sub` claim. Not named `subject`: that is a query-builder field,
+  // so `select(t => t.subject)` would resolve to it instead of this property.
+  // The RDF predicate stays auth:subject.
   @literalProperty({
     path: auth.subject,
     maxCount: 1,
   })
-  get subject(): string {
+  get sub(): string {
     return '';
   }
 
@@ -79,7 +82,7 @@ export class IdentityToken extends Shape {
       existingToken = await IdentityToken.select((t) => {
         return [
           t.email,
-          t.subject,
+          t.sub,
           t.token,
           t.phoneIdentifier,
           t.account.select((a) => {
@@ -95,7 +98,7 @@ export class IdentityToken extends Shape {
       existingToken = await IdentityToken.select((t) => {
         return [
           t.email,
-          t.subject,
+          t.sub,
           t.token,
           t.phoneIdentifier,
           t.account.select((a) => {
@@ -104,22 +107,20 @@ export class IdentityToken extends Shape {
         ];
       })
         .where((t) => {
-          return t.subject.equals(sub);
+          return t.sub.equals(sub);
         })
         .one();
     }
     return existingToken;
   }
 
-  static async getTokensBySubject(
-    subject: string
-  ): Promise<IdentityTokenResult[]> {
-    if (!subject) return [];
+  static async getTokensBySubject(sub: string): Promise<IdentityTokenResult[]> {
+    if (!sub) return [];
     return await IdentityToken.select((token) => [
       token.email,
-      token.subject,
+      token.sub,
       token.account.select((account) => [account.email, account.accountOf]),
-    ]).where((token) => token.subject.equals(subject));
+    ]).where((token) => token.sub.equals(sub));
   }
 
   static async getTokenByAccount(
@@ -128,7 +129,7 @@ export class IdentityToken extends Shape {
     const existingToken = await IdentityToken.select((t) => {
       return [
         t.email,
-        t.subject,
+        t.sub,
         t.token,
         t.phoneIdentifier,
         t.account.select((a) => {
@@ -154,7 +155,7 @@ export class IdentityToken extends Shape {
     const existingToken = await IdentityToken.select((t) => {
       return [
         t.email,
-        t.subject,
+        t.sub,
         t.token,
         t.phoneIdentifier,
         t.account.select((a) => {
