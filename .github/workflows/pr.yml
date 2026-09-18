@@ -1,0 +1,13 @@
+name: PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  checks:
+    uses: linked-fw/.github/.github/workflows/pr.yml@v1
+    with:
+      require-tests: false
+      run-e2e: false
