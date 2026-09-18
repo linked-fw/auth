@@ -8,6 +8,11 @@ on:
 jobs:
   checks:
     uses: linked-fw/.github/.github/workflows/pr.yml@v1
+    # The changeset reminder posts a PR comment. A reusable workflow cannot hold more than its
+    # caller granted it, so this has to be declared here as well.
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       require-tests: false
       run-e2e: false
