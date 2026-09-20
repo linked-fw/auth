@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 1.3.1
+
+### Patch Changes
+
+- [#25](https://github.com/linked-fw/auth/pull/25) [`11e67f0`](https://github.com/linked-fw/auth/commit/11e67f0cb8b20a7386b936efaeefe2db0c3f1fe3) Thanks [@flyon](https://github.com/flyon)! - Declare npm as the package manager for this repo, convert the build scripts off `yarn`, and mark `package-lock.json` as a generated file.
+
 ## 1.3.0
 
 ### Minor Changes
