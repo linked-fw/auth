@@ -30,10 +30,10 @@
     "web3"
   ],
   "dependencies": {
-    "@_linked/core": "^2.0.1",
+    "@_linked/core": "^2.21.0",
     "@_linked/react": "^1.1.0",
     "@_linked/schema": "^1.0",
-    "@_linked/server": "^2.0",
+    "@_linked/server": "^2.5.1",
     "@_linked/server-utils": "^1.0",
     "@_linked/sioc": "^1.0",
     "@_linked/xsd": "^1.0",
@@ -65,7 +65,7 @@
     "react-router-dom": "^6.14.2"
   },
   "devDependencies": {
-    "@_linked/cli": "^1.2",
+    "@_linked/cli": "^1.19.0",
     "@changesets/changelog-github": "^0.5.2",
     "@changesets/cli": "^2.29.8",
     "copyfiles": "^2.4.1",
