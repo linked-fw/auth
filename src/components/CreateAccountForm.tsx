@@ -8,7 +8,7 @@ import { Server } from '@_linked/server-utils/utils/Server';
 import { packageName } from '../package.js';
 import { useAuth } from '../hooks/useAuth.js';
 import type { AuthenticationResponse } from '../types/auth.js';
-import { useTranslate } from '@tolgee/react';
+import { useTranslate } from '@_linked/translation/react';
 import { cl } from '@_linked/react/utils/ClassNames';
 import { isCleanName } from '../utils/name-validation.js';
 

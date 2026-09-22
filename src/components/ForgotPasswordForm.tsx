@@ -7,7 +7,7 @@ import { Button } from 'lincd-mui-base/components/Button';
 import { useStyles } from '@_linked/react/utils/Hooks';
 import { Server } from '@_linked/server-utils/utils/Server';
 import { packageName } from '../package.js';
-import { useTranslate } from '@tolgee/react';
+import { useTranslate } from '@_linked/translation/react';
 
 interface ForgotPasswordFormProps {
   className?: string;
