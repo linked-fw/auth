@@ -14,7 +14,7 @@
   "packageManager": "npm@11.19.1",
   "linkedPackage": true,
   "main": "lib/esm/index.js",
-  "types": "./lib/esm/index.d.ts",
+  "types": "index.d.ts",
   "license": "ISC",
   "scripts": {
     "start": "npm exec linked dev",
