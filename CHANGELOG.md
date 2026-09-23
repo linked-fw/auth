@@ -1,5 +1,25 @@
 # @\_linked/auth
 
+## 1.3.2
+
+### Patch Changes
+
+- [#28](https://github.com/linked-fw/auth/pull/28) [`0cf087f`](https://github.com/linked-fw/auth/commit/0cf087f6502a1efaf422905f85afb3d210b79304) Thanks [@flyon](https://github.com/flyon)! - Compile the whole `src` folder, and let a bare import resolve under Node10.
+
+  The build only emitted what an entry transitively reached, so any module
+  nothing imported was never built — and never type-checked, so it rotted
+  quietly. `include` now covers `src/**/*` with tests excluded explicitly.
+
+  `typesVersions` maps every specifier through `lib/esm/*`, so a `types` value
+  that already carried that prefix had it applied twice and no consumer on
+  classic Node10 resolution could `import` the package by its bare name.
+
+## 1.3.1
+
+### Patch Changes
+
+- [#25](https://github.com/linked-fw/auth/pull/25) [`11e67f0`](https://github.com/linked-fw/auth/commit/11e67f0cb8b20a7386b936efaeefe2db0c3f1fe3) Thanks [@flyon](https://github.com/flyon)! - Declare npm as the package manager for this repo, convert the build scripts off `yarn`, and mark `package-lock.json` as a generated file.
+
 ## 1.3.0
 
 ### Minor Changes
