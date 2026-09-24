@@ -1,5 +1,5 @@
 import './types.js';
-import './ontologies/auth.js';
+import './ontologies/auth.register.js';
 
 //SHAPES FIRST
 import './shapes/IdentityToken.js';
