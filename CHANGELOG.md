@@ -1,5 +1,20 @@
 # @\_linked/auth
 
+## 1.3.4
+
+### Patch Changes
+
+- [#33](https://github.com/linked-fw/auth/pull/33) [`21f9c4e`](https://github.com/linked-fw/auth/commit/21f9c4eecb60bec4d07a462e4fb3362fcc82fed1) Thanks [@flyon](https://github.com/flyon)! - The ontology no longer registers by importing itself.
+
+  It carried `import * as _this from './<prefix>.js'` and passed that namespace to
+  `linkedOntology()`. Under `tsc` the self-reference survives; under a bundler it does
+  not — Rollup treats it as a circular import and elides it, so the binding is
+  `undefined` and a consuming app dies at boot with `_this is not defined`.
+
+  Registration now lives in a `<prefix>.register.ts` sibling, imported from the package
+  entry. Nothing changes for consumers: importing this package still registers the
+  ontology.
+
 ## 1.3.3
 
 ### Patch Changes
