@@ -18,6 +18,15 @@ export type IdentityTokenResult = QResult<
   }
 >;
 
+export type SubjectLinkedIdentityTokenResult = QResult<
+  IdentityToken,
+  {
+    sub: string;
+    email: string;
+    account: UserAccountData;
+  }
+>;
+
 @linkedShape
 export class IdentityToken extends Shape {
   static targetClass = auth.IdentityToken;
@@ -114,7 +123,9 @@ export class IdentityToken extends Shape {
     return existingToken;
   }
 
-  static async getTokensBySubject(sub: string): Promise<IdentityTokenResult[]> {
+  static async getTokensBySubject(
+    sub: string
+  ): Promise<SubjectLinkedIdentityTokenResult[]> {
     if (!sub) return [];
     return await IdentityToken.select((token) => [
       token.email,

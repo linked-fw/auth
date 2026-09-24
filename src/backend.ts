@@ -23,6 +23,7 @@ import type {
   UserAccountData,
   UserData,
 } from './types/auth.js';
+import { isOAuthProvider } from './types/auth.js';
 import { createToken, verifyToken } from './utils/jwt.js';
 import { RefreshToken } from './shapes/RefreshToken.js';
 import {
@@ -47,6 +48,7 @@ import type { AuthSession } from './types/auth.js';
 
 import connect_sqlite3 from 'connect-sqlite3';
 import { emailToWebID } from './utils/webID.js';
+import { isCleanName } from './utils/name-validation.js';
 
 var SQLiteStore = connect_sqlite3(session);
 
@@ -356,6 +358,14 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
 
+    if (!isCleanName(firstName) || (lastName && !isCleanName(lastName))) {
+      return {
+        error: 'Please enter your real name.',
+      };
+    }
+
+    email = email.trim().toLowerCase();
+
     let webIDFromEmail: string;
     try {
       webIDFromEmail = emailToWebID(email);
@@ -415,7 +425,7 @@ export default class AuthBackendProvider extends BackendProvider {
         const passwordHash = await PasswordHelper.generateHashedPassword(
           password
         );
-        const newCredential = await AuthCredential.create({
+        await AuthCredential.create({
           credentialOf: {
             id: user.id,
           },
@@ -436,9 +446,6 @@ export default class AuthBackendProvider extends BackendProvider {
             console.error(`Error creating account for user ${user.id}:`, err);
             throw new Error(`Could not create account for user ${user.id}`);
           });
-
-        console.log(`new user:`, JSON.stringify(user));
-        console.log(`new account:`, JSON.stringify(account));
 
         return {
           account: account,
@@ -705,19 +712,20 @@ export default class AuthBackendProvider extends BackendProvider {
     provider: Provider,
     oauthUserData: OAuthPayloadMap[Provider]
   ): Promise<AuthenticationResult> {
-    let { email, name, familyName, givenName, imageUrl } =
-      oauthUserData as OAuthProfilePayload;
-    let identityToken: string | undefined;
+    if (!isOAuthProvider(provider)) {
+      return { error: 'Unsupported OAuth provider' };
+    }
+
+    let { email, familyName, givenName } = oauthUserData as OAuthProfilePayload;
     let appleSubject: string | undefined;
     let subjectAccount: UserAccountData | undefined;
 
     if (provider === 'apple') {
       const appleData = oauthUserData as AppleOAuthPayload;
-      identityToken = appleData.identityToken;
       let appleIdentity;
       try {
         appleIdentity = await AppleHelper.validateIdentityToken(
-          identityToken,
+          appleData.identityToken,
           {
             nonce: appleData.nonce,
             audiences: buildAppleTokenAudiences(
@@ -773,10 +781,8 @@ export default class AuthBackendProvider extends BackendProvider {
 
       // Extract user data from validated Google payload
       email = googlePayload.email;
-      name = googlePayload.name;
       givenName = googlePayload.given_name;
       familyName = googlePayload.family_name;
-      imageUrl = googlePayload.picture;
     }
 
     if (provider === 'facebook') {
@@ -786,10 +792,8 @@ export default class AuthBackendProvider extends BackendProvider {
           facebookData.accessToken
         );
         email = facebookIdentity.email;
-        name = facebookIdentity.name;
         givenName = facebookIdentity.givenName;
         familyName = facebookIdentity.familyName;
-        imageUrl = facebookIdentity.imageUrl;
       } catch (error) {
         console.error('Facebook OAuth validation failed');
         return { error: 'Invalid Facebook access token' };
@@ -920,7 +924,7 @@ export default class AuthBackendProvider extends BackendProvider {
           });
 
         // Create AuthCredential for OAuth user (no password needed)
-        const newCredential = await AuthCredential.create({
+        await AuthCredential.create({
           credentialOf: {
             id: user.id,
           },
@@ -957,7 +961,7 @@ export default class AuthBackendProvider extends BackendProvider {
           });
 
         // Save Apple IdentityToken if this is an Apple sign-in
-        if (provider === 'apple' && identityToken && appleSubject) {
+        if (provider === 'apple' && appleSubject) {
           await createAppleIdentityLink(account as UserAccountData).catch((err) => {
             console.error(
               `Error creating Apple IdentityToken for user ${user.id}:`,
@@ -969,15 +973,12 @@ export default class AuthBackendProvider extends BackendProvider {
           });
         }
 
-        console.log(`${provider} user created:`, JSON.stringify(user));
-        console.log(`${provider} account created:`, JSON.stringify(account));
-
         return {
           account: account as any,
           person: user as any,
         };
       },
-      `${provider} - ${email}`
+      `${provider} OAuth`
     );
   }
 

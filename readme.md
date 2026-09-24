@@ -1,141 +1,94 @@
-# How to use Auth Package
+# `@_linked/auth`
 
-## Overview
+Portable authentication for Linked applications. The package provides session handling, password authentication, verified OAuth sign-in, account resolution, and React helpers.
 
-The Auth package facilitates authentication in your application using JSON Web Tokens (JWT). It employs `express-jwt` for stateless authentication, handling `accessToken` and `refreshToken` for web applications via Cookies and mobile applications using `@capacitor/preferences.`
+## Application setup
 
-Since the `accessToken` and `refreshToken` generated, default `accessToken` will be valid 60 minutes and `refreshToken` 7 days and your refreshToken will be saved into the database.
-
-## Installation
-
-To integrate the Auth package, follow these steps:
-
-1. Wrap your routes with `<ProvideAuth>` component. Define the `userType` and `accountType` and any additional `availableAccountTypes`.
+Wrap the client application with `ProvideAuth` and supply its user and account shapes:
 
 ```tsx
-import { FreeAccount } from 'lincd-dating/lib/shapes/FreeAccount';
-import { Person } from 'lincd-dating/lib/shapes/Person';
-import { PaidAccountTier1 } from 'lincd-dating/lib/shapes/PaidAccountTier1';
+import { ProvideAuth } from '@_linked/auth/components/ProvideAuth';
+import { Person } from 'profile-plus/shapes/Person';
+import { UserAccount } from 'profile-plus/shapes/UserAccount';
 
-<ProvideAuth
-  userType={Person}
-  accountType={FreeAccount}
-  availableAccountTypes={[PaidAccountTier1]}
->
-  {/* Your application code */}
+<ProvideAuth userType={Person} accountType={UserAccount}>
+  <App />
 </ProvideAuth>;
 ```
 
-2. Set the environment variables `AUTH_ACCOUNT_TYPE` and `AUTH_USER_TYPE` to match the types imported in the `ProvideAuth` component.
+Configure the same shapes for the backend:
 
-```json
-"AUTH_ACCOUNT_TYPE": "lincd-dating/lib/shapes/FreeAccount",
-"AUTH_USER_TYPE": "lincd-dating/lib/shapes/Person",
+```ini
+AUTH_USER_TYPE=profile-plus/shapes/Person
+AUTH_ACCOUNT_TYPE=profile-plus/shapes/UserAccount
 ```
 
-## How to use on Frontend
-
-Import the useAuth hook in your page to access functions like `signin`, `validateToken`, and `signout`.
-
-### Get user and userAccount
+Use `useAuth` from application components:
 
 ```tsx
-import { useAuth } from 'lincd-auth/lib/hooks/useAuth';
-import { FreeAccount } from 'lincd-dating/lib/shapes/FreeAccount';
-import { Person } from 'lincd-dating/lib/shapes/Person';
+import { useAuth } from '@_linked/auth/hooks/useAuth';
 
-const auth = useAuth<Person, FreeAccount>();
-// Person Shapes
-const user = auth.user;
-// UserAccount Shapes
-const userAccount = auth.userAccount;
+const auth = useAuth();
 ```
 
-### Signin with OAuth
+Package imports intentionally omit the `.js` suffix. The package export map resolves these paths to compiled ESM output.
 
-```tsx
-// example OAuth signin method
+## OAuth sign-in
+
+`signinOAuth` accepts `google`, `apple`, or `facebook`. The backend validates the provider credential before resolving or creating an account; caller-supplied profile claims are not accepted as proof of identity.
+
+- Google credentials are verified with Google's token verification endpoint.
+- Apple identity tokens are validated against Apple's signing keys and expected audience.
+- Facebook access tokens are checked against the configured application and then exchanged for the verified profile.
+
+Account resolution prefers a verified provider subject link and then a verified, normalized email address. If those identifiers point to different accounts, sign-in fails closed instead of merging them automatically.
+
+Provider configuration uses the corresponding environment values:
+
+```ini
+GOOGLE_CLIENT_ID=...
+APPLE_SIGN_IN_CLIENT_ID=...
+FACEBOOK_APP_ID=...
+FACEBOOK_APP_SECRET=...
 ```
 
-### Sign out
+Facebook sign-in requires permission to retrieve the user's email address.
 
-Since user signout, the process is all the tokens will be remove from cookies, storages and databases.
+## Password authentication
 
-```tsx
-import {useAuth} from 'lincd-auth/lib/hooks/useAuth';
-import {Person} from 'lincd-dating/lib/shapes/Person';
-import {FreeAccount} from 'lincd-dating/lib/shapes/FreeAccount';
+Password credentials use a normalized email address. OAuth-only accounts do not receive an implicit password; password sign-in checks that a password credential exists before attempting verification.
 
+Password reset email delivery requires an email provider package configured by the host application.
 
-const auth = useAuth<Person, FreeAccount>();
-<button onClick={() => auth.signout()}>
-```
+## Backend request context
 
-### Validate Token
+Authenticated backend requests expose `request.linkedAuth`. Providers must still reject requests where that context is absent:
 
-If you want to redirect the user to specific pages upon authentication, you can use the `validateToken` function.
-
-```tsx
-useEffect(() => {
-  const validateToken = async () => {
-    const validToken = await auth.validateToken();
-    if (validToken) {
-      // navigate when the token is valid
-    } else {
-      // navigate to the signin page
-    }
-  };
-  validateToken();
-}, []);
-```
-
-## How to use on Backend
-
-When a user is authenticated, the request on the server will be updated. This example usage of retrieving user information from the request in the backend.
-
-```tsx
-import { BackendProvider } from 'lincd-server-utils/lib/utils/BackendProvider';
-import { Person } from 'lincd-dating/lib/shapes/Person';
-import { FreeAccount } from 'lincd-dating/lib/shapes/FreeAccount';
-
-export default class SPBackendProvider extends BackendProvider {
-  getProfiles() {
-    // get linkedAuth from request
-    const auth = this.request.linkedAuth;
-
-    // if the user has successfully signed in, "auth" will be available.
-    // and if not, return false.
-    if (!auth) {
-      console.warn('No user authenticated.');
-      return false;
-    }
-
-    const user = auth.userAccount.accountOf as Person;
-    const userAccount = auth.userAccount as FreeAccount;
-
-    // now you can use 'user' and 'userAccount' in your backend logic
-    // ...
-  }
+```ts
+const auth = this.request.linkedAuth;
+if (!auth) {
+  throw new Error('Authentication required');
 }
+
+const user = auth.userAccount.accountOf;
 ```
 
-## Email configuration
+## Development sign-in
 
-Make sure to install an email client, like `lincd-zeptomail`.
-So that emails like 'forgot password' and 'verify email' can be sent from the backend.
+`DEV_AUTH=true` enables the local development authentication path. It must not be enabled in production. Store-backed sign-in still requires the configured RDF store to be available.
 
-## Setup Reset Password
+## Build and test
 
-To enable reset password, define a route for the reset password callback component in your app:
-
-```tsx
-reset_password_callback: {
-  path: '/auth/reset-password',
-  component: lazy(
-    () =>
-      import(
-        'lincd-auth/lib/components/ForgotPasswordCallback' /* webpackPrefetch: true */
-      ),
-  ),
-},
+```bash
+yarn linked build
+npm test
 ```
+
+`npm test` performs a strict TypeScript build and runs the package's Node tests.
+
+## Security notes
+
+- Provider names are runtime-validated even though TypeScript also constrains the public type.
+- OAuth account creation uses provider-verified identifiers only.
+- Conflicting verified subject and email matches are rejected for manual resolution.
+- Authentication logs must not contain tokens, serialized accounts, or personal profile data.
