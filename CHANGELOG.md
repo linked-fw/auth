@@ -1,5 +1,17 @@
 # @\_linked/auth
 
+## 1.3.3
+
+### Patch Changes
+
+- [#30](https://github.com/linked-fw/auth/pull/30) [`8e108c2`](https://github.com/linked-fw/auth/commit/8e108c253e85878d88474656b37711034c1ac11b) Thanks [@flyon](https://github.com/flyon)! - Point the changelog generator at this repo's real org.
+
+  `.changeset/config.json` still named `linked-cm/auth` as the GitHub repo, but
+  this package lives in `linked-fw/auth`. Every commit, PR and author link that
+  `@changesets/changelog-github` wrote into `CHANGELOG.md` therefore pointed at a
+  repository that does not exist. Renaming the org makes the generated links
+  resolve.
+
 ## 1.3.2
 
 ### Patch Changes
