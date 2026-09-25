@@ -55,7 +55,6 @@
     "jwks-rsa": "^3.0.1",
     "lincd-input": "~1.0",
     "lincd-mui-base": "~1.0",
-    "lincd-rdfs": "~1.0",
     "react-hook-form": "^7.47.0",
     "ulid": "^3.0.1",
     "uuid": "^9.0.0",
