@@ -3,7 +3,7 @@ import style from './RemoveAccountButton.module.css';
 import { Modal } from 'lincd-mui-base/components/Modal';
 import { Button } from 'lincd-mui-base/components/Button';
 import { useAuth } from '../hooks/useAuth.js';
-import { useTranslate } from '@tolgee/react';
+import { useTranslate } from '@_linked/translation/react';
 
 interface RemoveAccountButtonProps {
   confirmationText?: string;
