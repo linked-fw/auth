@@ -36,7 +36,7 @@
     "@_linked/server": "^2.0",
     "@_linked/server-utils": "^1.0",
     "@_linked/sioc": "^1.0",
-    "@_linked/translation": "^0.2.0",
+    "@_linked/translation": "^0.2.5",
     "@_linked/xsd": "^1.0",
     "@capacitor/dialog": "^7.0.2",
     "@types/bad-words": "^3.0.3",
