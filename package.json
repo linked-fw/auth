@@ -31,6 +31,7 @@
   ],
   "dependencies": {
     "@_linked/core": "^2.0.1",
+    "@_linked/primitives": "^1.3.0",
     "@_linked/react": "^1.1.0",
     "@_linked/schema": "^1.0",
     "@_linked/server": "^2.0",
@@ -53,8 +54,6 @@
     "js-cookie": "^3.0.5",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.0.1",
-    "lincd-input": "~1.0",
-    "lincd-mui-base": "~1.0",
     "react-hook-form": "^7.47.0",
     "ulid": "^3.0.1",
     "uuid": "^9.0.0",

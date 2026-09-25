@@ -1,18 +1,3 @@
-:root {
-  --ld-auth-button-background: var(
-    --ld-auth-button-background,
-    var(--ld-app-color-primary)
-  );
-  --ld-auth-button-color: var(
-    --ld-auth-button-color,
-    var(--ld-app-color-on-primary)
-  );
-  --ld-auth-button-hover-background: var(
-    --ld-auth-button-hover-background,
-    var(--ld-app-color-primary-darker)
-  );
-}
-
 .root {
   display: flex;
   flex-direction: column;
@@ -36,13 +21,12 @@
   }
 
   .FormButton {
+    /* `fullWidth` has no equivalent in @_linked/primitives — one declaration at the
+       call site rather than a prop on the shared Button. The background/colour
+       overrides that used to be here resolved to --ld-app-color-* tokens that are
+       defined nowhere; primitives' --button-primary-* tokens replace them. */
+    width: 100%;
     padding: 15px 10px;
-    background-color: var(--ld-auth-button-background);
-    color: var(--ld-auth-button-color);
-
-    &:hover {
-      background-color: var(--ld-auth-button-hover-background);
-    }
   }
 
   .Alert {

@@ -70,7 +70,7 @@ export class Auth {
 
   /**
    * Handle successful sign-in and return authentication result
-   * This also ensures that the provided person and account will available on the frontend with useAuth() (from lincd-auth)
+   * This also ensures that the provided person and account will available on the frontend with useAuth() (from this package)
    * This method should be used by any other package that implements authentication and wants to persist a successful login
    *
    * @param request - The incoming request

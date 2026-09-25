@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useForm, SubmitHandler, set } from 'react-hook-form';
 import style from './CreateNewPasswordForm.module.css';
-import { TextField } from 'lincd-input/components/TextField';
-import { Button } from 'lincd-mui-base/components/Button';
+import { Input } from '@_linked/primitives/components/Input';
+import { Button } from '@_linked/primitives/components/Button';
 import { useStyles } from '@_linked/react/utils/Hooks';
 import { Server } from '@_linked/server-utils/utils/Server';
 import { packageName } from '../package.js';
@@ -86,10 +86,9 @@ export function CreateNewPasswordForm({
       <form>
         <h2>Set A New Password</h2>
         <div className={style.FormGroup}>
-          <TextField
+          <Input
             type={'password'}
             placeholder="Enter new password"
-            onBlur={() => {}}
             {...register('password', {
               required: true,
               minLength: 6,
@@ -104,10 +103,9 @@ export function CreateNewPasswordForm({
             </p>
           )}
 
-          <TextField
+          <Input
             type={'password'}
             placeholder="Confirm your password"
-            onBlur={() => {}}
             {...register('confirmPassword', {
               required: true,
             })}
@@ -121,7 +119,7 @@ export function CreateNewPasswordForm({
         </div>
         <Button
           color="primary"
-          fullWidth={true}
+          className={style.FormButton}
           disabled={isDisabled}
           onClick={handleSubmit(resetPassword)}
         >

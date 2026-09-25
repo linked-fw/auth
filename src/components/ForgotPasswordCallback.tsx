@@ -7,10 +7,15 @@ export default function ForgotPasswordCallback({ onPasswordIsReset }) {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
 
+  // The full-viewport centring used to live on CreateNewPasswordForm's own `.root`
+  // (`height: 100vh`), which broke that same form when EditPasswordButton renders it
+  // inside a dialog. Page-level centring belongs to the page.
   return (
-    <CreateNewPasswordForm
-      token={token}
-      onPasswordIsReset={onPasswordIsReset}
-    />
+    <div className={style.Fallback}>
+      <CreateNewPasswordForm
+        token={token}
+        onPasswordIsReset={onPasswordIsReset}
+      />
+    </div>
   );
 }
