@@ -1,4 +1,4 @@
-import { JwtPayload } from 'jsonwebtoken';
+import type { JwtPayload } from 'jsonwebtoken';
 import { Person as FoafPerson } from 'foaf/shapes/Person';
 import { Person as SchemaPerson } from '@_linked/schema/shapes/Person';
 import { UserAccount } from '@_linked/sioc/shapes/UserAccount';
@@ -27,6 +27,54 @@ export type AuthenticationResult =
  * signin with OAuth provider
  */
 export type OAuthProvider = 'facebook' | 'google' | 'apple';
+
+export const OAUTH_PROVIDERS = ['facebook', 'google', 'apple'] as const;
+
+/** RPC arguments are untyped at runtime, so OAuth provider selection must be
+ * checked before any caller-supplied profile fields are read. */
+export function isOAuthProvider(value: unknown): value is OAuthProvider {
+  return OAUTH_PROVIDERS.includes(value as OAuthProvider);
+}
+
+export type OAuthProfilePayload = {
+  email?: string;
+  name?: string;
+  familyName?: string;
+  givenName?: string;
+  fullName?: string;
+  imageUrl?: string;
+};
+
+export type GoogleOAuthPayload = OAuthProfilePayload & {
+  authentication: { idToken: string };
+};
+
+export type AppleOAuthPayload = OAuthProfilePayload & {
+  identityToken: string;
+  authorizationCode?: string;
+  nonce: string;
+};
+
+export type FacebookOAuthPayload = {
+  accessToken: string;
+};
+
+export type OAuthPayloadMap = {
+  google: GoogleOAuthPayload;
+  apple: AppleOAuthPayload;
+  facebook: FacebookOAuthPayload;
+};
+
+export type VerifiedOAuthIdentity = {
+  provider: OAuthProvider;
+  subject: string;
+  email?: string;
+  emailVerified?: boolean;
+  name?: string;
+  givenName?: string;
+  familyName?: string;
+  imageUrl?: string;
+};
 
 /**
  * Create a new account signin with email and password.

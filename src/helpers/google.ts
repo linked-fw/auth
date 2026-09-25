@@ -1,4 +1,20 @@
-import { OAuth2Client } from 'google-auth-library';
+import { OAuth2Client, type TokenPayload } from 'google-auth-library';
+
+export type GoogleTokenVerifier = (input: {
+  idToken: string;
+  audience: string[];
+}) => Promise<TokenPayload | undefined>;
+
+export type GoogleValidationOptions = {
+  audiences?: Array<string | undefined>;
+  verifier?: GoogleTokenVerifier;
+};
+
+export function buildGoogleTokenAudiences(
+  ...values: Array<string | undefined>
+): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter(Boolean))] as string[];
+}
 
 const GoogleHelper = {
   /**
@@ -7,22 +23,19 @@ const GoogleHelper = {
    * @param idToken - The Google ID token to validate
    * @returns Promise<GoogleTokenPayload | null> - The validated token payload or null if invalid
    */
-  async validateIdToken(idToken: string): Promise<any | null> {
+  async validateIdToken(
+    idToken: string,
+    options: GoogleValidationOptions = {}
+  ): Promise<TokenPayload | null> {
     try {
-      const client = new OAuth2Client();
-
-      // get the Google Client IDs from environment variables
-      // we need to support multiple client IDs: web, iOS, and Android
-      const googleClientId = process.env.GOOGLE_CLIENT_ID;
-      const googleClientIdIos = process.env.GOOGLE_CLIENT_ID_IOS;
-      const googleClientIdAndroid = process.env.GOOGLE_CLIENT_ID_ANDROID;
-
-      // build array of valid audience values
-      const audiences = [
-        googleClientId,
-        googleClientIdIos,
-        googleClientIdAndroid,
-      ].filter(Boolean);
+      if (!idToken) return null;
+      const audiences = buildGoogleTokenAudiences(
+        ...(options.audiences || [
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_ID_IOS,
+          process.env.GOOGLE_CLIENT_ID_ANDROID,
+        ])
+      );
 
       if (audiences.length === 0) {
         console.error(
@@ -31,18 +44,16 @@ const GoogleHelper = {
         return null;
       }
 
-      console.log(
-        'Validating Google ID token against audiences:',
-        audiences.map((id) => id?.substring(0, 20) + '...')
-      );
-
-      // verify the ID token with multiple audiences
-      const ticket = await client.verifyIdToken({
-        idToken: idToken,
-        audience: audiences, // accept web, iOS, and Android client IDs
-      });
-
-      const payload = ticket.getPayload();
+      const verifier =
+        options.verifier ||
+        (async ({ idToken, audience }) => {
+          const ticket = await new OAuth2Client().verifyIdToken({
+            idToken,
+            audience,
+          });
+          return ticket.getPayload();
+        });
+      const payload = await verifier({ idToken, audience: audiences });
 
       if (!payload) {
         console.error('Google ID token payload is null');
@@ -66,10 +77,6 @@ const GoogleHelper = {
         return null;
       }
 
-      console.log(
-        'Google ID token validated successfully for user:',
-        payload.sub
-      );
       return payload;
     } catch (error) {
       console.error('Error validating Google ID token:', error);

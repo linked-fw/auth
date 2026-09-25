@@ -19,8 +19,9 @@
   "scripts": {
     "start": "npm exec linked dev",
     "build": "rimraf ./lib && npm run build-esm && npm run copy-to-lib",
-    "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && (tsc -p tsconfig-esm.json || echo 'tsc returned non-zero; .js still emitted via noEmitOnError default')",
-    "copy-to-lib": "echo 'copying CSS + JSON assets to lib folder' && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/esm"
+    "build-esm": "echo \"compiling ESM\" && rimraf ./lib/esm && tsc -p tsconfig-esm.json",
+    "copy-to-lib": "echo 'copying CSS + JSON assets to lib folder' && copyfiles -u 1 'src/**/*.css' 'src/**/*.json' lib/esm",
+    "test": "npm run build && node --test tests/*.test.mjs"
   },
   "keywords": [
     "lincd",
@@ -39,9 +40,11 @@
     "@_linked/xsd": "^1.0",
     "@capacitor/dialog": "^7.0.2",
     "@tolgee/react": "^5.16.2",
+    "@types/bad-words": "^3.0.3",
     "@types/bcrypt": "^5.0.2",
     "@types/js-cookie": "^3.0.6",
     "@types/node": "^20.12.7",
+    "bad-words": "^3.0.4",
     "bcrypt": "^5.1.1",
     "chalk": "^4.1.2",
     "connect-sqlite3": "^0.9.15",

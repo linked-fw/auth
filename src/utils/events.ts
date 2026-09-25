@@ -24,20 +24,27 @@ export function offNewUser<PersonType, AccountType>(
   authEvents.off(NEW_USER_EVENT, callback);
 }
 
+/**
+ * Returns an unsubscribe function so callers don't have to keep the exact
+ * callback reference around just to unregister it later (previously the
+ * cause of leaked anonymous listeners across HMR reloads). `offAccountWillBeRemoved`
+ * is still available for callers that already store the callback themselves.
+ */
 export function onAccountWillBeRemoved<AccountType>(
-  callback: (account: AccountType) => void
-) {
+  callback: (account: AccountType) => void | Promise<void>
+): () => void {
   authEvents.on(ACCOUNT_REMOVED_EVENT, callback);
+  return () => authEvents.off(ACCOUNT_REMOVED_EVENT, callback);
 }
 
 export function offAccountWillBeRemoved<AccountType>(
-  callback: (account: AccountType) => void
+  callback: (account: AccountType) => void | Promise<void>
 ) {
   authEvents.off(ACCOUNT_REMOVED_EVENT, callback);
 }
-export function emitAccountWillBeRemovedEvent(account) {
-  return new Promise<void>((resolve) => {
-    authEvents.emit(ACCOUNT_REMOVED_EVENT, account);
-    resolve();
-  });
+export async function emitAccountWillBeRemovedEvent(account) {
+  const listeners = authEvents.listeners(ACCOUNT_REMOVED_EVENT);
+  await Promise.all(
+    listeners.map((listener) => Promise.resolve(listener(account)))
+  );
 }

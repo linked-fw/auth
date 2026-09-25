@@ -332,10 +332,19 @@ function useProvideAuth(signinRoute: string = '') {
           accessToken: response.accessToken,
           refreshToken: response.refreshToken,
         });
-      } else {
-        //TODO: show user feedback
-        console.warn("Couldn't sign in with OAuth");
       }
+
+      if (response?.error) {
+        return { error: String(response.error) };
+      }
+
+      console.warn(
+        'Unable to sign in right now. Please try again or contact support'
+      );
+      return {
+        error:
+          'Unable to sign in right now. Please try again or contact support',
+      };
     });
   };
 

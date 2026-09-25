@@ -1,35 +1,98 @@
 import jwksClient from 'jwks-rsa';
-import jwt from 'jsonwebtoken';
+import jwt, { type JwtPayload } from 'jsonwebtoken';
+
+export type AppleKeyResolver = (kid: string) => Promise<string>;
+
+export type AppleTokenValidationOptions = {
+  nonce: string;
+  audiences: string[];
+  keyResolver?: AppleKeyResolver;
+};
+
+export type VerifiedAppleIdentity = {
+  sub: string;
+  email?: string;
+  emailVerified?: boolean;
+};
+
+export function buildAppleTokenAudiences(
+  ...values: Array<string | undefined>
+): string[] {
+  return [
+    ...new Set(
+      values
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value))
+    ),
+  ];
+}
+
+const appleJwks = jwksClient({
+  jwksUri: 'https://appleid.apple.com/auth/keys',
+  timeout: 30000,
+});
+
+const resolveAppleKey: AppleKeyResolver = async (kid) =>
+  (await appleJwks.getSigningKey(kid)).getPublicKey();
+
+function requirePayload(value: string | JwtPayload): JwtPayload {
+  if (typeof value === 'string' || !value.sub) {
+    throw new Error('Apple identity token is missing a subject');
+  }
+  return value;
+}
 
 const AppleHelper = {
-  /**
-   * Fetches the public key from Apple's authentication service.
-   * @param kid Key ID of the public key to fetch.
-   * @returns The public key associated with the provided Key ID.
-   */
-  async key(kid: string) {
-    const client = jwksClient({
-      jwksUri: 'https://appleid.apple.com/auth/keys',
-      timeout: 30000,
-    });
+  async validateIdentityToken(
+    identityToken: string,
+    options: AppleTokenValidationOptions
+  ): Promise<VerifiedAppleIdentity> {
+    if (!identityToken) throw new Error('Apple identity token is required');
+    if (!options.nonce) throw new Error('Apple nonce is required');
 
-    return await client.getSigningKey(kid);
-  },
+    const audiences = buildAppleTokenAudiences(...options.audiences);
+    if (audiences.length === 0) {
+      throw new Error('Apple token audiences are not configured');
+    }
 
-  /**
-   * Decodes the provided identity token.
-   * @param identityToken The identity token to decode.
-   * @returns An object containing the email and subject from the decoded token.
-   */
-  async decodeIdentityToken(identityToken: string) {
-    const { header } = jwt.decode(identityToken, { complete: true });
-    const kid = header.kid;
-    const publicKey = (await this.key(kid)).getPublicKey();
-    const tokenLoad = jwt.verify(identityToken, publicKey);
-    const email = tokenLoad['email'];
-    const sub = tokenLoad.sub;
+    const decoded = jwt.decode(identityToken, { complete: true });
+    if (!decoded || typeof decoded === 'string' || !decoded.header.kid) {
+      throw new Error('Apple identity token header is invalid');
+    }
+    if (decoded.header.alg !== 'RS256') {
+      throw new Error('Apple identity token algorithm is invalid');
+    }
 
-    return { email, sub };
+    const publicKey = await (options.keyResolver || resolveAppleKey)(
+      decoded.header.kid
+    );
+    const payload = requirePayload(
+      jwt.verify(identityToken, publicKey, {
+        algorithms: ['RS256'],
+        issuer: 'https://appleid.apple.com',
+        audience: audiences as [string, ...string[]],
+      })
+    );
+
+    if (payload.nonce !== options.nonce) {
+      throw new Error('Apple identity token nonce is invalid');
+    }
+
+    const emailVerified =
+      payload.email_verified === true || payload.email_verified === 'true'
+        ? true
+        : payload.email_verified === false || payload.email_verified === 'false'
+          ? false
+          : undefined;
+    if (typeof payload.email === 'string' && emailVerified !== true) {
+      throw new Error('Apple identity token email is not verified');
+    }
+
+    return {
+      sub: payload.sub,
+      email: typeof payload.email === 'string' ? payload.email : undefined,
+      emailVerified,
+    };
   },
 };
 
