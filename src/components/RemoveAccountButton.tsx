@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import style from './RemoveAccountButton.module.css';
-import { Modal } from 'lincd-mui-base/components/Modal';
-import { Button } from 'lincd-mui-base/components/Button';
+import { Button } from '@_linked/primitives/components/Button';
+import { ConfirmDialog } from '@_linked/primitives/components/ConfirmDialog';
 import { useAuth } from '../hooks/useAuth.js';
 import { useTranslate } from '@tolgee/react';
 
@@ -22,10 +21,8 @@ export const RemoveAccountButton = ({
   const { t } = useTranslate();
   const prefix = 'removeAccount';
 
-  const onToggleModal = () => setIsModalOpen(!isModalOpen);
-
   const onRemoveAccount = async () => {
-    onToggleModal();
+    setIsModalOpen(false);
     auth.removeAccount().then((res) => {
       if (res) {
         auth.signout();
@@ -34,31 +31,35 @@ export const RemoveAccountButton = ({
       }
     });
   };
-  // restProps = useStyles(restProps, style.root);
+
   return (
     <div {...restProps}>
-      <Button className={className} variant="outlined" onClick={onToggleModal}>
+      <Button
+        className={className}
+        variant="outline"
+        onClick={() => setIsModalOpen(true)}
+      >
         {t(prefix + '.deleteProfileButton', 'Delete Profile')}
       </Button>
-      <Modal isOpen={isModalOpen} onClose={onToggleModal}>
-        <div className={style.modal}>
-          <p>
-            {confirmationText ||
-              t(
-                prefix + '.deleteConfirmation',
-                'Are you sure you want to delete this account? Deleting your account will delete all personal information and all data related to you. You will not be able to undo this action'
-              )}
-          </p>
-          <div className={style.modalButtonContainer}>
-            <Button color={'secondary'} onClick={onToggleModal}>
-              {confirmationText || t(prefix + '.cancel', 'Cancel')}
-            </Button>
-            <Button onClick={onRemoveAccount}>
-              {agreeText || t(prefix + '.yes', 'Yes, delete my account')}
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      {/* `alertdialog` rather than a dialog: deleting an account is not dismissable by
+          clicking the backdrop, and `tone="danger"` states the consequence rather than
+          picking a colour. */}
+      <ConfirmDialog
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        onConfirm={onRemoveAccount}
+        tone="danger"
+        title={t(prefix + '.deleteTitle', 'Delete your account?')}
+        message={
+          confirmationText ||
+          t(
+            prefix + '.deleteConfirmation',
+            'Are you sure you want to delete this account? Deleting your account will delete all personal information and all data related to you. You will not be able to undo this action'
+          )
+        }
+        confirmText={agreeText || t(prefix + '.yes', 'Yes, delete my account')}
+        cancelText={t(prefix + '.cancel', 'Cancel')}
+      />
     </div>
   );
 };

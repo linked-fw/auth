@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import style from './ForgotPasswordForm.module.css';
-import { Modal } from 'lincd-mui-base/components/Modal';
-import { TextField } from 'lincd-input/components/TextField';
-import { Button } from 'lincd-mui-base/components/Button';
+import { Input } from '@_linked/primitives/components/Input';
+import { Button } from '@_linked/primitives/components/Button';
 import { useStyles } from '@_linked/react/utils/Hooks';
 import { Server } from '@_linked/server-utils/utils/Server';
 import { packageName } from '../package.js';
@@ -60,7 +59,7 @@ function ForgotPasswordForm({ ...restProps }: ForgotPasswordFormProps) {
     <form {...restProps}>
       <h2>{t(prefix + '.title', 'Reset Password')}</h2>
       <div className={style.FormGroup}>
-        <TextField
+        <Input
           type={'email'}
           {...register('email', {
             required: t(prefix + '.emailRequired', 'Email field is required'),
@@ -69,8 +68,11 @@ function ForgotPasswordForm({ ...restProps }: ForgotPasswordFormProps) {
             prefix + '.emailPlaceholder',
             'Enter your valid email'
           )}
-          helperText={helperText}
         />
+        {/* `helperText` was a prop on the legacy TextField. @_linked/primitives' Input is a
+            bare <input>; the message is a sibling, exactly like the ErrorMessage
+            paragraphs already beside every field in this package. */}
+        {helperText && <p className={style.HelperText}>{helperText}</p>}
         {errors.email && (
           <p className={style.ErrorMessage}>
             {t(prefix + '.invalidEmailError', errors.email.message)}
@@ -79,7 +81,6 @@ function ForgotPasswordForm({ ...restProps }: ForgotPasswordFormProps) {
       </div>
       <Button
         color="primary"
-        fullWidth={true}
         className={style.FormButton}
         disabled={loading}
         onClick={handleSubmit(onResetPassword)}

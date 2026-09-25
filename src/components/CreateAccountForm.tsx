@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import style from './CreateAccountForm.module.css';
-import { TextField } from 'lincd-input/components/TextField';
-import { Button } from 'lincd-mui-base/components/Button';
+import { Input } from '@_linked/primitives/components/Input';
+import { Button } from '@_linked/primitives/components/Button';
 import { useStyles } from '@_linked/react/utils/Hooks';
 import { Server } from '@_linked/server-utils/utils/Server';
 import { packageName } from '../package.js';
@@ -96,7 +96,7 @@ export function CreateAccountForm({
         </div>
       ) : null}
       <div className={style.FormGroup}>
-        <TextField
+        <Input
           type={'text'}
           placeholder={t(
             prefix + '.firstNamePlaceholder',
@@ -110,7 +110,7 @@ export function CreateAccountForm({
           </p>
         )}
 
-        <TextField
+        <Input
           type={'text'}
           placeholder={t(
             prefix + '.lastNamePlaceholder',
@@ -119,7 +119,7 @@ export function CreateAccountForm({
           {...register('lastName')}
         />
 
-        <TextField
+        <Input
           type={'email'}
           placeholder={t(prefix + '.emailPlaceholder', 'Enter your email')}
           {...register('email', { required: true })}
@@ -130,7 +130,7 @@ export function CreateAccountForm({
           </p>
         )}
 
-        <TextField
+        <Input
           type={'email'}
           placeholder={t(
             prefix + '.emailConfirmationPlaceholder',
@@ -152,7 +152,7 @@ export function CreateAccountForm({
           </p>
         ) : null}
 
-        <TextField
+        <Input
           type={'password'}
           placeholder={t(
             prefix + '.passwordPlaceholder',
@@ -174,7 +174,7 @@ export function CreateAccountForm({
           </p>
         )}
 
-        <TextField
+        <Input
           type={'password'}
           placeholder={t(
             prefix + '.passwordConfirmationPlaceholder',
@@ -201,7 +201,6 @@ export function CreateAccountForm({
       </div>
       <Button
         color="primary"
-        fullWidth={true}
         className={style.FormButton}
         disabled={loading}
         onClick={handleSubmit(createAccount)}

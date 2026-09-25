@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import style from './SigninWithPasswordForm.module.css';
-import { TextField } from 'lincd-input/components/TextField';
-import { Modal } from 'lincd-mui-base/components/Modal';
+import { Input } from '@_linked/primitives/components/Input';
+import { Dialog } from '@_linked/primitives/components/Dialog';
+import { VisuallyHidden } from '@_linked/primitives/components/VisuallyHidden';
 import CreateAccountForm from './CreateAccountForm.js';
 import ForgotPasswordForm from './ForgotPasswordForm.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { cl } from '@_linked/react/utils/ClassNames';
 import { Server } from '@_linked/server-utils/utils/Server';
-import { Button } from 'lincd-mui-base/components/Button';
+import { Button } from '@_linked/primitives/components/Button';
 import { packageName } from '../package.js';
 import { useSearchParams } from 'react-router-dom';
 import { Authentication } from '../shapes/Authentication.js';
@@ -176,64 +177,68 @@ export const SigninWithPasswordForm = ({
         <div className={cl(formIsHidden ? style.hidden : null)}>
           {!showInputField ? (
             <Button
-              className={buttonClassName}
+              className={cl(style.fullWidthButton, buttonClassName)}
               onClick={() => setShowInputField(true)}
-              variant="outlined"
-              fullWidth
-              startIcon={
-                showEmailIcon && (
-                  <img
-                    src={asset('/images/email.png')}
-                    alt="email-icon"
-                    className={style.iconButton}
-                  />
-                )
-              }
+              variant="outline"
+              type="button"
             >
+              {/* `startIcon` was a prop on the legacy Button. Button's .Root is already an
+                  inline-flex row with a gap, so the icon is simply the first child. */}
+              {showEmailIcon && (
+                <img
+                  src={asset('/images/email.png')}
+                  alt="email-icon"
+                  className={style.iconButton}
+                />
+              )}
               {t(prefix + '.email', 'Continue with Email')}
             </Button>
           ) : (
-            <TextField
-              type={'email'}
-              placeholder={t(
-                prefix + '.emailPlaceholder',
-                'Type your@email here'
-              )}
-              {...register('email', {
-                required: true,
-                pattern: {
-                  value: /\S+@\S+\.\S+/,
-                  message: t(
-                    prefix + '.unmatchedEmailError',
-                    'Entered value does not match email format'
-                  ),
-                },
-              })}
-              autoComplete="off"
-              endAdornment={
-                <div className={style.end}>
-                  <button
-                    className={style.button}
-                    type="button"
-                    onClick={onNextForm}
-                  >
-                    <svg
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        d="M4 12h16m0 0-6-6m6 6-6 6"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              }
-            />
+            <div className={style.control}>
+              {/* `endAdornment` was a prop on the legacy TextField. @_linked/primitives' Input is a
+                  bare <input> with no adornment slot; the trailing control is positioned
+                  by the call site, as CN's own SigninForm already does. */}
+              <Input
+                type={'email'}
+                className={style.input}
+                placeholder={t(
+                  prefix + '.emailPlaceholder',
+                  'Type your@email here'
+                )}
+                {...register('email', {
+                  required: true,
+                  pattern: {
+                    value: /\S+@\S+\.\S+/,
+                    message: t(
+                      prefix + '.unmatchedEmailError',
+                      'Entered value does not match email format'
+                    ),
+                  },
+                })}
+                autoComplete="off"
+              />
+              <button
+                className={style.adornment}
+                type="button"
+                aria-label={t(prefix + '.continue', 'Continue')}
+                onClick={onNextForm}
+              >
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M4 12h16m0 0-6-6m6 6-6 6"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
           )}
           {errors.email && (
             <p className={style.errorMessage}>
@@ -242,36 +247,38 @@ export const SigninWithPasswordForm = ({
           )}
         </div>
         <div className={cl(!formIsHidden ? style.hidden : null)}>
-          <TextField
-            type={'password'}
-            placeholder={t(
-              prefix + '.passwordPlaceholder',
-              'Type your password here'
-            )}
-            {...register('password', { required: true })}
-            endAdornment={
-              <div className={style.end}>
-                <button
-                  className={style.button}
-                  onClick={handleSubmit(onSignIn)}
-                >
-                  <svg
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      d="M4 12h16m0 0-6-6m6 6-6 6"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </div>
-            }
-          />
+          <div className={style.control}>
+            <Input
+              type={'password'}
+              className={style.input}
+              placeholder={t(
+                prefix + '.passwordPlaceholder',
+                'Type your password here'
+              )}
+              {...register('password', { required: true })}
+            />
+            <button
+              className={style.adornment}
+              type="submit"
+              aria-label={t(prefix + '.signIn', 'Sign in')}
+              onClick={handleSubmit(onSignIn)}
+            >
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+              >
+                <path
+                  d="M4 12h16m0 0-6-6m6 6-6 6"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
           {errors.password && (
             <p className={style.errorMessage}>
               {t(prefix + '.passwordError', 'Please type your password')}
@@ -297,25 +304,40 @@ export const SigninWithPasswordForm = ({
           </p>
         </div>
       )}
-      <Modal
-        isOpen={showCreateAccountModal}
-        backdrop="rgba(0, 0, 0, 0.8)"
-        onClose={() => setShowCreateAccountModal(false)}
+      {/* Each form keeps its own visible <h2> — it is also rendered outside a dialog —
+          so the title Radix needs for aria-labelledby is supplied here and hidden. */}
+      <Dialog.Root
+        open={showCreateAccountModal}
+        onOpenChange={setShowCreateAccountModal}
       >
-        <CreateAccountForm
-          className={style.modalForm}
-          onAccountCreated={(auth) => {
-            setShowCreateAccountModal(false);
-            onLoggedIn(auth);
-          }}
-        />
-      </Modal>
-      <Modal
-        isOpen={showForgotPasswordModal}
-        backdrop="rgba(0, 0, 0, 0.8)"
-        onClose={() => setShowForgotPasswordModal(false)}
-        renderContent={<ForgotPasswordForm className={style.modalForm} />}
-      />
+        <Dialog.Content className={style.modal} aria-describedby={undefined}>
+          <VisuallyHidden>
+            <Dialog.Title>
+              {t('createAccount.title', 'Create Account')}
+            </Dialog.Title>
+          </VisuallyHidden>
+          <CreateAccountForm
+            className={style.modalForm}
+            onAccountCreated={(auth) => {
+              setShowCreateAccountModal(false);
+              onLoggedIn(auth);
+            }}
+          />
+        </Dialog.Content>
+      </Dialog.Root>
+      <Dialog.Root
+        open={showForgotPasswordModal}
+        onOpenChange={setShowForgotPasswordModal}
+      >
+        <Dialog.Content className={style.modal} aria-describedby={undefined}>
+          <VisuallyHidden>
+            <Dialog.Title>
+              {t('resetPassword.title', 'Reset Password')}
+            </Dialog.Title>
+          </VisuallyHidden>
+          <ForgotPasswordForm className={style.modalForm} />
+        </Dialog.Content>
+      </Dialog.Root>
     </div>
   );
 };
