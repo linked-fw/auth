@@ -328,10 +328,23 @@ function useProvideAuth(signinRoute: string = '') {
           accessToken: response.accessToken,
           refreshToken: response.refreshToken,
         });
-      } else {
-        //TODO: show user feedback
-        console.warn("Couldn't sign in with OAuth");
       }
+
+      if (response?.error) {
+        // `action` tells the UI what the user can do next, e.g.
+        // 'sign_in_to_link' when the email belongs to an existing account.
+        return response.action
+          ? { error: String(response.error), action: String(response.action) }
+          : { error: String(response.error) };
+      }
+
+      console.warn(
+        'Unable to sign in right now. Please try again or contact support'
+      );
+      return {
+        error:
+          'Unable to sign in right now. Please try again or contact support',
+      };
     });
   };
 

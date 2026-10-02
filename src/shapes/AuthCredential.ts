@@ -62,6 +62,22 @@ export class AuthCredential extends Shape {
     return Server.call(this, 'hasAuthCredential', person);
   }
 
+  /**
+   * Returns true if the current signed-in user has an AuthCredential with a password hash.
+   * Use this when the caller specifically needs to know whether email/password login is available.
+   */
+  static userHasPassword(): Promise<boolean> {
+    return Server.call(this, 'userHasPassword');
+  }
+
+  /**
+   * Returns true if the given person has an AuthCredential with a password hash.
+   * This is narrower than hasAuthCredential(), which only checks whether any credential row exists.
+   */
+  static hasPassword(person: QResult<Person>): Promise<boolean> {
+    return Server.call(this, 'hasPassword', person);
+  }
+
   static createNewCredential(
     email: string,
     password: string,

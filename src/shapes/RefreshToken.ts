@@ -42,7 +42,7 @@ export class RefreshToken extends Shape {
       .one();
 
     if (existingToken) {
-      await RefreshToken.delete(existingToken);
+      await RefreshToken.delete({ id: existingToken.id });
       return true;
     }
 

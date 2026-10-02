@@ -16,7 +16,7 @@ const PasswordHelper = {
    */
   async generateHashedPassword(plainTextPassword: string) {
     try {
-      const saltRounds = 3; // Generate a salt (a random value to add to the password before hashing)
+      const saltRounds = 12; // bcrypt cost factor. The cost is stored in each hash, so raising it leaves existing hashes valid.
       const hashedPassword = await bcrypt.hash(plainTextPassword, saltRounds);
       return hashedPassword;
     } catch (error) {

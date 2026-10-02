@@ -13,7 +13,7 @@ import type {
 import { createToken } from './jwt.js';
 import { RefreshToken } from '../shapes/RefreshToken.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
-import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider.js';
+import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider';
 import { setQueryContext } from '@_linked/core/queries/QueryContext';
 
 export class Auth {
