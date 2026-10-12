@@ -20,10 +20,13 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 // --- fake backend -----------------------------------------------------------------------------
 let refreshMode = 'ok';
 let issued = 0;
+let emailVerified = false;
+const calls = [];
 const authFor = () => ({
   // a NEW object every time, with the same data — as a real refresh returns it
   user: { id: 'https://id.test/ada', givenName: 'Ada' },
   userAccount: { id: 'https://app.test/account/ada' },
+  emailVerified,
 });
 const token = () => {
   const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -36,6 +39,12 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     const send = (obj) =>
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(obj));
+    calls.push({ method: req.url.split('/').pop(), body });
+    if (req.url.endsWith('/verifyEmail')) {
+      emailVerified = true;
+      return send({ verified: true });
+    }
+    if (req.url.endsWith('/removeAccount')) return send(true);
     if (req.url.endsWith('/signinWithPassword')) return send({ auth: authFor(), accessToken: token() });
     if (req.url.endsWith('/signinOAuth')) {
       return send({ error: 'An account with this email already exists.', action: 'sign_in_to_link' });
@@ -128,4 +137,47 @@ test('signinOAuth hands the backend error and action to the caller', async () =>
     error: 'An account with this email already exists.',
     action: 'sign_in_to_link',
   });
+});
+
+const callsTo = (method) => calls.filter((c) => c.method === method);
+
+test('emailVerified reflects auth.emailVerified', async () => {
+  emailVerified = false;
+  await signIn();
+  assert.equal(current.emailVerified, false);
+  emailVerified = true;
+  await act(async () => {
+    assert.equal(await client.refreshAccessToken(), true);
+  });
+  assert.equal(current.emailVerified, true);
+});
+
+test('verifyEmail success, signed in, refreshes the session once (forced)', async () => {
+  emailVerified = false;
+  await signIn();
+  assert.equal(current.emailVerified, false);
+  calls.length = 0;
+  let result;
+  await act(async () => {
+    result = await current.verifyEmail('the-token');
+  });
+  assert.deepEqual(result, { verified: true });
+  assert.ok(callsTo('verifyEmail')[0].body.includes('the-token'), 'the token is sent');
+  const refreshes = callsTo('validateToken');
+  assert.equal(refreshes.length, 1, 'one validateToken');
+  assert.ok(refreshes[0].body.includes('forceRefresh'), 'a forced refresh');
+  assert.equal(current.emailVerified, true);
+});
+
+test('removeAccount(proof) sends the proof as its argument', async () => {
+  await signIn();
+  calls.length = 0;
+  let result;
+  await act(async () => {
+    result = await current.removeAccount({ password: 'secret-pw' });
+  });
+  assert.equal(result, true);
+  const [call] = callsTo('removeAccount');
+  assert.ok(call, 'removeAccount was called');
+  assert.ok(call.body.includes('secret-pw'), `the proof is in the request: ${call.body}`);
 });

@@ -859,6 +859,40 @@ Validation:
 - `npm run typecheck:gate` in CN, plus `npx linked build-all`, so that CN still compiles
   against the changed `removeAccount` and `useAuth` types.
 
+Done:
+
+- Validation: `npx linked build && npm test` — 295/295 pass. `useAuth.test.mjs`: `emailVerified`
+  follows `auth.emailVerified`, a signed-in `verifyEmail` makes one forced `validateToken`, and
+  `removeAccount({password})` sends the proof. New `remove-account-button.test.mjs` (5 cases,
+  rendered in jsdom): a password account gets the password field with confirm disabled until it
+  is filled; a wrong password keeps the dialog open with the error; an OAuth-only account gets
+  "Confirm with Google", which calls `getOAuthSource` and `removeAccount({provider, source})` in
+  one click; without `getOAuthSource` both buttons stay disabled; no methods deletes with no
+  proof. In CN, `npm run typecheck:gate` reports no new errors, and `npx linked build-all`
+  succeeds. The UI was not checked in a browser.
+- Deviations:
+  - `test/cssStub.mjs` registers a loader that turns `.css` imports into an empty class map, so
+    the built components load under node. The render test points Radix at jsdom's event
+    constructors.
+  - `verifyEmail` refreshes through `refreshAccessToken()`, the single-flight refresh, so it
+    cannot race a scheduled refresh. `VerifyEmailCallback` waits until `validating` is false
+    before it redeems the token, and redeems it only once (a ref, for StrictMode).
+  - `RemoveAccountButton` loads the methods when Delete is clicked and then opens the dialog.
+    If the load fails, it opens with a plain confirm, and the server's `reauthenticate` answer
+    supplies the methods. A wrong proof shows `removeAccount.wrongProof`; a missing proof shows
+    the server's text. New keys: `removeAccount.deleteFailed` and the `verifyEmail.*` keys.
+    `className` is now optional. An account with both a password and a provider link is asked
+    only for the password.
+  - `CreateAccountForm` and `ForgotPasswordForm` needed no change. The first already shows the
+    server's `error` (this covers `invalid_password`), and the second already shows the
+    uniform text on success.
+  - `VerifyEmailCallback` takes an optional `onEmailVerified` callback. It is registered in
+    `src/index.ts` and imported from `@_linked/auth/components/VerifyEmailCallback`. The types
+    come from `@_linked/auth/types/auth`, as before.
+  - CN: `src/backend/auth/authExposure.ts` does not list `verifyEmail`,
+    `resendEmailVerification` or `getReauthenticationMethods`. auth makes them callable, so
+    CN's drift check will refuse to start once CN runs this auth. CN is not changed here.
+
 ### Phase 6 — Readme, upgrade notes, changeset draft
 
 Tasks:
