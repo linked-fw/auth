@@ -199,7 +199,7 @@ about a person's email (reset token, email, password hash) on the credential.
 | `auth:emailVerifiedAt` (`xsd:dateTime`) | `emailVerifiedAt: Date` | When the person proved control of the email |
 | `auth:emailVerificationToken` | `emailVerificationToken: string` | SHA-256 (base64url) of the outstanding verification token |
 | `auth:emailVerificationTokenExpiresAt` (`xsd:dateTime`) | `emailVerificationTokenExpiresAt: Date` | When it stops working |
-| `auth:consumeMarker` | `consumeMarker: string` | Random marker written by an atomic token consume (see below) |
+| `auth:passwordResetConsumeMarker`, `auth:emailVerificationConsumeMarker` | `string` | Random marker written by an atomic token consume, one per token kind (see below; this replaced the single `consumeMarker` in iteration 1, Finding 7) |
 
 - A person counts as verified when **any** of their credential rows has `emailVerifiedAt`.
   Persons can have several rows (OAuth, older releases, reset on an account without one).
@@ -244,7 +244,8 @@ about a person's email (reset token, email, password hash) on the credential.
   3. `const row = await AuthCredential.select(c => [c.credentialOf]).where(c => c.consumeMarker.equals(N)).one()`
      - Only the request whose update matched finds its own `N`. A loser matches nothing and
        writes nothing.
-  4. The winner clears `consumeMarker`.
+  4. The winner clears the marker. Each kind uses its own marker field (see `TOKEN_KINDS` in
+     `src/helpers/credentialToken.ts`).
 - Expiry cannot be compared in a `where` (dates are not supported there; see
   `UsedNonceStore.markUsed`), and the update has already removed `forgotPasswordTokenExpiresAt`.
   So the consume reads the row's expiry **before** the update (as `findResetPasswordCredential`
@@ -1214,3 +1215,19 @@ Done:
     localize install layout) with the old and the new lockfile, so it is not a usable check here;
     the lockfile walk stands in for it.
   - The changeset's upgrade notes also mention the accounts that delete with just a session.
+
+## Review 2 (after iteration 1)
+
+- All 9 findings from the first review are resolved.
+- Runs:
+  - auth unit tests: 301/301
+  - auth Fuseki integration tests: 31/31
+  - CN `typecheck:gate`: clean
+- New findings, all low:
+  - CN arch-08's account-deletion row named only temporary and dev accounts as deleting with
+    just a session. Fixed in CN.
+  - The plan's design text still described the single `consumeMarker`. Fixed here.
+  - `sessions.ts` imports `toDate` from `credentialToken.ts`, which pulls in the token TTL
+    environment parsing. Open.
+- The low findings from the first review are still open. They are listed under "Low (left for
+  the pause)".
