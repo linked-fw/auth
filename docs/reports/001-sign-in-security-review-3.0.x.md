@@ -7,7 +7,7 @@ summary: >
   ask for the current password. Each was fixed in its own patch release. 3.0.6 stops the server
   dispatching auth's internal provider methods over HTTP and fixes the `types` entry. Lists the
   open items (Apple nonce, matching accounts by email, no rate limit) and what consumers must
-  configure.
+  configure. The rate limit item was closed in 3.2.0 (see the section on it).
 ---
 
 # 001 — Sign-in security review, 3.0.1 to 3.0.6
@@ -187,10 +187,36 @@ or the email's owner can lose the account to whoever created the Facebook link.
   client sends one.
 - **`signinDev` accepts any WebID when the token has no `sub`.** It is dev-only and left as is
   on purpose.
-- **No rate limit on password attempts.** The higher bcrypt cost slows a guessing attack but
-  does not stop one.
+- ~~**No rate limit on password attempts.**~~ Addressed in 3.2.0, see below.
 - **Single-use reset is not atomic.** The store has no compare-and-swap, so two requests racing
   with the same token can both succeed.
+
+## 3.2.0: rate limits
+
+The open item "no rate limit on password attempts" is closed. Every call that checks a
+credential, sends an email or creates something is now limited by client IP and, where it names
+an account, by that account: `signinWithPassword`, `createAccount`, `sendResetPasswordLink`,
+`resetPassword` (with a token, and the signed-in change that checks the current password), the
+refresh-token exchange in `validateToken`, `signinOAuth`, `linkOAuthIdentity`, `signinTemporary`
+and `hasAuthCredential`. The defaults and settings are in the readme (*Rate limits*);
+`AUTH_RATE_LIMIT=off` turns them off.
+
+Decisions:
+
+- **The account key is the email as typed, normalized, counted before any lookup**, so a limited
+  answer is the same for an account that exists and one that does not. (The unlimited answers of
+  `signinWithPassword` and `sendResetPasswordLink` still differ between the two; that is a
+  separate enumeration issue.)
+- **Every attempt counts, refused ones included,** and the count is taken with one atomic
+  increment, so concurrent requests cannot overshoot the limit. The price is that someone who
+  knows an email can keep that account's password sign-in limited (5 a minute by default) from
+  many addresses. That stops when they stop; it does not lock the account, and OAuth and reset
+  links are not affected.
+- **The answer is in-band** (`{error, action: 'rate_limited', retryAfter}`, plus `Retry-After`),
+  not an HTTP 429: `Server.call` resolves a non-2xx response as `undefined`, which the existing
+  forms would not show. `hasAuthCredential` returns a boolean, so it fails with 429.
+- **In-memory counters, per process**, with a `setRateLimitStore` interface for a shared store.
+  The client IP is Express's `request.ip`, so a deployment behind a proxy must set `trust proxy`.
 
 ## For consumers
 
@@ -211,3 +237,8 @@ or the email's owner can lose the account to whoever created the Facebook link.
   declaration of the same method is harmless.
 - **3.0.6 needs `@_linked/server-utils` 1.9 or later.** An app pinned to 1.8 would get a second
   copy of server-utils.
+- **From 3.2.0, behind a reverse proxy, set Express's `trust proxy`** to the proxies in front of
+  the app, or every client shares the proxy's rate limit budget. Run several instances with a
+  shared `setRateLimitStore` for global limits, and set `AUTH_RATE_LIMIT=off` in test runs that
+  sign in more often than a person would. A form may show `retryAfter` when `action` is
+  `rate_limited`.

@@ -4,6 +4,16 @@ import { AuthCredential } from './AuthCredential.js';
 import PasswordHelper from '../helpers/password.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import { Person } from '@_linked/schema/shapes/Person';
+import { limitRequest } from '../utils/rateLimit.js';
+import { ServerCallError } from '@_linked/server-utils/utils/ServerCallError';
+
+// Outside the class: every provider method can be dispatched over HTTP.
+async function credentialExists(person: QResult<Person>) {
+  const credential = await AuthCredential.select()
+    .where((p) => p.credentialOf.equals(person))
+    .one();
+  return credential && true;
+}
 
 export class AuthCredentialProvider extends ShapeProvider {
   public shape = AuthCredential;
@@ -18,7 +28,7 @@ export class AuthCredentialProvider extends ShapeProvider {
       console.warn('No user authenticated');
       return false;
     }
-    return this.hasAuthCredential(user);
+    return credentialExists(user);
   }
   /**
    * Whether the signed-in user has a password (a stored password hash), so email/password
@@ -34,12 +44,14 @@ export class AuthCredentialProvider extends ShapeProvider {
     return (credentials || []).some((credential) => Boolean(credential.passwordHash));
   }
 
+  /**
+   * Whether `person` has a credential. It answers for any person, so a client could probe many:
+   * it is limited by address, and a limited call fails with status 429.
+   */
   async hasAuthCredential(person: QResult<Person>) {
-    const credential = await AuthCredential.select()
-      .where((p) => p.credentialOf.equals(person))
-      .one();
-
-    return credential && true;
+    const limited = await limitRequest('credentialLookup', this.request, this.response);
+    if (limited) throw new ServerCallError(429, limited.error);
+    return credentialExists(person);
   }
 
   /**

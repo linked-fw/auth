@@ -101,6 +101,7 @@ import { PaidAccountTier1 } from 'lincd-dating/lib/shapes/PaidAccountTier1';
 | `AUTH_COOKIE_SAMESITE` | no | `lax`/`strict`/`none` for both token cookies (`none` forces Secure; for a frontend on another site) |
 | `AUTH_COOKIE_DOMAIN` | no | cookie domain (default: the host) |
 | `AUTH_REFRESH_COOKIE_PATH` | no | path of the refresh cookie (default `/call/@_linked/auth`; prefix it when the app is served under a path) |
+| `AUTH_RATE_LIMIT` | no | `off` turns the rate limits off; see *Rate limits* below for per-limit settings |
 
 4. If you offer Sign in with Apple or Google, set the client IDs that identity tokens must be issued to. **Without them that provider's sign-in is rejected** (fail closed): a token issued to any other app is never accepted.
 
@@ -259,6 +260,51 @@ export default class SPBackendProvider extends BackendProvider {
   }
 }
 ```
+
+## Rate limits
+
+The calls that check a credential, send an email or create something are rate limited by the
+client's IP address and, where the call names an account, by that account (the normalized email,
+or the signed-in account). An account is counted whether it exists or not, so a limited answer
+does not reveal whether it does.
+
+| Rule | Calls | Per IP | Per account |
+|---|---|---|---|
+| `signin` | `signinWithPassword` | 10 / minute | 5 / minute (by email) |
+| `signup` | `createAccount` | 10 / hour | |
+| `passwordResetRequest` | `sendResetPasswordLink` (sends an email) | 10 / hour | 3 / hour (by email) |
+| `passwordReset` | `resetPassword` with a reset token | 10 / minute | |
+| `passwordChange` | `resetPassword` without a token (checks the current password) | 10 / minute | 5 / 15 minutes |
+| `tokenRefresh` | `validateToken` when it exchanges a refresh token | 60 / minute | |
+| `oauth` | `signinOAuth`, `linkOAuthIdentity` | 20 / minute | 10 / minute (`linkOAuthIdentity`) |
+| `temporarySignin` | `signinTemporary` (creates a person and account) | 30 / hour | |
+| `credentialLookup` | `AuthCredentialProvider.hasAuthCredential` | 60 / minute | |
+
+A limited call answers `{error: 'Too many attempts. Please wait a moment and try again.', action:
+'rate_limited', retryAfter}` (seconds) with a `Retry-After` header, in place of its usual result.
+`hasAuthCredential`, which returns a boolean, fails with status 429 instead. Every attempt counts,
+including refused ones. A call made outside any HTTP request (a job, a script) is never limited;
+backend code that calls these while serving a request counts against that request's client.
+
+| Variable | Meaning |
+|---|---|
+| `AUTH_RATE_LIMIT` | `off` (or `false`/`0`) turns every limit off, e.g. for a test run |
+| `AUTH_RATE_LIMIT_<RULE>_<IP\|ACCOUNT>` | one limit as `<max>/<windowSeconds>`, or `off`. The rule in upper snake case: `AUTH_RATE_LIMIT_SIGNIN_IP=20/60`, `AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_ACCOUNT=5/3600` |
+
+In code, `configureRateLimits({signin: {ip: {max: 20, windowSeconds: 60}}})` from
+`@_linked/auth/utils/rateLimit` does the same (the environment wins), and `resetRateLimits()`
+clears the counters and overrides between tests.
+
+- **The counters are in memory, per process.** Behind a load balancer with N instances a client
+  gets up to N times the limit. For a global limit, give every instance one shared store with
+  `setRateLimitStore(store)`: anything with an atomic `increment(key, ttlMs)` returning the new
+  count and a `get(key)`, sync or async (Redis `INCR` + `PEXPIRE` and `GET` fit). The in-memory
+  store sweeps expired counters on write and caps how many it holds.
+- **The client IP is Express's `request.ip`**, never `X-Forwarded-For` read directly. Behind a
+  reverse proxy, set Express's [`trust proxy`](https://expressjs.com/en/guide/behind-proxies.html)
+  to the proxies in front of the app; otherwise every client has the proxy's address and shares
+  one budget per rule. Trusting more hops than there are proxies lets a client pick its own
+  address.
 
 ## Email configuration
 

@@ -22,6 +22,8 @@ export type AuthenticationResult =
   | {
       error: string;
       action?: string;
+      /** With `action: 'rate_limited'`: seconds until another attempt is accepted. */
+      retryAfter?: number;
     };
 
 /**
