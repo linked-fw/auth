@@ -9,7 +9,7 @@
 //   AUTH_TEST_FUSEKI_PASSWORD=... npm run test:integration
 //
 // Runs against the BUILT package in lib/ (build first).
-import { test, before, after, afterEach, mock } from 'node:test';
+import { test, before, after, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { serving } from '../serving.mjs';
@@ -43,6 +43,7 @@ await import(new URL('shapes/index.js', libDir));
 const sessions = await import(new URL('utils/sessions.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
+const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
 const { default: bcrypt } = await import('bcrypt');
 
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
@@ -60,6 +61,9 @@ async function sparql(query) {
   assert.equal(res.status, 200, await res.clone().text());
   return (await res.json()).results.bindings;
 }
+
+// every test signs in to the same account; each starts with a fresh limit budget
+beforeEach(() => resetRateLimits());
 
 before(async () => {
   const res = await fetch(`${FUSEKI}/$/datasets`, {

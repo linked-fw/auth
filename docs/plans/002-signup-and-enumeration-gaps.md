@@ -4,7 +4,7 @@ summary: >
   account exists. createAccount refuses any existing account for the email and validates the
   password on the server. Signup gets email verification. Request reads in checkSignin,
   removeAccount and setAuthentication are guarded, and removeAccount re-authenticates the user.
-status: Tasks
+status: Implementation
 source: docs/backlog/003-remaining-rpc-and-signup-gaps.md
 ---
 
@@ -611,6 +611,28 @@ Validation (new tests):
 - `test/session-lifetime.test.mjs` or a new `test/request-guards.test.mjs`:
   - `Auth.setAuthentication(undefined, auth)` returns linkedAuth and does not throw
   - `checkSignin` with no request returns `undefined`
+
+Done:
+
+- Validation: `npx linked build && npm test` — 241/241 pass (new: `signup.test.mjs`,
+  `enumeration.test.mjs`, `request-guards.test.mjs`, cases in `password-reset.test.mjs` and
+  `signin-dev.test.mjs`). `npm run test:integration` against Fuseki — 27/27 pass.
+- Deviations:
+  - `password.ts` also exports `isAcceptablePassword(password)` and `INVALID_PASSWORD_RESULT`, so
+    signup, token reset and password change share one check and one answer. The password check in
+    `resetPassword` runs after the match check and before the token is used up, so a short
+    password does not burn the link.
+  - `signinDev`: a missing `sub` answers `{error: 'Invalid token'}`; a `sub` that differs from
+    `webId` keeps its existing answer ("WebID does not match token subject").
+  - Sign-in also gives the uniform answer (with the dummy compare) when the credential found at
+    the WebID has no `passwordHash` (e.g. an OAuth credential). Before, that reached
+    `bcrypt.compare` with `undefined`, which fails fast.
+  - The credential duplicate check also compares the raw email when it differs from the
+    normalized one, as the account check does.
+  - `test/integration/sessions.fuseki.test.mjs` failed 4 tests on the base commit as well: they
+    hit the per-account sign-in rate limit. It now calls `resetRateLimits()` before each test.
+  - Shared in-memory shape fake for the new tests: `test/fakeStore.mjs` (`fakeShapeTable`).
+    `password-reset.test.mjs`'s `fakeCredentialTable` is unchanged; Phase 2 still extends it.
 
 ### Phase 2 — Mail failure handling (D4) and atomic reset consume (D5)
 

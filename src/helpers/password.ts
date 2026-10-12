@@ -12,6 +12,26 @@ import { readTtlFromEnv } from '../utils/token.js';
  */
 export const PASSWORD_HASH_COST = 10;
 
+/** The shortest password accepted on signup, token reset and password change. */
+export const MIN_PASSWORD_LENGTH = 6;
+
+/** What every failed password sign-in answers, so it never tells whether the account exists. */
+export const INVALID_CREDENTIALS_MESSAGE = 'Invalid email / password combination.';
+
+/** The answer to a password that `isAcceptablePassword` refuses. */
+export const INVALID_PASSWORD_RESULT = {
+  error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+  action: 'invalid_password',
+} as const;
+
+/** Whether `password` is a string of at least `MIN_PASSWORD_LENGTH` characters. */
+export function isAcceptablePassword(password: unknown): password is string {
+  return typeof password === 'string' && password.length >= MIN_PASSWORD_LENGTH;
+}
+
+/** A hash of a random password at `PASSWORD_HASH_COST`, made on first use. */
+let dummyHash: Promise<string> | undefined;
+
 /** How long a password reset link works, in seconds, unless `AUTH_PASSWORD_RESET_TTL` is set. */
 export const DEFAULT_PASSWORD_RESET_TTL = 60 * 60;
 
@@ -86,6 +106,17 @@ const PasswordHelper = {
       });
 
     return comparedPassword;
+  },
+
+  /**
+   * Compare `plainPassword` with a fixed hash that nothing matches, and answer false. A sign-in
+   * that finds no password calls this, so it takes about as long as a wrong password does.
+   */
+  async compareWithDummyHash(plainPassword: unknown): Promise<false> {
+    dummyHash ??= bcrypt.hash(crypto.randomBytes(16).toString('hex'), PASSWORD_HASH_COST);
+    const plain = typeof plainPassword === 'string' ? plainPassword : '';
+    await bcrypt.compare(plain, await dummyHash).catch(() => false);
+    return false;
   },
 
   /**

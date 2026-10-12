@@ -227,6 +227,27 @@ test('mismatched passwords do not use up the link', async () => {
   assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', token), SIGNED_IN);
 });
 
+const SHORT_PASSWORD_RESULT = {
+  error: 'Password must be at least 6 characters',
+  action: 'invalid_password',
+};
+
+test('a short password is refused for a reset link, and does not use up the link', async () => {
+  existingPassword();
+  const token = await requestResetLink();
+  assert.deepEqual(await provider.resetPassword('short', 'short', token), SHORT_PASSWORD_RESULT);
+  assert.equal(await passwordIs(OLD_PASSWORD), true);
+  assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', token), SIGNED_IN);
+});
+
+test('a short password is refused for a signed-in change', async () => {
+  existingPassword();
+  signedIn();
+  const result = await provider.resetPassword('short', 'short', undefined, OLD_PASSWORD);
+  assert.deepEqual(result, SHORT_PASSWORD_RESULT);
+  assert.equal(await passwordIs(OLD_PASSWORD), true);
+});
+
 test('a reset link expires after an hour', async () => {
   existingPassword();
   mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-01-01T00:00:00Z') });

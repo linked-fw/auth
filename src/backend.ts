@@ -46,7 +46,11 @@ import {
 } from './utils/events.js';
 import AppleHelper from './helpers/apple.js';
 import GoogleHelper from './helpers/google.js';
-import PasswordHelper from './helpers/password.js';
+import PasswordHelper, {
+  INVALID_CREDENTIALS_MESSAGE,
+  INVALID_PASSWORD_RESULT,
+  isAcceptablePassword,
+} from './helpers/password.js';
 import { IdentityToken } from './shapes/IdentityToken.js';
 import { decideEmailMatchedAccount } from './helpers/oauth-account.js';
 import { OAuthIdentityStore } from './utils/oauthIdentities.js';
@@ -154,6 +158,40 @@ async function verifyOAuthIdentity(
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Whether anything already exists for this email: a person at its WebID, an account with the
+ * email (stored as typed by older releases, or normalized), or a credential with the email or
+ * of that person. Signup refuses all of them, so it never adds a second set of rows for an
+ * email that someone already holds.
+ */
+async function emailAlreadyRegistered(
+  provider: AuthBackendProvider,
+  email: string,
+  normalizedEmail: string,
+  webID: string
+): Promise<boolean> {
+  const person = await provider.userShape.select((p) => [p.givenName]).for(webID);
+  if (person) return true;
+
+  const emails = email === normalizedEmail ? [normalizedEmail] : [normalizedEmail, email];
+  for (const candidate of emails) {
+    const account = await provider.accountShape
+      .select((a) => [a.email])
+      .where((a) => a.email.equals(candidate))
+      .one();
+    if (account) return true;
+    const credential = await AuthCredential.select((c) => [c.email])
+      .where((c) => c.email.equals(candidate))
+      .one();
+    if (credential) return true;
+  }
+
+  const credentialOfPerson = await AuthCredential.select((c) => [c.credentialOf])
+    .where((c) => c.credentialOf.equals({ id: webID }))
+    .one();
+  return Boolean(credentialOfPerson);
 }
 
 /** An account with its person's profile, as sign-in returns it, or null when it is gone. */
@@ -366,7 +404,7 @@ export default class AuthBackendProvider extends BackendProvider {
   // TODO: check possible to remove this method?
   checkSignin() {
     //this is a temporary fix that allows the frontend to check if the user is still logged in on the backend
-    return this.request.linkedAuth?.userAccount;
+    return this.request?.linkedAuth?.userAccount;
   }
 
   /**
@@ -432,10 +470,10 @@ export default class AuthBackendProvider extends BackendProvider {
         })
         .one();
 
-      if (!account) {
-        return {
-          error: 'This email is not registered',
-        };
+      // every failure gives the same answer, and costs about as much as a wrong password
+      if (!account?.accountOf?.id) {
+        await PasswordHelper.compareWithDummyHash(plainPassword);
+        return { error: INVALID_CREDENTIALS_MESSAGE };
       }
 
       existingCredential = preferCredentialWithPassword(
@@ -450,12 +488,11 @@ export default class AuthBackendProvider extends BackendProvider {
           return ac.credentialOf.equals({ id: account.accountOf.id });
         })
       );
+    }
 
-      if (!existingCredential) {
-        return {
-          error: 'No password found for this email',
-        };
-      }
+    if (!existingCredential?.passwordHash) {
+      await PasswordHelper.compareWithDummyHash(plainPassword);
+      return { error: INVALID_CREDENTIALS_MESSAGE };
     }
 
     const passwordIsValid = await PasswordHelper.checkPassword(
@@ -464,9 +501,7 @@ export default class AuthBackendProvider extends BackendProvider {
     );
 
     if (!passwordIsValid) {
-      return {
-        error: 'Invalid email / password combination',
-      };
+      return { error: INVALID_CREDENTIALS_MESSAGE };
     }
 
     await this.upgradePasswordHash(existingCredential, plainPassword);
@@ -518,6 +553,11 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
 
+    // before anything is looked up
+    if (!isAcceptablePassword(password)) {
+      return { ...INVALID_PASSWORD_RESULT };
+    }
+
     let webIDFromEmail: string;
     try {
       webIDFromEmail = emailToWebID(email);
@@ -527,12 +567,9 @@ export default class AuthBackendProvider extends BackendProvider {
         error: 'Invalid email format',
       };
     }
+    const normalizedEmail = email.trim().toLowerCase();
 
-    //check if this user has already been created/stored locally
-    let existingWebID = await (this.userShape as any)
-      .select((p) => [p.givenName, p.familyName, p.telephone])
-      .for(webIDFromEmail);
-    if (existingWebID) {
+    if (await emailAlreadyRegistered(this, email, normalizedEmail, webIDFromEmail)) {
       console.warn(
         `Account creation attempted with an email already in use (webID: ${webIDFromEmail})`
       );
@@ -569,10 +606,11 @@ export default class AuthBackendProvider extends BackendProvider {
         const passwordHash = await PasswordHelper.generateHashedPassword(
           password
         );
-        const newCredential = await AuthCredential.create({
+        await AuthCredential.create({
           credentialOf: {
             id: user.id,
           },
+          email: normalizedEmail,
           passwordHash: passwordHash,
         }).catch((err) => {
           console.error(`Error creating password for user ${user.id}:`, err);
@@ -584,7 +622,7 @@ export default class AuthBackendProvider extends BackendProvider {
         const account = await this.accountShape
           .create({
             accountOf: user,
-            email: email,
+            email: normalizedEmail,
           })
           .catch((err) => {
             console.error(`Error creating account for user ${user.id}:`, err);
@@ -672,6 +710,10 @@ export default class AuthBackendProvider extends BackendProvider {
       return {
         error: 'Passwords do not match',
       };
+    }
+    // checked before a token is used up, like the match above
+    if (!isAcceptablePassword(password)) {
+      return { ...INVALID_PASSWORD_RESULT };
     }
 
     //reset password works both if a token is provided, and if a user is currently logged in
@@ -1204,7 +1246,11 @@ export default class AuthBackendProvider extends BackendProvider {
       return { error: (tokenResult as any)?.error ?? 'Invalid token' };
     }
     const claims = (tokenResult as any).payload ?? tokenResult;
-    if (claims.sub && claims.sub !== input.webId) {
+    // a token must name its subject: one without `sub` could otherwise sign in as any WebID
+    if (!claims.sub) {
+      return { error: 'Invalid token' };
+    }
+    if (claims.sub !== input.webId) {
       return { error: 'WebID does not match token subject' };
     }
     // Only the verified token's email claim; `input.email` is the client's word and never stored.
