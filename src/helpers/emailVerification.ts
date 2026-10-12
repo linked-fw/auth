@@ -1,63 +1,21 @@
-import crypto from 'crypto';
-import { Person } from '@_linked/schema/shapes/Person';
-import { QResult } from '@_linked/core/queries/SelectQuery';
 import { AuthCredential } from '../shapes/AuthCredential.js';
-import { readTtlFromEnv } from '../utils/token.js';
-import { consumeCredentialToken } from './credentialToken.js';
-
-/** How long an email verification link works, in seconds, unless `AUTH_EMAIL_VERIFICATION_TTL` is set. */
-export const DEFAULT_EMAIL_VERIFICATION_TTL = 7 * 24 * 60 * 60;
-
-/**
- * How long an email verification link works, in seconds (`AUTH_EMAIL_VERIFICATION_TTL`, default
- * 7 days). Read once at startup; a value that is not a positive whole number throws.
- */
-export const EMAIL_VERIFICATION_TTL = readTtlFromEnv(
-  'AUTH_EMAIL_VERIFICATION_TTL',
-  DEFAULT_EMAIL_VERIFICATION_TTL
-);
-
-/**
- * The value a verification token is stored and looked up by: SHA-256, base64url. A plain hash
- * is enough, because the token is 160 random bits, not a password.
- */
-export function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token, 'utf8').digest('base64url');
-}
+import { hashToken, tokenExpiresAt } from './credentialToken.js';
 
 /**
  * The `AuthCredential` fields that make `token` the credential's one outstanding verification
- * token, valid for `EMAIL_VERIFICATION_TTL` from `now`. Writing them replaces any earlier token.
+ * token, valid for `AUTH_EMAIL_VERIFICATION_TTL` from `now`. Writing them replaces any earlier
+ * token.
  */
 export function verificationTokenFields(token: string, now: Date = new Date()) {
   return {
     emailVerificationToken: hashToken(token),
-    emailVerificationTokenExpiresAt: new Date(now.getTime() + EMAIL_VERIFICATION_TTL * 1000),
+    emailVerificationTokenExpiresAt: tokenExpiresAt('verify', now),
   };
 }
 
 /** The `AuthCredential` fields that remove the outstanding verification token (for `update`). */
 export function clearedVerificationTokenFields() {
   return { emailVerificationToken: null, emailVerificationTokenExpiresAt: null };
-}
-
-/**
- * Use up a verification token, atomically (see `consumeCredentialToken`). The token is removed
- * whether or not it is still valid.
- *
- * @returns the person whose credential held the token if it was valid, or undefined
- */
-export async function consumeEmailVerificationToken(
-  token: string,
-  now: Date = new Date()
-): Promise<QResult<Person> | undefined> {
-  if (!token || typeof token !== 'string') return undefined;
-  return consumeCredentialToken({
-    tokenField: 'emailVerificationToken',
-    expiresField: 'emailVerificationTokenExpiresAt',
-    hash: hashToken(token),
-    now,
-  });
 }
 
 /**

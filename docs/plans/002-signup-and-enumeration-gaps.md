@@ -1134,6 +1134,37 @@ scalability, then performance.
     marker test.
   - `npm run test:integration` is green, including the new expired-token cases (Finding 9).
 
+Done:
+
+- Validation: `npx linked build && npm test` — 300/300 pass (new: in
+  `email-verification.test.mjs`, the escaped signup name, a verify then reset consume and the
+  other way round, both consumed at once, and a token refused as the other kind; in
+  `password-reset.test.mjs`, the escaped reset name). With one marker for both kinds restored in
+  `lib/`, the "both consumed at once" case fails. `npm run test:integration` — 31/31 pass (new in
+  `accounts.fuseki.test.mjs`: an expired reset token and an expired verification token are
+  refused, and their token and expiry are removed).
+- `src/helpers/credentialToken.ts` holds `TOKEN_KINDS` (`reset`, `verify`), `hashToken`,
+  `toDate`, `tokenExpiresAt`, `clearUnsentToken(kind, hash)` and
+  `consumeCredentialToken(kind, token, now)`.
+- Deviations:
+  - `PasswordHelper.hashResetPasswordToken`, `resetPasswordTokenFields`,
+    `consumeResetPasswordToken`, `PASSWORD_RESET_TTL` and `DEFAULT_PASSWORD_RESET_TTL` stay, as
+    thin wrappers or re-exports, because they were released before this branch. In
+    `emailVerification.ts`, which this branch adds, `hashToken`, `consumeEmailVerificationToken`,
+    `DEFAULT_EMAIL_VERIFICATION_TTL` and `EMAIL_VERIFICATION_TTL` are removed;
+    `verificationTokenFields` and `clearedVerificationTokenFields` stay. `backend.ts` calls
+    `consumeCredentialToken('verify', …)` directly.
+  - `CredentialTokenField` was removed along with `CredentialTokenExpiryField`.
+  - `sessions.ts` imports `toDate` from `credentialToken.ts` (the same logic, without its
+    `as any`).
+  - The markers are `passwordResetConsumeMarker` and `emailVerificationConsumeMarker`;
+    `consumeMarker` is gone, with no migration.
+  - `escapeHtml(value)` returns `''` for a missing value, so a reset email to a person without a
+    given name now says "Hey 👋" rather than "Hey undefined 👋". `APP_NAME` and both URLs are
+    escaped too; the subject is plain text and is not.
+  - The `clearUnsentToken` log line now names the kind (`reset`/`verify`) instead of the old
+    wording.
+
 ### Phase 8: Client, docs, lockfile (auth) and CN follow-ups
 
 - Findings 1, 2, 3, 5 and 8.

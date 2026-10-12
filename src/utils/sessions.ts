@@ -37,6 +37,7 @@ import {
   hashRefreshToken,
   looksLikeOpaqueRefreshToken,
 } from './refreshTokenHash.js';
+import { toDate } from '../helpers/credentialToken.js';
 
 export { generateRefreshToken, hashRefreshToken };
 
@@ -77,12 +78,6 @@ export interface RefreshSessionStore {
    * without it is not cleaned up.
    */
   findStale?(cutoff: Date): Promise<RefreshSessionRecord[]>;
-}
-
-function toDate(value: unknown): Date | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const date = value instanceof Date ? value : new Date(value as any);
-  return isNaN(date.getTime()) ? undefined : date;
 }
 
 function idOf(value: any): string | undefined {

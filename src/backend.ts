@@ -62,10 +62,9 @@ import { OAuthIdentityStore } from './utils/oauthIdentities.js';
 import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
 import path, { dirname, basename } from 'path';
-import { sendAuthEmail } from './utils/email.js';
+import { escapeHtml, sendAuthEmail } from './utils/email.js';
+import { clearUnsentToken, consumeCredentialToken } from './helpers/credentialToken.js';
 import {
-  clearedVerificationTokenFields,
-  consumeEmailVerificationToken,
   markEmailVerified,
   personEmailVerified,
   verificationTokenFields,
@@ -295,34 +294,6 @@ const filename__ =
       basename(import.meta.url).replace('file:/', '');
 
 /**
- * Remove a reset token whose email was never sent, so no link exists for it. Matched by the
- * token's hash, so a newer link issued in the meantime is left alone.
- */
-async function clearUnsentResetPasswordToken(tokenHash: string) {
-  try {
-    await AuthCredential.update(PasswordHelper.clearedResetPasswordTokenFields()).where((cred) =>
-      cred.forgotPasswordToken.equals(tokenHash)
-    );
-  } catch (error) {
-    console.error('Could not remove an unsent reset password token', error);
-  }
-}
-
-/**
- * Remove a verification token whose email was never sent, so no link exists for it. Matched by
- * the token's hash, so a newer link sent in the meantime is left alone.
- */
-async function clearUnsentVerificationToken(tokenHash: string) {
-  try {
-    await AuthCredential.update(clearedVerificationTokenFields()).where((cred) =>
-      cred.emailVerificationToken.equals(tokenHash)
-    );
-  } catch (error) {
-    console.error('Could not remove an unsent email verification token', error);
-  }
-}
-
-/**
  * Email the verification link for `token` (already stored, hashed, on a credential) to `email`.
  * When the email is not sent, the stored token is removed again.
  *
@@ -349,17 +320,17 @@ async function sendVerificationEmail(
           <table role='presentation' border='0' cellpadding='0' cellspacing='0' class='body' style='border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #fff; width: 100%;' width='100%' bgcolor='#fff'>
             <tr>
               <td>
-                <p>Hey${givenName ? ` ${givenName}` : ''} 👋</p>
+                <p>Hey${givenName ? ` ${escapeHtml(givenName)}` : ''} 👋</p>
                 <p>Click the button below to confirm your email address:</p>
-                <a href='${verifyUrl}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Verify Email</a>
+                <a href='${escapeHtml(verifyUrl)}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Verify Email</a>
                 <p>Cheers,</p>
-                <p>${process.env.APP_NAME} Team</p>
+                <p>${escapeHtml(process.env.APP_NAME)} Team</p>
               </td>
             </tr>
             <tr>
               <td>
                 <p style='font-size: 12px; color: #999;'>Alternatively, you can also copy and paste the link into your browser:</p>
-                <a href='${verifyUrl}' target='_blank' style='font-size: 12px;'>${verifyUrl}</a>
+                <a href='${escapeHtml(verifyUrl)}' target='_blank' style='font-size: 12px;'>${escapeHtml(verifyUrl)}</a>
               </td>
             </tr>
           </table>
@@ -367,7 +338,7 @@ async function sendVerificationEmail(
   };
   const outcome = await sendAuthEmail(emailOptions, { purpose: 'verify', url: verifyUrl });
   if (outcome === 'failed') {
-    await clearUnsentVerificationToken(tokenHash);
+    await clearUnsentToken('verify', tokenHash);
     return false;
   }
   return true;
@@ -792,7 +763,8 @@ export default class AuthBackendProvider extends BackendProvider {
     }
 
     // The new account is unverified until the link in this email is opened. Only its hash is
-    // stored. Signup does not wait for the email: it works without an email provider.
+    // stored. Signup waits for the email to be sent, but works without an email provider: a
+    // failed send only removes the token again.
     const verificationToken = PasswordHelper.generateToken();
     const verificationFields = verificationTokenFields(verificationToken);
 
@@ -1136,7 +1108,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     if (!person) {
       console.warn('No user found for a reset password request');
-      await clearUnsentResetPasswordToken(resetTokenFields.forgotPasswordToken);
+      await clearUnsentToken('reset', resetTokenFields.forgotPasswordToken);
       return true;
     }
 
@@ -1156,17 +1128,17 @@ export default class AuthBackendProvider extends BackendProvider {
           <table role='presentation' border='0' cellpadding='0' cellspacing='0' class='body' style='border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #fff; width: 100%;' width='100%' bgcolor='#fff'>
             <tr>
               <td>
-                <p>Hey ${person.givenName} 👋</p>
+                <p>Hey ${escapeHtml(person.givenName)} 👋</p>
                 <p>Click the button below to reset your password:</p>
-                <a href='${confirmUrl}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Reset Password</a>
+                <a href='${escapeHtml(confirmUrl)}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Reset Password</a>
                 <p>Cheers,</p>
-                <p>${process.env.APP_NAME} Team</p>
+                <p>${escapeHtml(process.env.APP_NAME)} Team</p>
               </td>
             </tr>
             <tr>
               <td>
                 <p style='font-size: 12px; color: #999;'>Alternatively, you can also copy and paste the link into your browser:</p>
-                <a href='${confirmUrl}' target='_blank' style='font-size: 12px;'>${confirmUrl}</a>
+                <a href='${escapeHtml(confirmUrl)}' target='_blank' style='font-size: 12px;'>${escapeHtml(confirmUrl)}</a>
               </td>
             </tr>
           </table>
@@ -1175,7 +1147,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     const outcome = await sendAuthEmail(emailOptions, { purpose: 'reset', url: confirmUrl });
     if (outcome === 'failed') {
-      await clearUnsentResetPasswordToken(resetTokenFields.forgotPasswordToken);
+      await clearUnsentToken('reset', resetTokenFields.forgotPasswordToken);
     }
     return true;
   }
@@ -1356,7 +1328,7 @@ export default class AuthBackendProvider extends BackendProvider {
     const limited = await limitRequest('emailVerify', this.request, this.response);
     if (limited) return limited;
 
-    const person = await consumeEmailVerificationToken(token);
+    const person = await consumeCredentialToken('verify', token);
     if (!person?.id) {
       return {
         error: 'This verification link is invalid or has expired.',

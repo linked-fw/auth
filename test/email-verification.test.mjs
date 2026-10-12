@@ -32,6 +32,9 @@ const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libD
 const { emailToWebID } = await import(new URL('utils/webID.js', libDir));
 const { default: PasswordHelper } = await import(new URL('helpers/password.js', libDir));
 const verification = await import(new URL('helpers/emailVerification.js', libDir));
+const { hashToken, consumeCredentialToken } = await import(
+  new URL('helpers/credentialToken.js', libDir)
+);
 const sessions = await import(new URL('utils/sessions.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
@@ -125,12 +128,22 @@ test('signup stores only a hash of the verification token, with an expiry, and e
   assert.equal(sentEmails[0].to[0].email_address.address, EMAIL);
   const token = tokenFromLastEmail();
   const row = onlyRow();
-  assert.equal(row.emailVerificationToken, verification.hashToken(token));
+  assert.equal(row.emailVerificationToken, hashToken(token));
   assert.notEqual(row.emailVerificationToken, token);
   assert.ok(!JSON.stringify(row).includes(token), 'the raw token is not stored');
   const expiresAt = new Date(row.emailVerificationTokenExpiresAt).getTime();
   assert.ok(expiresAt >= before + 7 * DAY && expiresAt <= Date.now() + 7 * DAY, 'expires in 7 days');
   assert.equal(row.emailVerifiedAt, undefined, 'not verified yet');
+});
+
+test('the verification email escapes the name typed in at signup', async () => {
+  const name = '<a href="https://evil.test">Ada</a>';
+  await providerFor().createAccount({ firstName: name, email: EMAIL, password: PASSWORD });
+  const html = sentEmails.at(-1).htmlbody;
+  assert.ok(!html.includes(name), 'the name went in as markup');
+  assert.ok(!html.includes('evil.test">'), 'the link went in as markup');
+  assert.ok(html.includes('Hey &lt;a href=&quot;https://evil.test&quot;&gt;Ada&lt;/a&gt;'), html);
+  assert.ok(tokenFromLastEmail(), 'the link still works');
 });
 
 test('signup signs in even when the email cannot be sent, and the unsent token is removed', async () => {
@@ -190,7 +203,7 @@ test('resendEmailVerification sends a new link that replaces the old one', async
   assert.equal(sentEmails.length, 2);
   const second = tokenFromLastEmail();
   assert.notEqual(second, first);
-  assert.equal(onlyRow().emailVerificationToken, verification.hashToken(second));
+  assert.equal(onlyRow().emailVerificationToken, hashToken(second));
 
   assert.deepEqual(await providerFor().verifyEmail(first), INVALID_LINK);
   assert.deepEqual(await providerFor().verifyEmail(second), { verified: true });
@@ -205,7 +218,7 @@ test('resendEmailVerification for a person without a credential creates one with
   assert.deepEqual(result, { sent: true });
   const row = onlyRow();
   assert.equal(row.email, EMAIL);
-  assert.equal(row.emailVerificationToken, verification.hashToken(tokenFromLastEmail()));
+  assert.equal(row.emailVerificationToken, hashToken(tokenFromLastEmail()));
 });
 
 test('resendEmailVerification: an account without an email gets no_email', async () => {
@@ -304,4 +317,50 @@ test('personEmailVerified is false on a store error', async () => {
     throw new Error('store down');
   });
   assert.equal(await verification.personEmailVerified(WEBID), false);
+});
+
+// --- a reset token and a verification token on one credential ---
+
+/** A credential holding both a reset token and a verification token. */
+function bothTokens() {
+  return credentials.insert({
+    credentialOf: { id: WEBID },
+    email: EMAIL,
+    ...PasswordHelper.resetPasswordTokenFields('reset-token'),
+    ...verification.verificationTokenFields('verify-token'),
+  });
+}
+
+test('using up a verification token leaves a pending reset token usable, and the other way round', async () => {
+  bothTokens();
+  assert.equal((await consumeCredentialToken('verify', 'verify-token'))?.id, WEBID);
+  assert.ok(onlyRow().forgotPasswordToken, 'the reset token was removed');
+  assert.equal((await consumeCredentialToken('reset', 'reset-token'))?.id, WEBID);
+
+  credentials.rows.clear();
+  bothTokens();
+  assert.equal((await consumeCredentialToken('reset', 'reset-token'))?.id, WEBID);
+  assert.ok(onlyRow().emailVerificationToken, 'the verification token was removed');
+  assert.equal((await consumeCredentialToken('verify', 'verify-token'))?.id, WEBID);
+});
+
+test('a verification token and a reset token used up at the same moment both work', async () => {
+  bothTokens();
+  const [verified, reset] = await Promise.all([
+    consumeCredentialToken('verify', 'verify-token'),
+    consumeCredentialToken('reset', 'reset-token'),
+  ]);
+  assert.equal(verified?.id, WEBID, 'the verification token was wasted');
+  assert.equal(reset?.id, WEBID, 'the reset token was wasted');
+  const row = onlyRow();
+  assert.equal(row.passwordResetConsumeMarker, undefined, 'a reset marker is left');
+  assert.equal(row.emailVerificationConsumeMarker, undefined, 'a verification marker is left');
+});
+
+test('a token is used up only as its own kind', async () => {
+  bothTokens();
+  assert.equal(await consumeCredentialToken('reset', 'verify-token'), undefined);
+  assert.equal(await consumeCredentialToken('verify', 'reset-token'), undefined);
+  const row = onlyRow();
+  assert.ok(row.forgotPasswordToken && row.emailVerificationToken, 'a token was removed');
 });

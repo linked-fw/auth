@@ -3,8 +3,15 @@ import crypto from 'crypto';
 import { Person } from '@_linked/schema/shapes/Person';
 import { AuthCredential } from '../shapes/AuthCredential.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
-import { readTtlFromEnv } from '../utils/token.js';
-import { consumeCredentialToken } from './credentialToken.js';
+import {
+  consumeCredentialToken,
+  hashToken,
+  toDate,
+  tokenExpiresAt,
+  TOKEN_KINDS,
+} from './credentialToken.js';
+
+export { DEFAULT_PASSWORD_RESET_TTL } from './credentialToken.js';
 
 /**
  * The bcrypt cost (log2 of the rounds) of every new password hash. Hashes stored with a lower
@@ -33,24 +40,11 @@ export function isAcceptablePassword(password: unknown): password is string {
 /** A hash of a random password at `PASSWORD_HASH_COST`, made on first use. */
 let dummyHash: Promise<string> | undefined;
 
-/** How long a password reset link works, in seconds, unless `AUTH_PASSWORD_RESET_TTL` is set. */
-export const DEFAULT_PASSWORD_RESET_TTL = 60 * 60;
-
 /**
  * How long a password reset link works, in seconds (`AUTH_PASSWORD_RESET_TTL`, default 1 hour).
  * Read once at startup; a value that is not a positive whole number throws.
  */
-export const PASSWORD_RESET_TTL = readTtlFromEnv(
-  'AUTH_PASSWORD_RESET_TTL',
-  DEFAULT_PASSWORD_RESET_TTL
-);
-
-/** A stored value as a Date (stores may return dateTime literals as strings). */
-function toDate(value: unknown): Date | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const date = value instanceof Date ? value : new Date(value as string | number);
-  return isNaN(date.getTime()) ? undefined : date;
-}
+export const PASSWORD_RESET_TTL = TOKEN_KINDS.reset.ttl;
 
 /**
  * PasswordHelper
@@ -125,7 +119,7 @@ const PasswordHelper = {
    * hash is enough, because the token is 160 random bits, not a password.
    */
   hashResetPasswordToken(token: string): string {
-    return crypto.createHash('sha256').update(token, 'utf8').digest('base64url');
+    return hashToken(token);
   },
 
   /**
@@ -135,7 +129,7 @@ const PasswordHelper = {
   resetPasswordTokenFields(token: string, now: Date = new Date()) {
     return {
       forgotPasswordToken: PasswordHelper.hashResetPasswordToken(token),
-      forgotPasswordTokenExpiresAt: new Date(now.getTime() + PASSWORD_RESET_TTL * 1000),
+      forgotPasswordTokenExpiresAt: tokenExpiresAt('reset', now),
     };
   },
 
@@ -177,13 +171,7 @@ const PasswordHelper = {
     token: string,
     now: Date = new Date()
   ): Promise<QResult<Person> | undefined> {
-    if (!token || typeof token !== 'string') return undefined;
-    return consumeCredentialToken({
-      tokenField: 'forgotPasswordToken',
-      expiresField: 'forgotPasswordTokenExpiresAt',
-      hash: PasswordHelper.hashResetPasswordToken(token),
-      now,
-    });
+    return consumeCredentialToken('reset', token, now);
   },
 
   /** The credential whose outstanding reset token is `token`, if any. */

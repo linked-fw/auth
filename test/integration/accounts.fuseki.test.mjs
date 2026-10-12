@@ -20,6 +20,7 @@ const { default: AuthBackendProvider } = await import(new URL('backend.js', libD
 const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
 const { IdentityToken } = await import(new URL('shapes/IdentityToken.js', libDir));
 const { default: PasswordHelper } = await import(new URL('helpers/password.js', libDir));
+const { verificationTokenFields } = await import(new URL('helpers/emailVerification.js', libDir));
 const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
@@ -139,6 +140,74 @@ test('signup emails a verification link; verifying it shows in the next refresh'
     assert.equal(rows.length, 1);
     assert.ok(rows[0].emailVerifiedAt, 'emailVerifiedAt is stored');
     assert.ok(!rows[0].emailVerificationToken, 'no verification token left');
+  } finally {
+    send.mock.restore();
+  }
+});
+
+/** The credential of a new account, with `fields` written on it. */
+async function accountWithCredentialFields(fields) {
+  const email = newEmail();
+  const created = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_1 });
+  assert.equal(created.error, undefined, created.error);
+  const personId = created.auth.user.id;
+  const [credential] = await AuthCredential.select((c) => [c.email]).where((c) =>
+    c.credentialOf.equals({ id: personId })
+  );
+  await AuthCredential.update(fields).for({ id: credential.id });
+  return { email, personId, credentialId: credential.id };
+}
+
+/** The token fields stored on a credential. */
+async function tokenFieldsOf(credentialId) {
+  const row = await AuthCredential.select((c) => [
+    c.forgotPasswordToken,
+    c.forgotPasswordTokenExpiresAt,
+    c.emailVerificationToken,
+    c.emailVerificationTokenExpiresAt,
+    c.emailVerifiedAt,
+  ])
+    .for({ id: credentialId })
+    .one();
+  assert.ok(row, 'the credential is gone');
+  return row;
+}
+
+const HOURS_AGO = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000);
+
+test('an expired reset token is refused and removed', async () => {
+  const send = mock.method(LinkedEmail, 'send', async () => {});
+  try {
+    const { email, credentialId } = await accountWithCredentialFields(
+      PasswordHelper.resetPasswordTokenFields('expired-reset-token', HOURS_AGO(2))
+    );
+    assert.ok((await tokenFieldsOf(credentialId)).forgotPasswordToken, 'the token was written');
+
+    const reset = await provider().resetPassword(PASSWORD_2, PASSWORD_2, 'expired-reset-token');
+    assert.ok(reset.error, 'an expired token reset the password');
+    const row = await tokenFieldsOf(credentialId);
+    assert.ok(!row.forgotPasswordToken, 'the expired token is left');
+    assert.ok(!row.forgotPasswordTokenExpiresAt, 'its expiry is left');
+    assert.equal((await provider().signinWithPassword(email, PASSWORD_1)).error, undefined);
+  } finally {
+    send.mock.restore();
+  }
+});
+
+test('an expired verification token is refused and removed', async () => {
+  const send = mock.method(LinkedEmail, 'send', async () => {});
+  try {
+    const { credentialId } = await accountWithCredentialFields(
+      verificationTokenFields('expired-verify-token', HOURS_AGO(8 * 24))
+    );
+    assert.ok((await tokenFieldsOf(credentialId)).emailVerificationToken, 'the token was written');
+
+    const verified = await provider().verifyEmail('expired-verify-token');
+    assert.equal(verified.action, 'resend_verification', JSON.stringify(verified));
+    const row = await tokenFieldsOf(credentialId);
+    assert.ok(!row.emailVerificationToken, 'the expired token is left');
+    assert.ok(!row.emailVerificationTokenExpiresAt, 'its expiry is left');
+    assert.ok(!row.emailVerifiedAt, 'the email was marked verified');
   } finally {
     send.mock.restore();
   }

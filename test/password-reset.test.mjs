@@ -350,6 +350,22 @@ test('a failed upgrade does not fail the sign-in', async () => {
   assert.equal(storedCredential().passwordHash, COST_4_HASH);
 });
 
+test('the reset email escapes the stored name', async () => {
+  existingPassword();
+  const name = '<a href="https://evil.test">Ada</a>';
+  class HostileNameProvider extends TestProvider {
+    userShape = {
+      select: () => ({ for: () => ({ one: async () => ({ id: PERSON_ID, givenName: name }) }) }),
+    };
+  }
+  provider = serving(new HostileNameProvider(null, fakeLincdServer), request);
+  const token = await requestResetLink();
+  const html = sentEmails.at(-1).htmlbody;
+  assert.ok(!html.includes(name), 'the name went in as markup');
+  assert.ok(html.includes('Hey &lt;a href=&quot;https://evil.test&quot;&gt;Ada&lt;/a&gt;'), html);
+  assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', token), SIGNED_IN);
+});
+
 // --- using a link up atomically ---
 
 test('two concurrent resets with the same link: exactly one succeeds', async () => {
@@ -365,7 +381,7 @@ test('two concurrent resets with the same link: exactly one succeeds', async () 
   const winner = results[0] === SIGNED_IN ? 'new-pass-1' : 'new-pass-2';
   assert.equal(await passwordIs(winner), true, "the winner's password is set");
   assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token is gone');
-  assert.equal(storedCredential().consumeMarker, undefined, 'the consume marker is gone');
+  assert.equal(storedCredential().passwordResetConsumeMarker, undefined, 'the consume marker is gone');
 });
 
 // --- the answer never tells whether an account exists ---

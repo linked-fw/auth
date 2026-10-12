@@ -2,31 +2,83 @@ import crypto from 'crypto';
 import { Person } from '@_linked/schema/shapes/Person';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import { AuthCredential } from '../shapes/AuthCredential.js';
+import { readTtlFromEnv } from '../utils/token.js';
 
-/** The `AuthCredential` property that holds the hash of a single-use token. */
-export type CredentialTokenField = 'forgotPasswordToken' | 'emailVerificationToken';
+/** How long a password reset link works, in seconds, unless `AUTH_PASSWORD_RESET_TTL` is set. */
+export const DEFAULT_PASSWORD_RESET_TTL = 60 * 60;
 
-/** The `AuthCredential` property that holds when that token stops working. */
-export type CredentialTokenExpiryField =
-  | 'forgotPasswordTokenExpiresAt'
-  | 'emailVerificationTokenExpiresAt';
+/**
+ * The single-use tokens a credential can hold, each emailed as a link. Per kind: the
+ * `AuthCredential` properties that hold its hash, its expiry and its consume marker, and how long
+ * a new token works, in seconds. The lifetimes are read once at startup; a value that is not a
+ * positive whole number throws.
+ *
+ * - `reset`: a password reset link (`AUTH_PASSWORD_RESET_TTL`, default 1 hour).
+ * - `verify`: an email verification link (`AUTH_EMAIL_VERIFICATION_TTL`, default 7 days).
+ */
+export const TOKEN_KINDS = {
+  reset: {
+    tokenField: 'forgotPasswordToken',
+    expiresField: 'forgotPasswordTokenExpiresAt',
+    markerField: 'passwordResetConsumeMarker',
+    ttl: readTtlFromEnv('AUTH_PASSWORD_RESET_TTL', DEFAULT_PASSWORD_RESET_TTL),
+  },
+  verify: {
+    tokenField: 'emailVerificationToken',
+    expiresField: 'emailVerificationTokenExpiresAt',
+    markerField: 'emailVerificationConsumeMarker',
+    ttl: readTtlFromEnv('AUTH_EMAIL_VERIFICATION_TTL', 7 * 24 * 60 * 60),
+  },
+} as const;
+
+/** A kind of single-use credential token (see `TOKEN_KINDS`). */
+export type CredentialTokenKind = keyof typeof TOKEN_KINDS;
+
+/**
+ * The value a single-use token is stored and looked up by: SHA-256, base64url. A plain hash is
+ * enough, because the token is 160 random bits, not a password.
+ */
+export function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token, 'utf8').digest('base64url');
+}
 
 /** A stored value as a Date (stores may return dateTime literals as strings). */
-function toDate(value: unknown): Date | undefined {
+export function toDate(value: unknown): Date | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   const date = value instanceof Date ? value : new Date(value as string | number);
   return isNaN(date.getTime()) ? undefined : date;
 }
 
+/** When a token of `kind` issued at `now` stops working. */
+export function tokenExpiresAt(kind: CredentialTokenKind, now: Date = new Date()): Date {
+  return new Date(now.getTime() + TOKEN_KINDS[kind].ttl * 1000);
+}
+
 /**
- * Use up the single-use token whose stored hash is `hash`, atomically: of any number of
- * concurrent calls with the same hash, at most one gets the person back.
+ * Remove a token of `kind` whose email was never sent, so no link exists for it. Matched by the
+ * token's hash, so a newer link issued in the meantime is left alone. A store error is logged.
+ */
+export async function clearUnsentToken(kind: CredentialTokenKind, hash: string): Promise<void> {
+  const { tokenField, expiresField } = TOKEN_KINDS[kind];
+  try {
+    await AuthCredential.update({ [tokenField]: null, [expiresField]: null }).where((cred) =>
+      cred[tokenField].equals(hash)
+    );
+  } catch (error) {
+    console.error(`Could not remove an unsent ${kind} token`, error);
+  }
+}
+
+/**
+ * Use up the single-use token of `kind`, atomically: of any number of concurrent calls with the
+ * same token, at most one gets the person back.
  *
  * The store has no compare-and-set and does not report what an update matched. But an update
  * with a `where` is one SPARQL `DELETE … INSERT … WHERE`, which the store runs as one write
  * transaction. So the update that removes the token also writes a fresh random marker, and only
  * the call whose update matched the token finds its own marker afterwards. A call that lost
- * matched nothing and wrote nothing.
+ * matched nothing and wrote nothing. Each kind has its own marker property, so using up one kind
+ * never disturbs a concurrent consume of the other on the same credential.
  *
  * Expiry cannot be compared in a `where`, and the update removes it, so it is read before the
  * update. An expired token is still used up.
@@ -34,18 +86,14 @@ function toDate(value: unknown): Date | undefined {
  * @returns the person whose credential held the token if this call used it up and it had not
  *   expired, or undefined
  */
-export async function consumeCredentialToken({
-  tokenField,
-  expiresField,
-  hash,
-  now = new Date(),
-}: {
-  tokenField: CredentialTokenField;
-  expiresField: CredentialTokenExpiryField;
-  hash: string;
-  now?: Date;
-}): Promise<QResult<Person> | undefined> {
-  if (!hash || typeof hash !== 'string') return undefined;
+export async function consumeCredentialToken(
+  kind: CredentialTokenKind,
+  token: string,
+  now: Date = new Date()
+): Promise<QResult<Person> | undefined> {
+  if (!token || typeof token !== 'string') return undefined;
+  const { tokenField, expiresField, markerField } = TOKEN_KINDS[kind];
+  const hash = hashToken(token);
   const stored = await AuthCredential.select((cred) => [cred.credentialOf, cred[expiresField]])
     .where((cred) => cred[tokenField].equals(hash))
     .one();
@@ -55,14 +103,14 @@ export async function consumeCredentialToken({
   await AuthCredential.update({
     [tokenField]: null,
     [expiresField]: null,
-    consumeMarker: marker,
+    [markerField]: marker,
   }).where((cred) => cred[tokenField].equals(hash));
 
   const won = await AuthCredential.select((cred) => [cred.credentialOf])
-    .where((cred) => cred.consumeMarker.equals(marker))
+    .where((cred) => cred[markerField].equals(marker))
     .one();
   if (!won) return undefined;
-  await AuthCredential.update({ consumeMarker: null }).for({ id: won.id });
+  await AuthCredential.update({ [markerField]: null }).for({ id: won.id });
 
   if (won.id !== stored.id) return undefined;
   const expiresAt = toDate(stored[expiresField]);

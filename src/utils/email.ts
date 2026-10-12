@@ -9,6 +9,21 @@ function devAuthEnabled(): boolean {
   return devAuth === 'true' || devAuth === true;
 }
 
+/**
+ * `value` as text that is safe inside HTML, in element content and in quoted attribute values.
+ * A missing value is the empty string. Every value put into an email template goes through it:
+ * a name typed in at signup must not add markup to a mail sent from the app's real address.
+ */
+export function escapeHtml(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /** `text` with every occurrence of each of `secrets` replaced. */
 function redact(text: string, secrets: string[]): string {
   return secrets.filter(Boolean).reduce((out, secret) => out.split(secret).join('[redacted]'), text);

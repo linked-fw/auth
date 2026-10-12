@@ -334,7 +334,7 @@ test('two concurrent resets with one link: exactly one succeeds, and no consume 
   const left = await sparql(`
     PREFIX auth: <https://linked.cm/ont/auth/>
     SELECT ?s WHERE {
-      { ?s auth:consumeMarker ?m } UNION { GRAPH ?g { ?s auth:consumeMarker ?m } }
+      { ?s auth:passwordResetConsumeMarker ?m } UNION { GRAPH ?g { ?s auth:passwordResetConsumeMarker ?m } }
       UNION { ?s auth:forgotPasswordToken ?t } UNION { GRAPH ?g { ?s auth:forgotPasswordToken ?t } }
     }`);
   assert.equal(left.length, 0, 'no consume marker and no token left');

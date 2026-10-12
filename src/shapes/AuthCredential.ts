@@ -91,15 +91,24 @@ export class AuthCredential extends Shape {
   }
 
   /**
-   * Set only for the moment between an atomic token consume and its read-back: the consume
+   * Set only for the moment between an atomic reset token consume and its read-back: the consume
    * writes a fresh random marker in the same update that removes the token, then looks for it.
    * Only the request whose update matched the token finds its marker. See `consumeCredentialToken`.
    */
   @literalProperty({
-    path: auth.consumeMarker,
+    path: auth.passwordResetConsumeMarker,
     maxCount: 1,
   })
-  get consumeMarker(): string {
+  get passwordResetConsumeMarker(): string {
+    return '';
+  }
+
+  /** The same marker for an email verification token consume. */
+  @literalProperty({
+    path: auth.emailVerificationConsumeMarker,
+    maxCount: 1,
+  })
+  get emailVerificationConsumeMarker(): string {
     return '';
   }
 
