@@ -57,8 +57,7 @@
     "jwks-rsa": "^4.0.0",
     "react-hook-form": "^7.47.0",
     "ulid": "^3.0.1",
-    "uuid": "^14.0.0",
-    "zeptomail": "^8.0.0"
+    "uuid": "^14.0.0"
   },
   "peerDependencies": {
     "react": "^18.2.0 || ^19.0.0",

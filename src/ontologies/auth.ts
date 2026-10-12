@@ -45,6 +45,8 @@ export var passwordHash = ns('passwordHash');
 export var phoneIdentifier = ns('phoneIdentifier');
 export var forgotPasswordToken = ns('forgotPasswordToken');
 export var forgotPasswordTokenExpiresAt = ns('forgotPasswordTokenExpiresAt');
+/** A random marker an atomic token consume writes, to learn whether its update matched. */
+export var consumeMarker = ns('consumeMarker');
 export var telephone = ns('telephone');
 export var hash = ns('hash');
 export var tokenHash = ns('tokenHash');
@@ -77,6 +79,7 @@ export const auth = {
   passwordHash,
   forgotPasswordToken,
   forgotPasswordTokenExpiresAt,
+  consumeMarker,
   telephone,
   hash,
   tokenHash,

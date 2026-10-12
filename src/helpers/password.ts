@@ -4,6 +4,7 @@ import { Person } from '@_linked/schema/shapes/Person';
 import { AuthCredential } from '../shapes/AuthCredential.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import { readTtlFromEnv } from '../utils/token.js';
+import { consumeCredentialToken } from './credentialToken.js';
 
 /**
  * The bcrypt cost (log2 of the rounds) of every new password hash. Hashes stored with a lower
@@ -166,7 +167,8 @@ const PasswordHelper = {
 
   /**
    * Validate the reset password token and use it up: the token is removed from its credential
-   * whether or not it is still valid, so it never works again.
+   * whether or not it is still valid, so it never works again. Atomic: of concurrent calls with
+   * the same token, at most one gets the person back (see `consumeCredentialToken`).
    *
    * @param token - The reset password token
    * @returns the person whose credential held the token if it was valid, or undefined
@@ -175,14 +177,13 @@ const PasswordHelper = {
     token: string,
     now: Date = new Date()
   ): Promise<QResult<Person> | undefined> {
-    const credential = await PasswordHelper.findResetPasswordCredential(token);
-    if (!credential) return undefined;
-    await AuthCredential.update(PasswordHelper.clearedResetPasswordTokenFields()).for({
-      id: credential.id,
+    if (!token || typeof token !== 'string') return undefined;
+    return consumeCredentialToken({
+      tokenField: 'forgotPasswordToken',
+      expiresField: 'forgotPasswordTokenExpiresAt',
+      hash: PasswordHelper.hashResetPasswordToken(token),
+      now,
     });
-    const expiresAt = toDate(credential.forgotPasswordTokenExpiresAt);
-    if (!expiresAt || expiresAt.getTime() <= now.getTime()) return undefined;
-    return credential.credentialOf;
   },
 
   /** The credential whose outstanding reset token is `token`, if any. */

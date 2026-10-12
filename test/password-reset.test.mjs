@@ -57,8 +57,10 @@ class TestProvider extends AuthBackendProvider {
 
 /**
  * An in-memory stand-in for the `AuthCredential` query API the provider uses:
- * `select(...).where(...)/.for(...).one()` (or the query awaited for every match), `create(data)` and `update(data).for(node)`.
- * A `null` in an update unsets the property, as it does for a real store.
+ * `select(...).where(...)/.for(...).one()` (or the query awaited for every match), `create(data)`,
+ * `update(data).for(node)` and `update(data).where(...)`. A `null` in an update unsets the
+ * property, as it does for a real store. An update with a `where` matches and writes in one step,
+ * like the single SPARQL update a real store runs it as.
  */
 function fakeCredentialTable() {
   const rows = new Map();
@@ -70,15 +72,20 @@ function fakeCredentialTable() {
     conditions.every(([prop, value]) =>
       value && typeof value === 'object' ? row[prop]?.id === value.id : row[prop] === value
     );
-  const query = (conditions = []) => ({
-    where(fn) {
-      const found = [];
-      const proxy = new Proxy(
+  // each `prop.equals(value)` a where callback makes, as [prop, value]
+  const conditionsOf = (fn) => {
+    const found = [];
+    fn(
+      new Proxy(
         {},
         { get: (_t, prop) => ({ equals: (value) => (found.push([prop, value]), true) }) }
-      );
-      fn(proxy);
-      return query([...conditions, ...found]);
+      )
+    );
+    return found;
+  };
+  const query = (conditions = []) => ({
+    where(fn) {
+      return query([...conditions, ...conditionsOf(fn)]);
     },
     for(node) {
       return query([...conditions, ['id', typeof node === 'string' ? node : node.id]]);
@@ -118,6 +125,17 @@ function fakeCredentialTable() {
           const row = rows.get(id);
           if (row) write(row, data);
           return copy(row);
+        },
+        where: (fn) => {
+          const conditions = conditionsOf(fn);
+          // resolves void, like the real where-mode update: it never says what it matched
+          return Promise.resolve().then(() => {
+            for (const row of rows.values()) {
+              if (!matches(row, conditions)) continue;
+              updates.push([row.id, { ...data }]);
+              write(row, data);
+            }
+          });
         },
       }));
     },
@@ -416,4 +434,77 @@ test('a failed upgrade does not fail the sign-in', async () => {
   }));
   assert.equal(await provider.signinWithPassword(EMAIL, OLD_PASSWORD), SIGNED_IN);
   assert.equal(storedCredential().passwordHash, COST_4_HASH);
+});
+
+// --- using a link up atomically ---
+
+test('two concurrent resets with the same link: exactly one succeeds', async () => {
+  existingPassword();
+  const token = await requestResetLink();
+  const results = await Promise.all([
+    provider.resetPassword('new-pass-1', 'new-pass-1', token),
+    provider.resetPassword('new-pass-2', 'new-pass-2', token),
+  ]);
+  const won = results.filter((result) => result === SIGNED_IN);
+  assert.equal(won.length, 1, `expected one success: ${JSON.stringify(results)}`);
+  assert.ok(results.find((result) => result !== SIGNED_IN)?.error, 'the other one failed');
+  const winner = results[0] === SIGNED_IN ? 'new-pass-1' : 'new-pass-2';
+  assert.equal(await passwordIs(winner), true, "the winner's password is set");
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token is gone');
+  assert.equal(storedCredential().consumeMarker, undefined, 'the consume marker is gone');
+});
+
+// --- the answer never tells whether an account exists ---
+
+test('an unknown email gets the same answer, and no email is sent', async () => {
+  mock.method(UserAccount, 'select', () => ({ where: () => ({ one: async () => null }) }));
+  assert.equal(await provider.sendResetPasswordLink('nobody@example.test'), true);
+  assert.equal(sentEmails.length, 0, 'an email was sent');
+  assert.equal(credentials.rows.size, 0, 'a credential was created');
+});
+
+test('an account whose person is missing gets the same answer, and keeps no token', async () => {
+  existingPassword();
+  class NoPersonProvider extends TestProvider {
+    userShape = { select: () => ({ for: () => ({ one: async () => null }) }) };
+  }
+  const noPerson = serving(new NoPersonProvider(null, fakeLincdServer), request);
+  assert.equal(await noPerson.sendResetPasswordLink(EMAIL), true);
+  assert.equal(sentEmails.length, 0, 'an email was sent');
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token was kept');
+});
+
+test('a send that throws (no email provider) answers true, and removes the token', async () => {
+  existingPassword();
+  // what LinkedEmail.send does without a registered provider: throw synchronously
+  mock.method(LinkedEmail, 'send', () => {
+    throw new Error('No email provider set.');
+  });
+  assert.equal(await provider.sendResetPasswordLink(EMAIL), true);
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token was kept');
+  assert.equal(storedCredential().forgotPasswordTokenExpiresAt, undefined, 'the expiry was kept');
+});
+
+test('a send that rejects answers true, and removes the token', async () => {
+  existingPassword();
+  mock.method(LinkedEmail, 'send', async () => {
+    throw new Error('provider down');
+  });
+  assert.equal(await provider.sendResetPasswordLink(EMAIL), true);
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token was kept');
+});
+
+test('with DEV_AUTH and no email provider, the link is logged and keeps working', async (t) => {
+  process.env.DEV_AUTH = 'true';
+  t.after(() => delete process.env.DEV_AUTH);
+  existingPassword();
+  const info = mock.method(console, 'info', () => {});
+  assert.equal(await provider.sendResetPasswordLink(EMAIL), true);
+  assert.equal(LinkedEmail.send.mock.callCount(), 0, 'a send was attempted');
+  const line = info.mock.calls.map((call) => call.arguments.join(' ')).join('\n');
+  const match = line.match(/\[@_linked\/auth\] dev: reset link: \S*reset-password\?token=(\S+)/);
+  assert.ok(match, `no link logged: ${line}`);
+  assert.ok(!line.includes(EMAIL), 'the address was logged');
+  assert.ok(storedCredential().forgotPasswordToken, 'the token was removed');
+  assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', match[1]), SIGNED_IN);
 });

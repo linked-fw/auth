@@ -311,6 +311,36 @@ test('a reset link stores only a hash with an expiry, and works once', async () 
   assert.equal(signin.error, undefined, 'the password from the first use stands');
 });
 
+test('two concurrent resets with one link: exactly one succeeds, and no consume marker is left', async () => {
+  const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
+  const sent = [];
+  const send = mock.method(LinkedEmail, 'send', async (options) => {
+    sent.push(options);
+  });
+  try {
+    assert.equal(await provider().sendResetPasswordLink(email), true);
+  } finally {
+    send.mock.restore();
+  }
+  const token = sent[0].htmlbody.match(/reset-password\?token=([^'"&\s]+)/)[1];
+
+  // both set the same password, so the account ends up the same whichever one wins
+  const results = await Promise.all(
+    [1, 2, 3].map(() => provider().resetPassword(PASSWORD_2, PASSWORD_2, token))
+  );
+  const succeeded = results.filter((result) => !result?.error);
+  assert.equal(succeeded.length, 1, `expected one success: ${JSON.stringify(results.map((r) => r?.error ?? 'ok'))}`);
+
+  const left = await sparql(`
+    PREFIX auth: <https://linked.cm/ont/auth/>
+    SELECT ?s WHERE {
+      { ?s auth:consumeMarker ?m } UNION { GRAPH ?g { ?s auth:consumeMarker ?m } }
+      UNION { ?s auth:forgotPasswordToken ?t } UNION { GRAPH ?g { ?s auth:forgotPasswordToken ?t } }
+    }`);
+  assert.equal(left.length, 0, 'no consume marker and no token left');
+  assert.equal((await provider().signinWithPassword(email, PASSWORD_2)).error, undefined);
+});
+
 test('removeAccount deletes the account\'s refresh token records', async () => {
   const signin = await provider().signinWithPassword(email, PASSWORD_2);
   const accountId = signin.auth.userAccount.id;

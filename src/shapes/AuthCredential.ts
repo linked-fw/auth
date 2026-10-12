@@ -53,6 +53,19 @@ export class AuthCredential extends Shape {
     return undefined as any;
   }
 
+  /**
+   * Set only for the moment between an atomic token consume and its read-back: the consume
+   * writes a fresh random marker in the same update that removes the token, then looks for it.
+   * Only the request whose update matched the token finds its marker. See `consumeCredentialToken`.
+   */
+  @literalProperty({
+    path: auth.consumeMarker,
+    maxCount: 1,
+  })
+  get consumeMarker(): string {
+    return '';
+  }
+
   @literalProperty({
     path: auth.passwordHash,
     maxCount: 1,

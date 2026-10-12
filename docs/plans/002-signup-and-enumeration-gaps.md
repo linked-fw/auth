@@ -667,6 +667,39 @@ Validation:
 - Integration (Fuseki): a case in `test/integration/sessions.fuseki.test.mjs`. Two parallel
   consumes of one real token result in one success, and `consumeMarker` is gone afterwards.
 
+Done:
+
+- Fuseki check first: `AuthCredential.update({forgotPasswordToken: null, forgotPasswordTokenExpiresAt: null, telephone: 'M1'}).where(c => c.forgotPasswordToken.equals('H1'))`
+  against a throwaway dataset removed both fields on the matching row only, wrote the marker, and
+  left the other row alone. A second identical update matched nothing and wrote nothing. Null
+  unsets in where mode, so no `rawQuery` fallback was built.
+- Validation: `npx linked build && npm test` — 248/248 pass (new in `password-reset.test.mjs`:
+  concurrent resets with one link, unknown email, missing person, a send that throws
+  synchronously, a send that rejects, DEV_AUTH logging; in `log-hygiene.test.mjs`: a failed
+  reset send logs neither address nor token). `npm run test:integration` — 28/28 pass. The new
+  integration case races three `resetPassword` calls on one real token: one succeeds, the other
+  two get "No user account found to reset password", and no `consumeMarker` or token is left.
+  With the old consume restored, the same case gives three successes and fails.
+- Deviations:
+  - `src/data/auth.json` holds no property definitions (only the template's `ExampleClass`), so
+    `consumeMarker` was added to `src/ontologies/auth.ts` and the shape only. Phase 3's terms can
+    do the same.
+  - `consumeCredentialToken` takes `tokenField`/`expiresField` as string-literal unions that
+    only hold the reset fields for now. Phase 3 widens them with the verification fields.
+    It returns the person (`QResult<Person>`) when this call won and the pre-read expiry is still
+    in the future; a win on a row other than the pre-read one counts as invalid.
+  - The unsent token is cleared with a where-mode update keyed by its own hash
+    (`clearUnsentResetPasswordToken`, module-level), so a newer link issued meanwhile survives.
+    The "person not found" branch also clears it, since no email goes out there either.
+  - `sendAuthEmail` redacts the recipient addresses, the link and its raw token from the logged
+    provider error, because a provider message may echo what it was asked to send.
+  - `package-lock.json` of the checkout: the `zeptomail` root dependency and its
+    `node_modules/zeptomail*` entries were removed by script (no `npm install` in the
+    checkout). `axios`, which only zeptomail used, stays in the lock as an orphan until the next
+    Renovate refresh. `npm install` at the CN root ran; zeptomail is now `extraneous` there.
+  - The readme's `lincd-zeptomail` sentence (readme.md:379) is left for Phase 6 (Email
+    configuration).
+
 ### Phase 3 — Email verification backend
 
 Tasks:

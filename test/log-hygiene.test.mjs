@@ -1,4 +1,5 @@
-// Sign-in must never write credentials (ID tokens, identity tokens) or email addresses to the log.
+// Sign-in must never write credentials (ID tokens, identity tokens) or email addresses to the log,
+// and neither must a reset email that could not be sent (the link holds a token).
 //
 // Runs against the BUILT package in lib/ (build first: `npx linked build`). No network and no
 // store: the provider helpers and `Auth.login` are stubbed.
@@ -24,6 +25,8 @@ const { Auth } = await import(new URL('utils/auth.js', libDir));
 const { default: AppleHelper } = await import(new URL('helpers/apple.js', libDir));
 const { default: GoogleHelper } = await import(new URL('helpers/google.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
+const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
+const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 const { OAuth2Client } = await import('google-auth-library');
 
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
@@ -106,4 +109,29 @@ test('an Apple sign-in does not log the email', async () => {
   mock.method(AppleHelper, 'decodeIdentityToken', async () => ({ sub: 'apple-sub', email: EMAIL }));
   await provider.signinOAuth('apple', { identityToken: FAKE_JWT });
   assert.ok(!allLogs().includes(EMAIL), `the email was logged:\n${allLogs()}`);
+});
+
+test('a reset email that fails to send logs neither the address nor the token', async () => {
+  delete process.env.DEV_AUTH;
+  class ResetProvider extends AuthBackendProvider {
+    userShape = {
+      select: () => ({ for: () => ({ one: async () => ({ id: 'p1', givenName: 'Ada' }) }) }),
+    };
+    async getPasswordForUser() {
+      return { id: 'c1', passwordHash: 'hash' };
+    }
+  }
+  mock.method(AuthCredential, 'update', () => ({ for: async () => {}, where: async () => {} }));
+  let token;
+  // a provider whose error message repeats what it was asked to send
+  mock.method(LinkedEmail, 'send', async (options) => {
+    token = options.htmlbody.match(/reset-password\?token=([^'"&\s]+)/)[1];
+    throw new Error(`rejected ${options.to[0].email_address.address}: ${options.htmlbody}`);
+  });
+  const provider = new ResetProvider(null, fakeLincdServer);
+  assert.equal(await provider.sendResetPasswordLink(EMAIL), true);
+  assert.ok(token, 'no send was attempted');
+  assert.ok(allLogs().includes('could not send the reset email'), `failure not logged:\n${allLogs()}`);
+  assert.ok(!allLogs().includes(EMAIL), `the email was logged:\n${allLogs()}`);
+  assert.ok(!allLogs().includes(token), `the token was logged:\n${allLogs()}`);
 });

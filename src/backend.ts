@@ -6,7 +6,6 @@ import { declareCallable, declareInternal } from '@_linked/server-utils/utils/ca
 import session from 'express-session';
 
 import { Auth } from './utils/auth.js';
-import { SendMailClient } from 'zeptomail';
 import { AuthCredential } from './shapes/AuthCredential.js';
 import { auth } from './ontologies/auth.js';
 import { expressjwt, Request } from 'express-jwt';
@@ -57,7 +56,7 @@ import { OAuthIdentityStore } from './utils/oauthIdentities.js';
 import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
 import path, { dirname, basename } from 'path';
-import { LinkedEmail } from '@_linked/server-utils/utils/LinkedEmail';
+import { sendAuthEmail } from './utils/email.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import type { AuthSession } from './types/auth.js';
 
@@ -244,10 +243,23 @@ const filename__ =
     : //@ts-ignore
       basename(import.meta.url).replace('file:/', '');
 
+/**
+ * Remove a reset token whose email was never sent, so no link exists for it. Matched by the
+ * token's hash, so a newer link issued in the meantime is left alone.
+ */
+async function clearUnsentResetPasswordToken(tokenHash: string) {
+  try {
+    await AuthCredential.update(PasswordHelper.clearedResetPasswordTokenFields()).where((cred) =>
+      cred.forgotPasswordToken.equals(tokenHash)
+    );
+  } catch (error) {
+    console.error('Could not remove an unsent reset password token', error);
+  }
+}
+
 export default class AuthBackendProvider extends BackendProvider {
   public accountShape: typeof UserAccount = UserAccount;
   public userShape: typeof SchemaPerson = SchemaPerson;
-  protected zeptoMail: SendMailClient;
   // Plan-011 — store the listener so dispose() can unsubscribe it.
   // Anonymous inline callbacks would leak across HMR reloads.
   private accountRemovedListener?: (account: UserAccountData) => Promise<void>;
@@ -279,12 +291,6 @@ export default class AuthBackendProvider extends BackendProvider {
     // set the user and account shapes for auth
     Auth.userType = this.userShape;
     Auth.accountType = this.accountShape;
-
-    // set zeptoMail client
-    this.zeptoMail = new SendMailClient({
-      url: 'api.zeptomail.com/',
-      token: process.env.ZEPTOMAIL_TOKEN,
-    });
 
     // FOR initial page requests we send the JWT token as a cookie (Stored in the browser)
     // see getToken for how we use the cookie and set this.request.linkedAuth
@@ -827,10 +833,14 @@ export default class AuthBackendProvider extends BackendProvider {
   }
 
   /**
-   * Send the reset password link with zeptoMail
+   * Send a reset password link to `email`, through the registered email provider.
+   *
+   * Answers `true` for every well-formed email, whether or not an account exists for it and
+   * whether or not the email could be sent, so the answer never tells which emails have an
+   * account. When the email is not sent, the stored token is removed again.
    *
    * @param email - The email address
-   * @returns
+   * @returns true, or an error for a malformed email or a rate-limited request
    */
   async sendResetPasswordLink(email: string) {
     // every request sends an email; counted by the address asked for, existing or not
@@ -874,10 +884,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
       if (!account?.accountOf?.id) {
         console.warn('No account found for a reset password request');
-        return {
-          error:
-            'No password is associated with this account. Please try another login method or contact support.',
-        };
+        return true;
       }
 
       webID = account.accountOf.id;
@@ -899,10 +906,9 @@ export default class AuthBackendProvider extends BackendProvider {
       .one();
 
     if (!person) {
-      console.warn(`No user found for reset password webID ${webID}`);
-      return {
-        error: 'We could not prepare the reset password link for this account.',
-      };
+      console.warn('No user found for a reset password request');
+      await clearUnsentResetPasswordToken(resetTokenFields.forgotPasswordToken);
+      return true;
     }
 
     const confirmUrl = `${process.env.SITE_ROOT}/auth/reset-password?token=${newToken}`;
@@ -938,17 +944,11 @@ export default class AuthBackendProvider extends BackendProvider {
         `,
     };
 
-    // await this.zeptoMail.sendMail(emailOptions);
-    return LinkedEmail.send(emailOptions)
-      .then(() => {
-        return true;
-      })
-      .catch((error) => {
-        console.error('Error sending reset link:', error);
-        return {
-          error: "Sorry, we couldn't send the email, please try again later",
-        };
-      });
+    const outcome = await sendAuthEmail(emailOptions, { purpose: 'reset', url: confirmUrl });
+    if (outcome === 'failed') {
+      await clearUnsentResetPasswordToken(resetTokenFields.forgotPasswordToken);
+    }
+    return true;
   }
 
   /**
