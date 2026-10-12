@@ -35,6 +35,7 @@ const { default: AuthBackendProvider } = await import(new URL('backend.js', libD
 const { UserAccount } = await import('@_linked/sioc/shapes/UserAccount');
 const { default: bcrypt } = await import('bcrypt');
 const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
+const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
 
 const EMAIL = 'ada@example.test';
 const PERSON_ID = emailToWebID(EMAIL);
@@ -129,6 +130,8 @@ let provider;
 let request;
 
 beforeEach(() => {
+  // every test requests links for the same email; each starts with a fresh limit budget
+  resetRateLimits();
   credentials = fakeCredentialTable();
   credentials.install();
   sentEmails = [];

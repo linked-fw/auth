@@ -59,6 +59,7 @@ import type { AuthSession } from './types/auth.js';
 
 import connect_sqlite3 from 'connect-sqlite3';
 import { emailToWebID } from './utils/webID.js';
+import { limitRequest } from './utils/rateLimit.js';
 
 var SQLiteStore = connect_sqlite3(session);
 
@@ -398,6 +399,10 @@ export default class AuthBackendProvider extends BackendProvider {
     email: string,
     plainPassword: string
   ): Promise<AuthenticationResult> {
+    // before anything is looked up, so the answer is the same whether the account exists or not
+    const limited = await limitRequest('signin', this.request, this.response, email);
+    if (limited) return limited;
+
     let webID: string;
     try {
       webID = emailToWebID(email);
@@ -503,6 +508,9 @@ export default class AuthBackendProvider extends BackendProvider {
     email,
     password,
   }: CreateAccount): Promise<AuthenticationResult> {
+    const limited = await limitRequest('signup', this.request, this.response);
+    if (limited) return limited;
+
     // check if the first name and email are provided
     if (!firstName || !email) {
       return {
@@ -647,6 +655,18 @@ export default class AuthBackendProvider extends BackendProvider {
     token?: string,
     currentPassword?: string
   ): Promise<AuthenticationResult> {
+    // A token is guessed by address only; a signed-in change also checks the current password,
+    // so it is limited per account as well.
+    const limited = token
+      ? await limitRequest('passwordReset', this.request, this.response)
+      : await limitRequest(
+          'passwordChange',
+          this.request,
+          this.response,
+          this.request?.linkedAuth?.userAccount?.id ?? this.request?.linkedAuth?.user?.id
+        );
+    if (limited) return limited;
+
     // check if password and confirmPassword match
     if (password !== confirmPassword) {
       return {
@@ -771,6 +791,15 @@ export default class AuthBackendProvider extends BackendProvider {
    * @returns
    */
   async sendResetPasswordLink(email: string) {
+    // every request sends an email; counted by the address asked for, existing or not
+    const limited = await limitRequest(
+      'passwordResetRequest',
+      this.request,
+      this.response,
+      email
+    );
+    if (limited) return limited;
+
     const newToken = PasswordHelper.generateToken();
     // Only the hash is stored, with an expiry. Writing it replaces any earlier link's token.
     const resetTokenFields = PasswordHelper.resetPasswordTokenFields(newToken);
@@ -906,6 +935,9 @@ export default class AuthBackendProvider extends BackendProvider {
     provider: OAuthProvider,
     oauthUserData: any
   ): Promise<AuthenticationResult> {
+    const limited = await limitRequest('oauth', this.request, this.response);
+    if (limited) return limited;
+
     if (!VERIFIED_OAUTH_PROVIDERS.includes(provider)) {
       console.error(
         `signinOAuth: rejected provider ${JSON.stringify(provider)}, ` +
@@ -1067,6 +1099,8 @@ export default class AuthBackendProvider extends BackendProvider {
     if (!account?.id) {
       return { error: 'Sign in first to connect a sign-in method.' };
     }
+    const limited = await limitRequest('oauth', this.request, this.response, account.id);
+    if (limited) return limited;
     if (!VERIFIED_OAUTH_PROVIDERS.includes(provider)) {
       return { error: 'Unsupported OAuth provider' };
     }
@@ -1101,6 +1135,9 @@ export default class AuthBackendProvider extends BackendProvider {
    * @returns
    */
   async signinTemporary() {
+    const limited = await limitRequest('temporarySignin', this.request, this.response);
+    if (limited) return limited;
+
     const person = await (this.userShape as any)
       .create({
         givenName: '',
@@ -1331,6 +1368,9 @@ export default class AuthBackendProvider extends BackendProvider {
       }
 
       if (refreshToken) {
+        // only an exchange is counted: it writes to the store, a valid access token does not
+        const limited = await limitRequest('tokenRefresh', request, response);
+        if (limited) return limited;
         return await this.refreshSession(refreshToken);
       }
 
