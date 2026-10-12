@@ -742,6 +742,39 @@ Validation:
 - Integration (Fuseki), `accounts.fuseki.test.mjs`: create, then verify, then refresh →
   `auth.emailVerified === true`.
 
+Done:
+
+- Validation: `npx linked build && npm test` — 274/274 pass (new: `email-verification.test.mjs`,
+  15 cases; in `oauth.test.mjs`: new OAuth user, linked sign-in with the person's email and with
+  another email, email-matched attach; in `rate-limit.test.mjs`: both new rules; in
+  `tokens.test.mjs`: `buildAuthSession` true/false/store error, the access token and
+  `updateSessionData` keep it, a refresh re-reads it; `exposure.test.mjs` `SURFACE` has both
+  methods). `npm run test:integration` — 29/29 pass. The new case in `accounts.fuseki.test.mjs`
+  creates an account (`emailVerified: false`), verifies it with the emailed token, sees the
+  token refused a second time, and refreshes to `emailVerified: true`.
+- Deviations:
+  - `emailVerification.ts` also exports `consumeEmailVerificationToken(token)` (the
+    `consumeCredentialToken` call) and has its own `hashToken`. It does not import `password.ts`,
+    so `utils/auth.ts` does not pull in bcrypt; the backend makes the raw token with
+    `PasswordHelper.generateToken()`.
+  - `test/password-reset.test.mjs`'s `fakeCredentialTable` moved to `test/fakeStore.mjs`
+    (`install(AuthCredential)`), shared by the new tests.
+  - New module-level helpers in `backend.ts`: `sendVerificationEmail` (builds the email, sends
+    through `sendAuthEmail`, clears an unsent token by its hash), `clearUnsentVerificationToken`,
+    `markOAuthEmailVerified`, `accountEmail` and `givenNameOf`. No new provider methods besides
+    the two RPCs.
+  - `resendEmailVerification` reads the email from the stored account first and falls back to
+    the session's; it writes the token on the person's credential with a password (else the
+    first), or creates one with the email. A session without a person id throws.
+  - A failed `markEmailVerified` is logged and does not fail a password reset or OAuth sign-in;
+    in `verifyEmail` it is an error. The reset marks after the password write, so the new
+    session already reports `emailVerified: true`.
+  - The email-matched OAuth path marks the email without a separate WebID check: the person was
+    found at `emailToWebID(email)`.
+  - Integration runs: do not source CN's `.env`. It sets `DEV_AUTH=true`, which logs links
+    instead of calling the (mocked) `LinkedEmail.send`, so every emailed-link case fails. Pass
+    only the `AUTH_TEST_FUSEKI_*` variables.
+
 ### Phase 4 — `removeAccount` proof and `getReauthenticationMethods`
 
 Tasks:

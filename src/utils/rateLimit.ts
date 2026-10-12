@@ -43,7 +43,9 @@ export type RateLimitRuleName =
   | 'tokenRefresh'
   | 'oauth'
   | 'temporarySignin'
-  | 'credentialLookup';
+  | 'credentialLookup'
+  | 'emailVerificationRequest'
+  | 'emailVerify';
 
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;
@@ -77,6 +79,13 @@ export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitRuleName, RateLimitRu
   temporarySignin: { ip: { max: 30, windowSeconds: HOUR } },
   /** `hasAuthCredential`: tells whether a person has a credential. */
   credentialLookup: { ip: { max: 60, windowSeconds: MINUTE } },
+  /** `resendEmailVerification`: each one sends an email. By the signed-in account. */
+  emailVerificationRequest: {
+    ip: { max: 10, windowSeconds: HOUR },
+    account: { max: 3, windowSeconds: HOUR },
+  },
+  /** `verifyEmail`: guessing a verification token. */
+  emailVerify: { ip: { max: 10, windowSeconds: MINUTE } },
 };
 
 /**

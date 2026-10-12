@@ -18,6 +18,7 @@ import type { RefreshTokenExpiry } from './token.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider.js';
 import { setQueryContext } from '@_linked/core/queries/QueryContext';
+import { personEmailVerified } from '../helpers/emailVerification.js';
 
 export class Auth {
   // define the default user and account types
@@ -147,6 +148,7 @@ export class Auth {
     const authentication: AuthSession = {
       userAccount: account,
       user: person,
+      emailVerified: await personEmailVerified(person?.id),
     };
 
     //Give the app its backend provider a chance to extend the authentication data with the default user and account data
@@ -211,6 +213,7 @@ export class Auth {
         userAccount: updatedUserAccount,
         updateSessionData, // Keep the reference to this function
         sid: currentSessionId,
+        emailVerified: current.emailVerified,
       };
 
       // Update request.linkedAuth to point to the new session
@@ -254,6 +257,7 @@ export class Auth {
           auth: {
             user: newAuthSession.user,
             userAccount: newAuthSession.userAccount,
+            emailVerified: newAuthSession.emailVerified,
           },
           accessToken,
           refreshToken,

@@ -50,6 +50,21 @@ export type VerifiedOAuthIdentity = {
 /** The result of `linkOAuthIdentity`. */
 export type LinkOAuthIdentityResult = { linked: true } | { error: string; action?: string };
 
+/** The result of `verifyEmail`. */
+export type VerifyEmailResult =
+  | { verified: true }
+  | { error: string; action?: string; retryAfter?: number };
+
+/** The result of `resendEmailVerification`. `{verified: true}`: already verified, nothing sent. */
+export type ResendEmailVerificationResult =
+  | { sent: true }
+  | { verified: true }
+  | {
+      error: string;
+      action?: 'no_email' | 'rate_limited' | 'email_failed';
+      retryAfter?: number;
+    };
+
 /**
  * Create a new account signin with email and password.
  */
@@ -95,6 +110,12 @@ export type AuthSession<UserAccount = UserAccountData, User = UserData> = {
    * from the access token's `sid` claim; absent for tokens issued before sessions were stored.
    */
   sid?: string;
+  /**
+   * Whether the person has proved control of their email (see `personEmailVerified`). Read from
+   * the store when the session is built (sign-in and refresh), so in an access token it can be
+   * stale until the next refresh.
+   */
+  emailVerified?: boolean;
   updateSessionData?: (
     updatedData: Omit<AuthSession, 'updateSessionData'>
   ) => Promise<{

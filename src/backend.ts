@@ -3,6 +3,7 @@ import type { Shape } from '@_linked/core/shapes/Shape';
 import { UserAccount } from '@_linked/sioc/shapes/UserAccount';
 import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider';
 import { declareCallable, declareInternal } from '@_linked/server-utils/utils/callable';
+import { requireSessionUser } from '@_linked/server-utils/utils/CallContext';
 import session from 'express-session';
 
 import { Auth } from './utils/auth.js';
@@ -16,9 +17,11 @@ import type {
   CreateAccount,
   LinkOAuthIdentityResult,
   OAuthProvider,
+  ResendEmailVerificationResult,
   UserAccountData,
   UserData,
   VerifiedOAuthIdentity,
+  VerifyEmailResult,
 } from './types/auth.js';
 import {
   createAccessToken,
@@ -57,6 +60,13 @@ import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
 import path, { dirname, basename } from 'path';
 import { sendAuthEmail } from './utils/email.js';
+import {
+  clearedVerificationTokenFields,
+  consumeEmailVerificationToken,
+  markEmailVerified,
+  personEmailVerified,
+  verificationTokenFields,
+} from './helpers/emailVerification.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import type { AuthSession } from './types/auth.js';
 
@@ -207,6 +217,37 @@ async function loadAccountWithPerson(
   return (account as unknown as UserAccountData) || null;
 }
 
+/** The stored email of an account, else the one in its session, else ''. */
+async function accountEmail(
+  provider: AuthBackendProvider,
+  account: UserAccountData
+): Promise<string> {
+  try {
+    const stored = await provider.accountShape.select((a) => [a.email]).for({ id: account.id });
+    if (stored?.email) return stored.email;
+  } catch (error) {
+    console.warn('Could not read the email of an account', error);
+  }
+  const sessionEmail: unknown = (account as { email?: unknown }).email;
+  return typeof sessionEmail === 'string' ? sessionEmail : '';
+}
+
+/** The given name of a person, for an email greeting, if it can be read. */
+async function givenNameOf(
+  provider: AuthBackendProvider,
+  personId: string
+): Promise<string | undefined> {
+  try {
+    const person = await provider.userShape
+      .select((u) => u.givenName)
+      .for({ id: personId })
+      .one();
+    return typeof person?.givenName === 'string' && person.givenName ? person.givenName : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The account and/or person that already exist for a WebID. A person can exist without an
  * account in this app (accounts are created on the fly), and it may hold a password.
@@ -254,6 +295,87 @@ async function clearUnsentResetPasswordToken(tokenHash: string) {
     );
   } catch (error) {
     console.error('Could not remove an unsent reset password token', error);
+  }
+}
+
+/**
+ * Remove a verification token whose email was never sent, so no link exists for it. Matched by
+ * the token's hash, so a newer link sent in the meantime is left alone.
+ */
+async function clearUnsentVerificationToken(tokenHash: string) {
+  try {
+    await AuthCredential.update(clearedVerificationTokenFields()).where((cred) =>
+      cred.emailVerificationToken.equals(tokenHash)
+    );
+  } catch (error) {
+    console.error('Could not remove an unsent email verification token', error);
+  }
+}
+
+/**
+ * Email the verification link for `token` (already stored, hashed, on a credential) to `email`.
+ * When the email is not sent, the stored token is removed again.
+ *
+ * @returns false when the email could not be sent
+ */
+async function sendVerificationEmail(
+  email: string,
+  givenName: string | undefined,
+  token: string,
+  tokenHash: string
+): Promise<boolean> {
+  const verifyUrl = `${process.env.SITE_ROOT}/auth/verify-email?token=${token}`;
+  const emailOptions = {
+    to: [
+      {
+        email_address: {
+          address: email,
+          name: email,
+        },
+      },
+    ],
+    subject: `Verify your ${process.env.APP_NAME} email address`,
+    htmlbody: `
+          <table role='presentation' border='0' cellpadding='0' cellspacing='0' class='body' style='border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #fff; width: 100%;' width='100%' bgcolor='#fff'>
+            <tr>
+              <td>
+                <p>Hey${givenName ? ` ${givenName}` : ''} 👋</p>
+                <p>Click the button below to confirm your email address:</p>
+                <a href='${verifyUrl}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Verify Email</a>
+                <p>Cheers,</p>
+                <p>${process.env.APP_NAME} Team</p>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <p style='font-size: 12px; color: #999;'>Alternatively, you can also copy and paste the link into your browser:</p>
+                <a href='${verifyUrl}' target='_blank' style='font-size: 12px;'>${verifyUrl}</a>
+              </td>
+            </tr>
+          </table>
+        `,
+  };
+  const outcome = await sendAuthEmail(emailOptions, { purpose: 'verify', url: verifyUrl });
+  if (outcome === 'failed') {
+    await clearUnsentVerificationToken(tokenHash);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * After an OAuth sign-in reached `personId`: the provider vouches for its email, so when that
+ * email is the person's (it gives their WebID), the person's email counts as verified. A failure
+ * is logged and never fails the sign-in.
+ */
+async function markOAuthEmailVerified(identity: VerifiedOAuthIdentity, personId: string) {
+  if (!identity.email || !identity.emailVerified) return;
+  try {
+    const email = identity.email.trim().toLowerCase();
+    if (emailToWebID(email) !== personId) return;
+    await markEmailVerified(personId, email);
+  } catch (error) {
+    console.error(`${identity.provider} sign-in: could not mark the email verified`, error);
   }
 }
 
@@ -586,7 +708,12 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
 
-    return Auth.login(
+    // The new account is unverified until the link in this email is opened. Only its hash is
+    // stored. Signup does not wait for the email: it works without an email provider.
+    const verificationToken = PasswordHelper.generateToken();
+    const verificationFields = verificationTokenFields(verificationToken);
+
+    const result = await Auth.login(
       this,
       async () => {
         //we're not trying to log in with an existing account, a new one should be created
@@ -618,6 +745,7 @@ export default class AuthBackendProvider extends BackendProvider {
           },
           email: normalizedEmail,
           passwordHash: passwordHash,
+          ...verificationFields,
         }).catch((err) => {
           console.error(`Error creating password for user ${user.id}:`, err);
           throw new Error(`Could not create password for user ${user.id}`);
@@ -644,6 +772,17 @@ export default class AuthBackendProvider extends BackendProvider {
       },
       `createAccount - ${firstName} ${lastName} - ${email}`
     );
+
+    // the sign-in result is the same whether or not the email went out
+    if (!('error' in result)) {
+      await sendVerificationEmail(
+        normalizedEmail,
+        firstName,
+        verificationToken,
+        verificationFields.emailVerificationToken
+      );
+    }
+    return result;
   }
 
   /**
@@ -803,6 +942,13 @@ export default class AuthBackendProvider extends BackendProvider {
         passwordHash: newHashedPassword,
         ...PasswordHelper.clearedResetPasswordTokenFields(),
       }).for(dbPassword);
+    }
+
+    // The reset link was opened from the inbox, which proves the email as well.
+    if (token) {
+      await markEmailVerified(user.id, email).catch((error) =>
+        console.error('Could not mark the email verified after a password reset', error)
+      );
     }
 
     // A new password ends every existing session (other devices, and anyone holding a stolen
@@ -1014,6 +1160,7 @@ export default class AuthBackendProvider extends BackendProvider {
             console.warn(`${provider} sign-in: could not upgrade a legacy identity link`, err)
           );
         }
+        await markOAuthEmailVerified(identity, account.accountOf.id);
         return Auth.onSigninSuccessful(this, account.accountOf as UserData, account);
       }
       // a link to an account that no longer exists: fall through to the email
@@ -1050,6 +1197,7 @@ export default class AuthBackendProvider extends BackendProvider {
       const account =
         existing.account ?? ((await this.getOrCreateAccount(person)) as UserAccountData);
       await OAuthIdentityStore.createLink(identity, account.id);
+      await markOAuthEmailVerified(identity, existing.personId);
       return Auth.onSigninSuccessful(
         this,
         (existing.account?.accountOf as UserData) ?? person,
@@ -1074,12 +1222,14 @@ export default class AuthBackendProvider extends BackendProvider {
             throw new Error(`Could not create ${provider} user ${webID}`);
           });
 
-        // A credential without a password hash: it carries the email for password reset.
+        // A credential without a password hash: it carries the email for password reset. The
+        // provider verified that email.
         await AuthCredential.create({
           credentialOf: {
             id: user.id,
           },
           email: email,
+          emailVerifiedAt: new Date(),
         }).catch((err) => {
           console.error(`Error creating credential for ${provider} user ${user.id}:`, err);
           throw new Error(`Could not create credential for ${provider} user ${user.id}`);
@@ -1109,6 +1259,87 @@ export default class AuthBackendProvider extends BackendProvider {
       },
       `${provider} OAuth`
     );
+  }
+
+  /**
+   * Verify the email of an account with the token from a link sent by `createAccount` or
+   * `resendEmailVerification`. The token works once, and only until it expires
+   * (`AUTH_EMAIL_VERIFICATION_TTL`). Needs no session and signs no one in: a signed-in client
+   * refreshes its session afterwards to see `emailVerified`.
+   *
+   * @param token - The token from the link
+   */
+  async verifyEmail(token: string): Promise<VerifyEmailResult> {
+    const limited = await limitRequest('emailVerify', this.request, this.response);
+    if (limited) return limited;
+
+    const person = await consumeEmailVerificationToken(token);
+    if (!person?.id) {
+      return {
+        error: 'This verification link is invalid or has expired.',
+        action: 'resend_verification',
+      };
+    }
+    await markEmailVerified(person.id);
+    return { verified: true };
+  }
+
+  /**
+   * Send the signed-in account a new email verification link, to the account's email. The new
+   * link replaces any earlier one. An account that is already verified gets no email
+   * (`{verified: true}`), and one without an email (a temporary account) gets `action:
+   * 'no_email'`.
+   */
+  async resendEmailVerification(): Promise<ResendEmailVerificationResult> {
+    const account: UserAccountData = requireSessionUser();
+    const limited = await limitRequest(
+      'emailVerificationRequest',
+      this.request,
+      this.response,
+      account.id
+    );
+    if (limited) return limited;
+
+    const personId: string | undefined =
+      this.request?.linkedAuth?.user?.id ?? account.accountOf?.id;
+    if (!personId) {
+      throw new Error('Cannot send a verification email: the session has no person');
+    }
+    if (await personEmailVerified(personId)) {
+      return { verified: true };
+    }
+
+    const email = (await accountEmail(this, account)).trim().toLowerCase();
+    if (!email) {
+      return { error: 'This account has no email address.', action: 'no_email' };
+    }
+
+    const token = PasswordHelper.generateToken();
+    const fields = verificationTokenFields(token);
+    const credential = preferCredentialWithPassword(
+      await AuthCredential.select((cred) => [cred.passwordHash]).where((cred) =>
+        cred.credentialOf.equals({ id: personId })
+      )
+    );
+    if (credential) {
+      await AuthCredential.update(fields).for({ id: credential.id });
+    } else {
+      await AuthCredential.create({ credentialOf: { id: personId }, email, ...fields });
+    }
+
+    const sent = await sendVerificationEmail(
+      email,
+      await givenNameOf(this, personId),
+      token,
+      fields.emailVerificationToken
+    );
+    if (!sent) {
+      return {
+        error: "Sorry, we couldn't send the email, please try again later",
+        action: 'email_failed',
+      };
+    }
+    return { sent: true };
   }
 
   /**
@@ -1574,9 +1805,11 @@ declareCallable(AuthBackendProvider, {
   signinDev: 'public',
   sendResetPasswordLink: 'public',
   resetPassword: 'public',
+  verifyEmail: 'public',
   validateToken: 'public',
   signout: 'public',
   linkOAuthIdentity: 'user',
+  resendEmailVerification: 'user',
   removeAccount: 'user',
 });
 

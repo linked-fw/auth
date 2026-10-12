@@ -4,10 +4,12 @@ import { QResult } from '@_linked/core/queries/SelectQuery';
 import { AuthCredential } from '../shapes/AuthCredential.js';
 
 /** The `AuthCredential` property that holds the hash of a single-use token. */
-export type CredentialTokenField = 'forgotPasswordToken';
+export type CredentialTokenField = 'forgotPasswordToken' | 'emailVerificationToken';
 
 /** The `AuthCredential` property that holds when that token stops working. */
-export type CredentialTokenExpiryField = 'forgotPasswordTokenExpiresAt';
+export type CredentialTokenExpiryField =
+  | 'forgotPasswordTokenExpiresAt'
+  | 'emailVerificationTokenExpiresAt';
 
 /** A stored value as a Date (stores may return dateTime literals as strings). */
 function toDate(value: unknown): Date | undefined {

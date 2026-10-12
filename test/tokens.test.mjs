@@ -31,6 +31,7 @@ const jwtUtils = await import(new URL('utils/jwt.js', libDir));
 const { Auth } = await import(new URL('utils/auth.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const sessions = await import(new URL('utils/sessions.js', libDir)).catch(() => null);
+const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
 
 const PERSON = { id: 'https://id.test/person/ada' };
 const ACCOUNT = { id: 'https://app.test/account/ada', email: 'ada@example.test', accountOf: PERSON };
@@ -353,6 +354,53 @@ test('updateSessionData keeps the session and the client refresh token', async (
   assert.equal(claims.sid, jwtUtils.verifyAccessToken(first.accessToken).sid);
   assert.equal(updated.refreshToken, first.refreshToken);
   assert.equal((await refresh(first.refreshToken)).error, undefined, 'still refreshable');
+});
+
+// ---------------------------------------------------------------------------------------------
+// emailVerified in the session
+// ---------------------------------------------------------------------------------------------
+/** Make the person's credentials, as `AuthCredential.select(...).where(...)` returns them. */
+function credentialsAre(t, rowsOrError) {
+  t.mock.method(AuthCredential, 'select', () => ({
+    where: () =>
+      rowsOrError instanceof Error ? Promise.reject(rowsOrError) : Promise.resolve(rowsOrError),
+  }));
+}
+
+test('buildAuthSession reports emailVerified from the credentials', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const provider = newProvider();
+  credentialsAre(t, [{ id: 'c1' }, { id: 'c2', emailVerifiedAt: new Date().toISOString() }]);
+  assert.equal((await Auth.buildAuthSession(provider, PERSON, ACCOUNT)).emailVerified, true);
+  credentialsAre(t, [{ id: 'c1' }]);
+  assert.equal((await Auth.buildAuthSession(provider, PERSON, ACCOUNT)).emailVerified, false);
+  credentialsAre(t, new Error('store down'));
+  assert.equal((await Auth.buildAuthSession(provider, PERSON, ACCOUNT)).emailVerified, false);
+});
+
+test('emailVerified reaches the access token, and updateSessionData keeps it', async (t) => {
+  credentialsAre(t, [{ id: 'c1', emailVerifiedAt: new Date().toISOString() }]);
+  const first = await signin();
+  assert.equal(first.auth.emailVerified, true);
+  assert.equal(jwtUtils.verifyAccessToken(first.accessToken).emailVerified, true);
+
+  const request = requestWith({ bearer: first.accessToken });
+  await newProvider(request).validateRequestToken(request);
+  assert.equal(request.linkedAuth.emailVerified, true);
+  const updated = await request.linkedAuth.updateSessionData({ user: { givenName: 'Ada L.' } });
+  assert.equal(updated.auth.emailVerified, true);
+  assert.equal(jwtUtils.verifyAccessToken(updated.accessToken).emailVerified, true);
+  assert.equal(request.linkedAuth.emailVerified, true);
+});
+
+test('a refresh reads emailVerified again from the store', async (t) => {
+  credentialsAre(t, []);
+  const first = await signin();
+  assert.equal(first.auth.emailVerified, false);
+  credentialsAre(t, [{ id: 'c1', emailVerifiedAt: new Date().toISOString() }]);
+  const refreshed = await refresh(first.refreshToken);
+  assert.equal(refreshed.auth.emailVerified, true);
+  assert.equal(jwtUtils.verifyAccessToken(refreshed.accessToken).emailVerified, true);
 });
 
 // ---------------------------------------------------------------------------------------------

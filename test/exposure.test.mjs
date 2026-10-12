@@ -60,9 +60,11 @@ const SURFACE = {
       signinDev: 'public',
       sendResetPasswordLink: 'public',
       resetPassword: 'public',
+      verifyEmail: 'public',
       validateToken: 'public',
       signout: 'public',
       linkOAuthIdentity: 'user',
+      resendEmailVerification: 'user',
       removeAccount: 'user',
     },
     internal: [

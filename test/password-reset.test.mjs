@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { serving } from './serving.mjs';
+import { fakeCredentialTable } from './fakeStore.mjs';
 
 process.env.NODE_ENV = 'test';
 process.env.SITE_ROOT = 'https://app.test';
@@ -55,93 +56,6 @@ class TestProvider extends AuthBackendProvider {
   }
 }
 
-/**
- * An in-memory stand-in for the `AuthCredential` query API the provider uses:
- * `select(...).where(...)/.for(...).one()` (or the query awaited for every match), `create(data)`,
- * `update(data).for(node)` and `update(data).where(...)`. A `null` in an update unsets the
- * property, as it does for a real store. An update with a `where` matches and writes in one step,
- * like the single SPARQL update a real store runs it as.
- */
-function fakeCredentialTable() {
-  const rows = new Map();
-  // every update, as [credential id, the data written]
-  const updates = [];
-  let nextId = 1;
-  const copy = (row) => (row ? structuredClone(row) : null);
-  const matches = (row, conditions) =>
-    conditions.every(([prop, value]) =>
-      value && typeof value === 'object' ? row[prop]?.id === value.id : row[prop] === value
-    );
-  // each `prop.equals(value)` a where callback makes, as [prop, value]
-  const conditionsOf = (fn) => {
-    const found = [];
-    fn(
-      new Proxy(
-        {},
-        { get: (_t, prop) => ({ equals: (value) => (found.push([prop, value]), true) }) }
-      )
-    );
-    return found;
-  };
-  const query = (conditions = []) => ({
-    where(fn) {
-      return query([...conditions, ...conditionsOf(fn)]);
-    },
-    for(node) {
-      return query([...conditions, ['id', typeof node === 'string' ? node : node.id]]);
-    },
-    async one() {
-      return copy([...rows.values()].find((row) => matches(row, conditions)));
-    },
-    // awaiting the query itself gives every match, like the real query builder
-    then(resolve, reject) {
-      return Promise.resolve(
-        [...rows.values()].filter((row) => matches(row, conditions)).map(copy)
-      ).then(resolve, reject);
-    },
-  });
-  const write = (row, data) => {
-    for (const [key, value] of Object.entries(data)) {
-      if (value === null) delete row[key];
-      else if (value !== undefined) row[key] = value instanceof Date ? value.toISOString() : value;
-    }
-  };
-  return {
-    rows,
-    updates,
-    insert(data) {
-      const row = { id: `https://app.test/credential/${nextId++}` };
-      write(row, data);
-      rows.set(row.id, row);
-      return copy(row);
-    },
-    install() {
-      mock.method(AuthCredential, 'select', () => query());
-      mock.method(AuthCredential, 'create', async (data) => this.insert(data));
-      mock.method(AuthCredential, 'update', (data) => ({
-        for: async (node) => {
-          const id = typeof node === 'string' ? node : node.id;
-          updates.push([id, { ...data }]);
-          const row = rows.get(id);
-          if (row) write(row, data);
-          return copy(row);
-        },
-        where: (fn) => {
-          const conditions = conditionsOf(fn);
-          // resolves void, like the real where-mode update: it never says what it matched
-          return Promise.resolve().then(() => {
-            for (const row of rows.values()) {
-              if (!matches(row, conditions)) continue;
-              updates.push([row.id, { ...data }]);
-              write(row, data);
-            }
-          });
-        },
-      }));
-    },
-  };
-}
-
 let credentials;
 let sentEmails;
 let provider;
@@ -151,7 +65,7 @@ beforeEach(() => {
   // every test requests links for the same email; each starts with a fresh limit budget
   resetRateLimits();
   credentials = fakeCredentialTable();
-  credentials.install();
+  credentials.install(AuthCredential);
   sentEmails = [];
   mock.method(LinkedEmail, 'send', async (options) => {
     sentEmails.push(options);

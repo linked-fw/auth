@@ -20,6 +20,7 @@ const { default: AuthBackendProvider } = await import(new URL('backend.js', libD
 const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
 const { IdentityToken } = await import(new URL('shapes/IdentityToken.js', libDir));
 const { default: PasswordHelper } = await import(new URL('helpers/password.js', libDir));
+const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
 
@@ -104,4 +105,33 @@ test('removeAccount deletes every credential and identity token of the account',
   assert.ok((await provider().signinWithPassword(email, 'leftover-Passw0rd!')).error);
   assert.ok((await provider().signinWithPassword(email, PASSWORD_1)).error);
   assert.equal((await provider().signinWithPassword(email, PASSWORD_2)).error, undefined);
+});
+
+test('signup emails a verification link; verifying it shows in the next refresh', async () => {
+  const sent = [];
+  const send = mock.method(LinkedEmail, 'send', async (options) => sent.push(options));
+  try {
+    const email = newEmail();
+    const created = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_1 });
+    assert.equal(created.error, undefined, created.error);
+    assert.equal(created.auth.emailVerified, false);
+    assert.equal(sent.length, 1, 'a verification email was sent');
+    const token = decodeURIComponent(sent[0].htmlbody.match(/verify-email\?token=([^'"&\s]+)/)[1]);
+
+    assert.deepEqual(await provider().verifyEmail(token), { verified: true });
+    assert.equal((await provider().verifyEmail(token)).action, 'resend_verification', 'single-use');
+
+    const refreshed = await provider().validateToken(created.refreshToken);
+    assert.equal(refreshed.error, undefined, refreshed.error);
+    assert.equal(refreshed.auth.emailVerified, true);
+    const rows = await AuthCredential.select((c) => [
+      c.emailVerificationToken,
+      c.emailVerifiedAt,
+    ]).where((c) => c.credentialOf.equals({ id: created.auth.user.id }));
+    assert.equal(rows.length, 1);
+    assert.ok(rows[0].emailVerifiedAt, 'emailVerifiedAt is stored');
+    assert.ok(!rows[0].emailVerificationToken, 'no verification token left');
+  } finally {
+    send.mock.restore();
+  }
 });
