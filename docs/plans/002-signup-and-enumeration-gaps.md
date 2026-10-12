@@ -4,7 +4,7 @@ summary: >
   account exists. createAccount refuses any existing account for the email and validates the
   password on the server. Signup gets email verification. Request reads in checkSignin,
   removeAccount and setAuthentication are guarded, and removeAccount re-authenticates the user.
-status: Plan
+status: Tasks
 source: docs/backlog/003-remaining-rpc-and-signup-gaps.md
 ---
 
@@ -241,7 +241,7 @@ about a person's email (reset token, email, password hash) on the credential.
 - To learn who won, the consume writes a fresh random marker in the same update and reads it back:
   1. `N = randomBytes(16)`
   2. `await AuthCredential.update({forgotPasswordToken: null, forgotPasswordTokenExpiresAt: null, consumeMarker: N}).where(c => c.forgotPasswordToken.equals(H))`
-  3. `const row = await AuthCredential.select(c => [c.credentialOf, c.forgotPasswordTokenExpiresAt?…]).where(c => c.consumeMarker.equals(N)).one()`
+  3. `const row = await AuthCredential.select(c => [c.credentialOf]).where(c => c.consumeMarker.equals(N)).one()`
      - Only the request whose update matched finds its own `N`. A loser matches nothing and
        writes nothing.
   4. The winner clears `consumeMarker`.
@@ -567,3 +567,225 @@ The app adds a route at `/auth/verify-email`, which the readme documents.
 - **Server-side password length is enforced on signup only (D2).** A token reset or a password
   change still accepts any length on the server. The client forms enforce 6. Should the reset path
   share the check? It is a small addition, but not decided.
+
+## Phases
+
+Every phase ends with `npx linked build && npm test` (unit, `lib/esm`) green. Integration runs
+(`npm run test:integration`) need Fuseki on `:3030` and are called out where required. One commit
+per phase.
+
+### Phase 1 — Request guards, `signinDev` sub, enumeration answers, signup checks
+
+Tasks:
+
+- `src/backend.ts`:
+  - `checkSignin` gets `?.`.
+  - `signinDev` refuses a missing `sub`.
+  - `signinWithPassword` returns `INVALID_CREDENTIALS_MESSAGE` for all three failures, with a
+    dummy-hash compare on the paths without a credential.
+  - `createAccount`:
+    - checks the password (`MIN_PASSWORD_LENGTH`) before any lookup
+    - checks for an existing Person, UserAccount or AuthCredential
+    - normalizes the email it stores
+    - writes `email` on the new credential
+- `src/helpers/password.ts`: `MIN_PASSWORD_LENGTH`, `INVALID_CREDENTIALS_MESSAGE`, and
+  `compareWithDummyHash(plain)`, whose hash is computed lazily once.
+- `src/utils/auth.ts`: `setAuthentication` and `updateSessionData` work without a request.
+- `readme.md` line 38: the migration note no longer quotes the old message.
+
+Validation (new tests):
+
+- `test/signup.test.mjs` (new; in-memory fakes for userShape, accountShape and AuthCredential,
+  `Auth.login` stubbed):
+  - refuses when the Person exists
+  - refuses when only a UserAccount with the email exists (also mixed case)
+  - refuses when only an AuthCredential with the email exists
+  - refuses a missing or short password with `invalid_password` and creates nothing
+  - creates the account when nothing exists, and the credential carries the normalized email
+- `test/password.test.mjs` or a new `test/enumeration.test.mjs`: for an unknown email, an
+  account with no credential, and a wrong password, the result is the same
+  `{error: INVALID_CREDENTIALS_MESSAGE}`, and the unknown-email path calls `bcrypt.compare` once.
+- `test/signin-dev.test.mjs`: a token without `sub` → `{error: 'Invalid token'}`, and nothing is
+  written.
+- `test/session-lifetime.test.mjs` or a new `test/request-guards.test.mjs`:
+  - `Auth.setAuthentication(undefined, auth)` returns linkedAuth and does not throw
+  - `checkSignin` with no request returns `undefined`
+
+### Phase 2 — Mail failure handling (D4) and atomic reset consume (D5)
+
+Tasks:
+
+- Ontology and shape: `consumeMarker`.
+- `src/helpers/credentialToken.ts`: `consumeCredentialToken`.
+  - **First** verify against Fuseki that `update({x: null, …}).where(cond)` unsets in where mode.
+  - If it does not, implement the `rawQuery` fallback and record the deviation.
+- `PasswordHelper.consumeResetPasswordToken` uses it. `validateResetPasswordToken` is unchanged.
+- `src/utils/email.ts`: `sendAuthEmail`.
+- `sendResetPasswordLink`:
+  - returns `true` for every well-formed email
+  - goes through `sendAuthEmail`
+  - clears the token on `'failed'`
+  - the "person not found" branch also returns `true`
+- Remove ZeptoMail from `backend.ts` and `package.json` (`npm install` from the CN root
+  afterwards, not inside the checkout; see CN CLAUDE.md).
+- `ForgotPasswordForm.tsx`: the uniform text
+  `t('resetPassword.linkSent', "If an account exists for this email, we've sent a link.")`.
+
+Validation:
+
+- Extend `fakeCredentialTable` in `test/password-reset.test.mjs` with `update().where()`.
+- New cases:
+  - two concurrent `resetPassword(token)` calls with the same token: exactly one succeeds
+  - unknown email → `true`, and no email is sent
+  - `LinkedEmail.send` throwing synchronously → `true`, and the stored token is cleared
+  - `DEV_AUTH=true` with no provider: the link is logged, the token is kept, and no send is
+    attempted
+- `test/log-hygiene.test.mjs`: a failed send without DEV_AUTH logs no token and no email.
+- Integration (Fuseki): a case in `test/integration/sessions.fuseki.test.mjs`. Two parallel
+  consumes of one real token result in one success, and `consumeMarker` is gone afterwards.
+
+### Phase 3 — Email verification backend
+
+Tasks:
+
+- Ontology and shape: `emailVerifiedAt`, `emailVerificationToken`,
+  `emailVerificationTokenExpiresAt`.
+- `src/helpers/emailVerification.ts`: TTL, token fields, `markEmailVerified`,
+  `personEmailVerified`.
+- `src/types/auth.ts`: `AuthSession.emailVerified`, `VerifyEmailResult`,
+  `ResendEmailVerificationResult`.
+- `src/utils/auth.ts`: `buildAuthSession` sets `emailVerified`, and `updateSessionData` carries
+  it.
+- `src/utils/rateLimit.ts`: `emailVerificationRequest` and `emailVerify`.
+- `src/backend.ts`:
+  - `createAccount` writes the verification token fields on the new credential, then sends
+    through `sendAuthEmail` after `Auth.login`. On a failure it clears the token, and the
+    sign-in result is unchanged.
+  - New `verifyEmail` and `resendEmailVerification`.
+  - `resetPassword` with a token calls `markEmailVerified`.
+  - `signinOAuth`: all three paths mark the email verified when the verified email maps to the
+    person.
+  - Declarations: `verifyEmail: 'public'`, `resendEmailVerification: 'user'`.
+
+Validation:
+
+- `test/email-verification.test.mjs` (new; fake credential table):
+  - the token is stored hashed and expires
+  - `verifyEmail` with a valid token sets `emailVerifiedAt` and works only once (concurrent
+    calls too)
+  - expired or unknown token → the error with `action: 'resend_verification'`
+  - resend: no email → `no_email`, already verified → `{verified: true}`, send failure →
+    `email_failed` with the token cleared
+  - reset-by-token marks verified
+- `test/oauth.test.mjs`: a new OAuth user's credential has `emailVerifiedAt`, and a linked sign-in
+  whose email maps to the person marks it.
+- `test/rate-limit.test.mjs`: the two new rules (3 resends an hour per account).
+- `test/exposure.test.mjs`: `SURFACE` gets the two methods.
+- `test/session-lifetime.test.mjs` or `tokens.test.mjs`: `buildAuthSession` reports
+  `emailVerified`, `updateSessionData` keeps it, and a store error → `false`.
+- Integration (Fuseki), `accounts.fuseki.test.mjs`: create, then verify, then refresh →
+  `auth.emailVerified === true`.
+
+### Phase 4 — `removeAccount` proof and `getReauthenticationMethods`
+
+Tasks:
+
+- `src/helpers/apple.ts`: return `iat`.
+- `VerifiedOAuthIdentity.issuedAt`, filled for both providers.
+- `src/types/auth.ts`: `ReauthenticationMethod`, `RemoveAccountProof`, `RemoveAccountResult`.
+- `src/utils/rateLimit.ts`: `reauthenticate`.
+- `src/backend.ts`:
+  - Module-level `reauthenticationMethods(accountId, personId)` and `verifyReauthentication(…)`,
+    with `REAUTH_MAX_TOKEN_AGE`.
+  - `getReauthenticationMethods` (`'user'`).
+  - `removeAccount(proof?)` uses `requireSessionUser()`, checks the proof (rate-limited when a
+    proof is checked), and otherwise deletes as today.
+
+Validation:
+
+- `test/remove-account.test.mjs` (new; `serving()`, stubbed `OAuthIdentityStore`, helpers and
+  deletes):
+  - no proof on a password account → `reauthenticate` with `['password']`
+  - wrong password → `reauthenticate`
+  - right password → deletes and returns `true`
+  - OAuth-only account: no proof → `['google']` (its linked providers)
+  - a valid Google token whose subject is linked to *another* account → refused
+  - linked subject → `true`
+  - token older than 10 minutes → refused
+  - an account with no credential and no links → `true` without proof
+  - no session → 401
+- `test/exposure.test.mjs`: `getReauthenticationMethods: 'user'`, and the subclass test still
+  passes.
+- Integration (Fuseki): update the `removeAccount()` calls in `accounts.fuseki.test.mjs` and
+  `sessions.fuseki.test.mjs` to pass `{password}`, and add one refused-without-proof case.
+
+### Phase 5 — Client: `useAuth`, `RemoveAccountButton`, forms, `VerifyEmailCallback`
+
+Tasks:
+
+- `src/hooks/useAuth.tsx`: `emailVerified`, `verifyEmail` (refreshes when signed in),
+  `resendEmailVerification`, `getReauthenticationMethods`, and `removeAccount(proof?)` with the
+  types from the Contracts section.
+- `src/components/RemoveAccountButton.tsx`: the proof UI described in Contracts, plus the
+  `getOAuthSource` prop.
+- `src/components/VerifyEmailCallback.tsx` (new).
+- `CreateAccountForm.tsx`: shows the server's `invalid_password` text.
+- Export the new component and types where the package exposes components.
+
+Validation:
+
+- `test/useAuth.test.mjs`:
+  - `emailVerified` reflects `auth.emailVerified`
+  - `verifyEmail` success triggers one forced `validateToken`
+  - `removeAccount(proof)` sends the proof as its argument
+- If the existing test harness can render components, add a render test for
+  `RemoveAccountButton`. Otherwise do a manual check in CN (localized):
+  - a password account sees the password field
+  - an OAuth-only account sees "Confirm with Google"
+  - a wrong password keeps the dialog open with the error
+- `npm run typecheck:gate` in CN, plus `npx linked build-all`, so that CN still compiles
+  against the changed `removeAccount` and `useAuth` types.
+
+### Phase 6 — Readme, upgrade notes, changeset draft
+
+Tasks:
+
+- `readme.md`:
+  - the outline in Plan › Upgrade/readme
+  - RPC table: +3 methods
+  - rate-limit table: +3 rules, with env names such as
+    `AUTH_RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_ACCOUNT`
+  - Email configuration
+  - Setup Verify Email route
+  - the account-deletion section, with `getOAuthSource` examples
+- Draft the changeset text here. It is created with `npx changeset` in wrapup, as a minor:
+
+  > Email verification (soft flag): signup sends a verification link; `auth.emailVerified` /
+  > `useAuth().emailVerified`; new `verifyEmail` (public) and `resendEmailVerification` (user).
+  > A completed password reset or a verified Google/Apple sign-in also verifies the email.
+  > Sign-in and password reset give the same answer whether or not an account exists.
+  > `createAccount` refuses any existing person, account or credential for the email and checks
+  > the password length on the server. Reset links are single-use atomically. Without an email
+  > provider, sends fail safely (the link is logged with `DEV_AUTH`). ZeptoMail dependency removed.
+  > **Upgrade:** `removeAccount()` now needs proof for accounts with a password or OAuth link —
+  > `removeAccount({password})` or `removeAccount({provider, source})`; see
+  > `getReauthenticationMethods()`. `RemoveAccountButton` takes `getOAuthSource` for OAuth-only
+  > accounts. Apple's redirect flow can't supply the proof; use popup mode.
+
+Validation: the readme tables match `RATE_LIMIT_DEFAULTS` and `declareCallable` (compare them by
+eye against `exposure.test.mjs` `SURFACE`). A full `npm test` and `npm run test:integration` with
+Fuseki pass.
+
+### Dependencies and parallelization
+
+```
+P1 ──► P2 ──► P3 ──► P5 ──► P6
+          └──► P4 ──┘
+```
+
+- P2 must come before P3 and P4. It adds `consumeMarker`, `credentialToken.ts` and
+  `sendAuthEmail`, which P3 reuses, and it extends the fake credential table.
+- P3 and P4 both edit `backend.ts`, `types/auth.ts`, `rateLimit.ts` and `exposure.test.mjs`. They
+  are logically independent, but should run one after the other (P3, then P4) to avoid conflicts.
+  A parallel run needs a careful merge of the rule union and the `SURFACE` entries.
+- P5 needs the P3 and P4 types. P6 is last.
