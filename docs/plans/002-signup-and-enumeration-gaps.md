@@ -987,3 +987,159 @@ P1 ──► P2 ──► P3 ──► P5 ──► P6
   are logically independent, but should run one after the other (P3, then P4) to avoid conflicts.
   A parallel run needs a careful merge of the rule union and the `SURFACE` entries.
 - P5 needs the P3 and P4 types. P6 is last.
+
+## Review
+
+Three parallel reviews of the branch: backend security, client and docs, tests, cleanup and
+architecture.
+
+**Validation run for the review (all green):**
+
+- auth unit tests: 295/295
+- auth Fuseki integration tests: 29/29
+- CN `src/backend/auth` vitest: 132/132, with the CN branch `chore/auth-verification-exposure`
+  (`e534f841`)
+
+**Medium and higher (fixed in iteration 1):**
+
+1. *High.* `removeAccount` changed from returning a boolean to returning `RemoveAccountResult`.
+   Called with no proof, it now returns `{error, action:'reauthenticate'}`, and that object is
+   truthy. An app using the old `if (res) signout()` pattern signs the user out as if the account
+   were deleted, and nothing was deleted. The plan labels the release minor.
+2. `resendEmailVerification` answering `{verified:true}` does not refresh the session, so
+   `emailVerified` stays stale.
+3. CN `src/pages/CreateAccount.tsx` checks no password length and has its error branch commented
+   out. The server's new `invalid_password` answer fails silently.
+4. `firstName` goes into the verification and reset email HTML unescaped. Signup sends to any
+   address typed in, so an attacker can send phishing through the app's real sender.
+5. `package-lock.json` keeps 11 entries nothing depends on: `axios` and its dependencies, left
+   when ZeptoMail was removed.
+6. `backend.ts:795` says signup does not wait for the email, but it awaits it.
+7. Duplicated token logic: `hashToken` appears twice, `toDate` three times, and there are two
+   "clear unsent token" copies. The reset and verification consumes share one `consumeMarker`, so
+   opening both links at once can waste one (a low finding, fixed by the same work).
+8. Docs:
+   - Readme: no timing caveat on reset. The custom-UI example hard-codes `google` where it should
+     use `methods[0]`. "Dev accounts always unverified" should say "normally".
+   - CN arch-08 does not mention the soft `emailVerified` flag, dev links going to the log, or
+     the deletion proof.
+9. The test fake returns whole rows whatever is selected, so expiry handling is only tested
+   against the fake.
+
+**Low (left for the pause):**
+
+- `verifyEmail` uses up the token before marking the email verified, with no catch.
+- `Auth.login` logs the email on signup. This predates the branch.
+- Accounts whose only link is Facebook or a WebID delete with just a session; not documented.
+- Old phase labels in comments (predate the branch).
+- Unused exported constants.
+- `REAUTH_MAX_TOKEN_AGE` is exported from the `backend.ts` barrel (arch-10).
+- The person-id expression is repeated three times.
+- The two email templates are duplicated.
+- No Apple case in the `removeAccount` tests, and no test for the button when the methods call
+  fails.
+- `RemoveAccountButton`: a provider failure shows no message, server errors are untranslated, the
+  password input lacks `aria-invalid`, and the button offers the password only on a password plus
+  Google account.
+- `VerifyEmailCallback`'s once-only guard is not keyed on the token.
+
+## Iteration 1 — Ideation
+
+The decisions below are made in automatic mode by priority: maintainability first, then
+scalability, then performance.
+
+### Finding 1 of 9: release bump
+
+- Option A: release as major (4.0.0).
+- Option B: keep it minor and make `removeAccount()` with no proof return a falsy value.
+  - B breaks the package's `{error, action}` convention.
+  - B still changes behaviour, so it is not really minor.
+- Chosen: A, a major release. The changeset and readme open with "a truthy result no longer means
+  deleted; compare `=== true`". The changeset itself is made in wrapup, so this can still be
+  changed.
+
+### Finding 2 of 9: stale `emailVerified` after resend
+
+- On `{verified:true}`, the useAuth `resendEmailVerification` runs the single-flight refresh
+  before it returns.
+
+### Finding 3 of 9: CN signup feedback
+
+- CN's `CreateAccount.tsx` checks for at least `MIN_PASSWORD_LENGTH` (6) characters and shows the
+  server error.
+- This goes on CN branch `chore/auth-verification-exposure`, together with the exposure entries
+  and arch-08.
+
+### Finding 4 of 9: email HTML injection
+
+- A small `escapeHtml` in `utils/email.ts`.
+- Every value interpolated into either template is escaped.
+
+### Finding 5 of 9: lockfile
+
+- Regenerate it with `npm install --package-lock-only` in a temporary clean clone of the branch.
+  Never run `npm install` inside the localized checkout.
+- Copy back only the lockfile.
+
+### Finding 6 of 9: comment versus code
+
+- Keep the `await`, so tests stay deterministic; signup latency is the lowest priority.
+- Fix the comment.
+
+### Finding 7 of 9: token logic
+
+- `credentialToken.ts` owns one `TOKEN_KINDS` table: `{tokenField, expiresField, markerField,
+  ttl}` per kind.
+- It also owns `hashToken`, `toDate` and `clearUnsentToken(kind, hash)`.
+- `password.ts`, `emailVerification.ts` and `backend.ts` call it, which removes their copies.
+- A separate marker field per kind fixes the cross-kind race.
+
+### Finding 8 of 9: docs
+
+- The readme fixes listed in the review.
+- CN arch-08 additions in §CN user accounts, §Dev-mode identity and §Session management.
+
+### Finding 9 of 9: expiry tested on the fake only
+
+- Fuseki integration cases: an expired reset token and an expired verification token are refused
+  and used up.
+
+## Iteration 1 — Plan
+
+- **auth, `src/helpers/credentialToken.ts`:** the `TOKEN_KINDS` table and the shared helpers.
+- **auth, ontology and `AuthCredential` shape:** one marker property per kind, replacing the
+  shared `consumeMarker`.
+- **auth, `src/helpers/password.ts` and `src/utils/emailVerification.ts`:** thin wrappers.
+- **auth, `src/backend.ts`:** `clearUnsentToken(kind, …)`, the corrected comment, and escaped
+  templates.
+- **auth, `src/utils/email.ts`:** `escapeHtml`.
+- **auth, `src/hooks/useAuth.tsx`:** refresh the session on `{verified:true}`.
+- **auth, readme:** the 4.0 upgrade heading and truthy warning, the timing caveat, `methods[0]`,
+  and "normally".
+- **auth, plan:** the changeset text becomes major.
+- **auth, `package-lock.json`:** regenerated.
+- **auth, `test/integration`:** the expired-token cases.
+- **auth, unit tests:** an escape test for both templates, a cross-kind marker test, and a test
+  that resend refreshes the session.
+- **CN, branch `chore/auth-verification-exposure`:** `src/pages/CreateAccount.tsx` and
+  `docs/architecture/08-identity-and-auth.md`.
+
+## Iteration 1 — Phases
+
+### Phase 7: Token consolidation and email escaping (auth)
+
+- Findings 4, 6 and 7: `TOKEN_KINDS`, a marker per kind, `escapeHtml`, and the corrected comment.
+- Validation:
+  - `npx linked build && npm test` is green, including the new escape test and the cross-kind
+    marker test.
+  - `npm run test:integration` is green, including the new expired-token cases (Finding 9).
+
+### Phase 8: Client, docs, lockfile (auth) and CN follow-ups
+
+- Findings 1, 2, 3, 5 and 8.
+- Validation:
+  - auth `npm test` is green, including the new resend-refresh test.
+  - `npm ls` is clean, and a walk of the lockfile finds no unreachable entries.
+  - CN `npm run typecheck:gate` and the CN `src/backend/auth` vitest pass.
+
+Phase 8 depends on phase 7 because both edit the readme and the plan.
