@@ -44,6 +44,11 @@ const server = http.createServer((req, res) => {
       emailVerified = true;
       return send({ verified: true });
     }
+    if (req.url.endsWith('/resendEmailVerification')) {
+      // verified elsewhere (another tab, another device): the session here is stale
+      emailVerified = true;
+      return send({ verified: true });
+    }
     if (req.url.endsWith('/removeAccount')) return send(true);
     if (req.url.endsWith('/signinWithPassword')) return send({ auth: authFor(), accessToken: token() });
     if (req.url.endsWith('/signinOAuth')) {
@@ -166,6 +171,21 @@ test('verifyEmail success, signed in, refreshes the session once (forced)', asyn
   const refreshes = callsTo('validateToken');
   assert.equal(refreshes.length, 1, 'one validateToken');
   assert.ok(refreshes[0].body.includes('forceRefresh'), 'a forced refresh');
+  assert.equal(current.emailVerified, true);
+});
+
+test('resendEmailVerification answering verified, signed in, refreshes the session once', async () => {
+  emailVerified = false;
+  await signIn();
+  assert.equal(current.emailVerified, false);
+  calls.length = 0;
+  let result;
+  await act(async () => {
+    result = await current.resendEmailVerification();
+  });
+  assert.deepEqual(result, { verified: true });
+  assert.equal(callsTo('resendEmailVerification').length, 1);
+  assert.equal(callsTo('validateToken').length, 1, 'one validateToken');
   assert.equal(current.emailVerified, true);
 });
 

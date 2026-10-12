@@ -589,12 +589,23 @@ function useProvideAuth(signinRoute: string = '') {
     return response;
   };
 
+  /**
+   * Send a new verification link. When the server answers `{verified:true}` (the email was
+   * verified elsewhere, e.g. in another tab), the session is refreshed the same way as in
+   * `verifyEmail`, so `emailVerified` turns true here too.
+   */
   const resendEmailVerification = async (): Promise<ResendEmailVerificationResult> => {
     const response: ResendEmailVerificationResult | null = await Server.call(
       packageName,
       'resendEmailVerification'
     );
-    return response || { error: "Sorry, we couldn't send the email, please try again later" };
+    if (!response) {
+      return { error: "Sorry, we couldn't send the email, please try again later" };
+    }
+    if ('verified' in response && response.verified === true && userAccount) {
+      await refreshAccessToken();
+    }
+    return response;
   };
 
   // Return the user object and auth methods

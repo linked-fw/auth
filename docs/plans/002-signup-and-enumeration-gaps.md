@@ -905,16 +905,30 @@ Tasks:
   - Email configuration
   - Setup Verify Email route
   - the account-deletion section, with `getOAuthSource` examples
-- Draft the changeset text here. It is created with `npx changeset` in wrapup, as a minor.
+- Draft the changeset text here. It is created with `npx changeset` in wrapup, as a major.
 
-Changeset (`@_linked/auth`: minor):
+Changeset (`@_linked/auth`: major):
 
-```md
+````md
 ---
-'@_linked/auth': minor
+'@_linked/auth': major
 ---
 
 Email verification, uniform sign-in and reset answers, and proof for account deletion.
+
+**Breaking: `removeAccount()` no longer answers a plain boolean.** It answers `true` when the
+account was deleted and `{error, action, …}` otherwise. That object is truthy, so a truthy result
+no longer means deleted: compare `=== true`.
+
+```ts
+// before (3.x): signs the user out even when nothing was deleted
+if (await auth.removeAccount()) signout();
+
+// after (4.0)
+const result = await auth.removeAccount({ password });
+if (result === true) signout();
+else showError(result.error);
+```
 
 - Email verification (a soft flag): sign-up sends a verification link to
   `${SITE_ROOT}/auth/verify-email?token=…`, valid for `AUTH_EMAIL_VERIFICATION_TTL` (default 7
@@ -938,7 +952,8 @@ Email verification, uniform sign-in and reset answers, and proof for account del
 - `removeAccount()` with no proof now fails with `action: 'reauthenticate'` for accounts with a
   password or a linked Google/Apple identity. Send `removeAccount({password})` or
   `removeAccount({provider, source})`; `getReauthenticationMethods()` tells which. The ID token
-  must be at most 10 minutes old. Temporary and dev accounts need only a session.
+  must be at most 10 minutes old. Temporary and dev accounts, and accounts with neither a
+  password nor a Google/Apple link (e.g. Facebook-only), need only a session.
 - `RemoveAccountButton` asks for the password itself. Apps that offer Google or Apple pass
   `getOAuthSource(provider)`, the same function their sign-in uses to build `signinOAuth`'s
   second argument. Apple's web redirect (`form_post`) flow cannot supply the proof; use popup
@@ -949,7 +964,7 @@ Email verification, uniform sign-in and reset answers, and proof for account del
 - UIs that showed "this email is not registered" on sign-in or reset should show the generic
   answer.
 - Add a `/auth/verify-email` route that renders `VerifyEmailCallback`.
-```
+````
 
 Validation: the readme tables match `RATE_LIMIT_DEFAULTS` and `declareCallable` (compare them by
 eye against `exposure.test.mjs` `SURFACE`). A full `npm test` and `npm run test:integration` with
@@ -1174,3 +1189,28 @@ Done:
   - CN `npm run typecheck:gate` and the CN `src/backend/auth` vitest pass.
 
 Phase 8 depends on phase 7 because both edit the readme and the plan.
+
+Done:
+
+- Validation: `npx linked build && npm test` — 301/301 pass (new in `useAuth.test.mjs`:
+  `resendEmailVerification` answering `{verified:true}` while signed in refreshes the session once
+  and `emailVerified` turns true). A walk of the new lockfile from the root finds no unreachable
+  entries and no unresolved required dependency.
+- Finding 1: the changeset above is now `major` and opens with the `=== true` warning and a
+  before/after snippet; the readme's "Upgrading to 3.4" is now "Upgrading to 4.0" with the same
+  warning.
+- Finding 2: `useAuth().resendEmailVerification` runs the single-flight refresh on
+  `{verified:true}` when signed in, as `verifyEmail` does.
+- Finding 5: `npm install --package-lock-only` in a clean clone of the branch removed exactly the
+  11 orphaned entries (`axios`, `axios/node_modules/agent-base`,
+  `axios/node_modules/https-proxy-agent`, `asynckit`, `combined-stream`, `delayed-stream`,
+  `es-set-tostringtag`, `follow-redirects`, `form-data`, `has-tostringtag`, `proxy-from-env`). No
+  entry was added or changed, so the regenerated file was copied back as it was.
+- Finding 8: the readme has the reset timing caveat, `methods[0]` in the custom delete example,
+  "normally" for dev accounts' `emailVerified`, and notes that accounts with no password and no
+  Google/Apple link (e.g. Facebook-only or WebID-token accounts) delete with just a session.
+- Deviations:
+  - `npm ls` in the localized checkout reports the same 444 errors (extraneous packages from the
+    localize install layout) with the old and the new lockfile, so it is not a usable check here;
+    the lockfile walk stands in for it.
+  - The changeset's upgrade notes also mention the accounts that delete with just a session.

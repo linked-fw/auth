@@ -33,13 +33,28 @@ The client refreshes ~60 s before the access token's `exp`, again when the tab b
 
 Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/token`) before rendering `ProvideAuth`. The client then sends `x-linked-auth-transport: body`, the server returns the refresh token in the response body, and both tokens are stored through your functions (`expires` in seconds). Other non-browser clients (scripts, tests) can send that header too.
 
-## Upgrading to 3.4
+## Upgrading to 4.0
 
-3.4 is a minor release, and most apps only need the first point.
+> **Breaking: `removeAccount()` no longer answers a plain boolean.** It answers `true` when the
+> account was deleted, and `{error, action, …}` otherwise. That object is truthy, so a truthy
+> result no longer means deleted: compare `=== true`.
+>
+> ```ts
+> // before (3.x): signs the user out even when nothing was deleted
+> if (await auth.removeAccount()) signout();
+>
+> // after (4.0)
+> const result = await auth.removeAccount({ password });
+> if (result === true) signout();
+> else showError(result.error);
+> ```
+
+4.0 is a major release because of the point above. Most apps only need the first point below.
 
 - **Deleting an account now needs proof.** `removeAccount()` with no argument fails with
   `{error, action: 'reauthenticate', methods}` for any account with a password or a linked
-  Google/Apple identity. Temporary and dev accounts still need only a session.
+  Google/Apple identity. Temporary and dev accounts, and accounts with neither (e.g. Facebook-only
+  or WebID-token accounts), still need only a session.
   - Apps that use `RemoveAccountButton` need no change for password accounts. If you offer Google
     or Apple sign-in, pass `getOAuthSource` (see *Delete account* below).
   - Apps with their own delete UI call `getReauthenticationMethods()` first and send
@@ -274,6 +289,10 @@ so they cannot be used to find out who has an account:
 - `sendResetPasswordLink` answers `true` for every well-formed email, whether or not an account
   exists and whether or not the email could be sent. `ForgotPasswordForm` shows "If an account
   exists for this email, we've sent a link." Show the same in a custom form.
+  - Known limit: for a real account the server stores a reset token and sends the email before
+    it answers, so the answer takes measurably longer than for an unknown email. This is
+    accepted: the `passwordResetRequest` limits (3 per hour per email, 10 per hour per IP) make
+    testing emails by timing slow.
 
 Sign-up still answers "This email address is already in use" when a person, account or credential
 exists for the email: it signs the user in at once, so it cannot give one answer for both cases.
@@ -294,7 +313,7 @@ an unverified account may not do.**
   `AUTH_EMAIL_VERIFICATION_TTL` seconds (default 7 days); only a hash of the token is stored.
 - An email also counts as verified after a completed password reset (the link came from the
   inbox) and after a Google or Apple sign-in whose email the provider has verified.
-- Dev accounts (`signinDev`) always report `emailVerified: false`.
+- Dev accounts (`signinDev`) normally report `emailVerified: false`.
 
 ```tsx
 const auth = useAuth();
@@ -320,7 +339,9 @@ expired token answers `{error, action: 'resend_verification'}`.
 - an account with a password gets a password field;
 - an account without a password but with a linked Google/Apple identity gets "Confirm with
   Google/Apple", which calls your `getOAuthSource(provider)`;
-- temporary and dev accounts have nothing to check and are deleted with a plain confirm.
+- temporary and dev accounts, and accounts with no password and no Google/Apple link (e.g.
+  Facebook-only or WebID-token accounts), have nothing to check and are deleted with a plain
+  confirm, on the session alone.
 
 auth does not ship the provider SDKs. `getOAuthSource` runs the provider's sign-in and resolves to
 what `signinOAuth` takes as its second argument, so pass the same function your sign-in buttons
@@ -363,7 +384,7 @@ const { methods } = await auth.getReauthenticationMethods(); // ['password'] | [
 const result = methods.includes('password')
   ? await auth.removeAccount({ password })
   : methods.length
-    ? await auth.removeAccount({ provider: 'google', source: await getOAuthSource('google') })
+    ? await auth.removeAccount({ provider: methods[0], source: await getOAuthSource(methods[0]) })
     : await auth.removeAccount();
 
 if (result !== true) {
