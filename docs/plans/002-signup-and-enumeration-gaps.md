@@ -4,7 +4,7 @@ summary: >
   account exists. createAccount refuses any existing account for the email and validates the
   password on the server. Signup gets email verification. Request reads in checkSignin,
   removeAccount and setAuthentication are guarded, and removeAccount re-authenticates the user.
-status: Ideation
+status: Plan
 source: docs/backlog/003-remaining-rpc-and-signup-gaps.md
 ---
 
@@ -185,3 +185,385 @@ All five are decided below.
 - `checkSignin` uses `this.request?.linkedAuth`.
 - `Auth.setAuthentication` stops reading and writing `request.linkedAuth` when there is no request.
 - `removeAccount` gets the user from `requireSessionUser()` (D3).
+
+## Plan
+
+### Architecture decisions made concrete
+
+**Where verification state lives.** On the auth-owned `AuthCredential`, not on the account. The
+account shape is app-provided (`AUTH_ACCOUNT_TYPE`), and auth already keeps everything it owns
+about a person's email (reset token, email, password hash) on the credential.
+
+| New ontology term (`src/ontologies/auth.ts`, `src/data/auth.json`) | On `AuthCredential` | Meaning |
+|---|---|---|
+| `auth:emailVerifiedAt` (`xsd:dateTime`) | `emailVerifiedAt: Date` | When the person proved control of the email |
+| `auth:emailVerificationToken` | `emailVerificationToken: string` | SHA-256 (base64url) of the outstanding verification token |
+| `auth:emailVerificationTokenExpiresAt` (`xsd:dateTime`) | `emailVerificationTokenExpiresAt: Date` | When it stops working |
+| `auth:consumeMarker` | `consumeMarker: string` | Random marker written by an atomic token consume (see below) |
+
+- A person counts as verified when **any** of their credential rows has `emailVerifiedAt`.
+  Persons can have several rows (OAuth, older releases, reset on an account without one).
+- The WebID is derived from the email (`emailToWebID`), so there is no "verified for which email"
+  question while email change is not a feature.
+- `createAccount` now also writes `email` (normalized) on the credential it creates. It didn't
+  before; the reset path relies on `UserAccount.email` instead.
+- Verification TTL: `AUTH_EMAIL_VERIFICATION_TTL`, default 7 days, read with `readTtlFromEnv`
+  like `AUTH_PASSWORD_RESET_TTL`.
+- New helper module `src/helpers/emailVerification.ts`, mirroring `password.ts`:
+  - `verificationTokenFields(token, now?)`, `clearedVerificationTokenFields()`, `hashToken(token)`.
+    Reuse `PasswordHelper.generateToken()` (160 random bits).
+  - `markEmailVerified(personId, email?, now?)` updates every credential row of the person that
+    lacks `emailVerifiedAt`, setting it and clearing the verification token fields. A person
+    without any row gets a new row `{credentialOf, email, emailVerifiedAt}`. It is idempotent.
+  - `personEmailVerified(personId): Promise<boolean>` returns false on any store error.
+
+**How `emailVerified` reaches the client.**
+
+- `AuthSession` (`src/types/auth.ts`) gets `emailVerified?: boolean`.
+- `Auth.buildAuthSession` sets it from `personEmailVerified(person.id)` before the app hooks run.
+  Sign-in and refresh both go through it, and so does the access token payload.
+- `setAuthentication` keeps it, because it spreads the payload. Two places in
+  `updateSessionData` have to carry it explicitly: `newAuthSession` and the `auth` passed to
+  `deliverTokens`.
+- `supplyDataForRequest` copies `linkedAuth`, so SSR gets it for free.
+- The access token goes stale after a verification. The client fixes that: `useAuth().verifyEmail`
+  calls `refreshSession()` (a forced `validateToken`) when signed in, and `refreshSession` rebuilds
+  the session from the store.
+
+**Atomic token consume (D5).**
+
+- The store offers no compare-and-set, and no API reports what an update matched.
+  `UpdateBuilder.exec` resolves `void` in where mode, and `deleteWhere` always returns `count: 0`.
+- It does compile `AuthCredential.update(data).where(cond)` to **one** SPARQL
+  `DELETE {…} INSERT {…} WHERE {…}` (`_linked-core/src/sparql/irToAlgebra.ts` `updateWhereToAlgebra`).
+  Fuseki/TDB2 runs one update request as one write transaction with a single writer, so two
+  concurrent consumes cannot both match.
+- To learn who won, the consume writes a fresh random marker in the same update and reads it back:
+  1. `N = randomBytes(16)`
+  2. `await AuthCredential.update({forgotPasswordToken: null, forgotPasswordTokenExpiresAt: null, consumeMarker: N}).where(c => c.forgotPasswordToken.equals(H))`
+  3. `const row = await AuthCredential.select(c => [c.credentialOf, c.forgotPasswordTokenExpiresAt?…]).where(c => c.consumeMarker.equals(N)).one()`
+     - Only the request whose update matched finds its own `N`. A loser matches nothing and
+       writes nothing.
+  4. The winner clears `consumeMarker`.
+- Expiry cannot be compared in a `where` (dates are not supported there; see
+  `UsedNonceStore.markUsed`), and the update has already removed `forgotPasswordTokenExpiresAt`.
+  So the consume reads the row's expiry **before** the update (as `findResetPasswordCredential`
+  does now), keyed by credential id. After winning, it decides validity from that pre-read
+  expiry. An expired token is still used up, as it is today.
+- The verification-token consume in `verifyEmail` works the same way, generalized as
+  `consumeCredentialToken({tokenField, expiresField, hash})` in a small shared helper,
+  `src/helpers/credentialToken.ts`, used by both.
+- `rawQuery` is the fallback only if `update().where()` with `null` values turns out not to unset
+  in where mode. That fallback only works when the shapes are pinned to a `FusekiStore`, not
+  through a router. Check this first in the phase that builds it.
+
+**Rate-limit rules** (`RateLimitRuleName` union, `RATE_LIMIT_DEFAULTS`, readme table).
+
+| Rule | Call | Per IP | Per account |
+|---|---|---|---|
+| `emailVerificationRequest` | `resendEmailVerification` (sends an email) | 10 / hour | 3 / hour (signed-in account) |
+| `emailVerify` | `verifyEmail` | 10 / minute | |
+| `reauthenticate` | `removeAccount` when it checks a password or ID token | 10 / minute | 5 / 15 minutes (signed-in account) |
+
+**`removeAccount` proof (D3).**
+
+- Add a module-level helper (outside the class, like `verifyOAuthIdentity`):
+  `verifyReauthentication(provider, accountId, personId, proof)`.
+  - Password proof: load the credential with `getPasswordForUser({id: personId})`, then
+    `PasswordHelper.checkPassword`.
+  - ID-token proof:
+    - only `VERIFIED_OAUTH_PROVIDERS`
+    - `verifyOAuthIdentity(provider, source)`: the exact path `signinOAuth` uses, covering
+      signature, audience, expiry, email verified, and Apple's nonce under `AUTH_APPLE_NONCE`
+    - then `OAuthIdentityStore.findLinks(provider, identity.subject)` must contain a link whose
+      `accountId === account.id`
+- **Freshness.** `VerifiedOAuthIdentity` gets `issuedAt?: Date` (`iat`). `GoogleHelper` already
+  returns the payload; `AppleHelper.decodeIdentityToken` must also return `iat`. `removeAccount`
+  refuses a token older than `REAUTH_MAX_TOKEN_AGE` (10 minutes, a constant). This makes "freshly
+  issued" concrete (see open questions).
+- Methods for an account:
+  - `personHasPassword(personId)` → `['password']`
+  - otherwise `findLinkedProviders(accountId)` filtered to google/apple
+  - otherwise `[]`, meaning no proof is needed (temporary and dev accounts)
+- Any valid proof is accepted, even one that is not the preferred method. A linked Google token
+  on a password account is as strong as the password.
+- The session comes from `requireSessionUser()`, which returns the `userAccount`. The person id is
+  `this.request?.linkedAuth?.user?.id ?? account.accountOf?.id`, and it is an error if neither
+  exists.
+
+**Enumeration (D2).**
+
+- Sign-in: one message for all three failures. Define `INVALID_CREDENTIALS_MESSAGE = 'Invalid
+  email / password combination.'`.
+  - When no credential with a hash is found, run `bcrypt.compare` against a fixed dummy hash at
+    `PASSWORD_HASH_COST`, so the unknown-email path costs about as long as a wrong password.
+  - The dummy hash is computed once, lazily, in `password.ts`.
+- Reset: `sendResetPasswordLink` returns `true` for every well-formed email. That covers a known
+  account, an unknown one, a missing person and a failed send. Only `Invalid email format` and
+  `rate_limited` still return errors.
+  - The return type does not change, and the form shows the uniform text.
+  - Residual: a send to a real account takes longer than "no account". This is accepted: the
+    per-email limit of 3/hour and the per-IP limit of 10/hour make timing enumeration slow. It
+    goes in the readme as a known limit.
+- `createAccount` refuses when any of these exist:
+  - a Person at `emailToWebID(email)`
+  - a `UserAccount` (configured `accountShape`) whose `email` equals the normalized email, or
+    the raw one, because older rows stored the raw input
+  - an `AuthCredential` whose `email` equals the normalized email or whose `credentialOf` is
+    the WebID
+
+  The answer stays `{error: 'This email address is already in use…', action: 'change_email_or_log_in'}`.
+- Password check: `MIN_PASSWORD_LENGTH = 6`, exported from `helpers/password.ts`, which matches
+  `minLength: 6` in `CreateAccountForm` and `CreateNewPasswordForm`. A non-string or short password
+  gets `{error: 'Password must be at least 6 characters', action: 'invalid_password'}`. The check
+  runs before any lookup.
+
+**Mail (D4).** New `src/utils/email.ts`:
+
+```ts
+export type AuthEmailOutcome = 'sent' | 'logged' | 'failed';
+/** Send an auth email. Never throws (LinkedEmail.send throws synchronously without a provider). */
+export async function sendAuthEmail(
+  options: EmailOptions,
+  devLink: { purpose: 'reset' | 'verify'; url: string }
+): Promise<AuthEmailOutcome>;
+```
+
+- With `DEV_AUTH` on (`'true'` or `true`) and `!LinkedEmail.hasDefaultProvider()`, it prints
+  `[@_linked/auth] dev: <purpose> link: <url>` with `console.info` and returns `'logged'`. The
+  token stays valid.
+- Otherwise it awaits `LinkedEmail.send` inside `try` and returns `'sent'` or `'failed'` (the error
+  is logged without the address).
+- `'failed'` clears the reset token (`clearedResetPasswordTokenFields`) or the verification token.
+  The signup account stays unverified.
+- Remove `zeptoMail` (field, import, construction) and the `zeptomail` dependency from
+  `package.json`. Check that nothing else imports it.
+- The verification link is `${SITE_ROOT}/auth/verify-email?token=<raw>`, built like the reset link.
+
+**Request guards.**
+
+- `checkSignin` returns `this.request?.linkedAuth?.userAccount`.
+- `Auth.setAuthentication(request | undefined, …)` only reads and assigns `request.linkedAuth`
+  (in both the outer function and `updateSessionData`) when `request` exists. It still returns
+  the linkedAuth object and sets the query context.
+- `updateSessionData` falls back to the closure's `linkedAuth` when there is no request.
+
+**`signinDev`.** A verified token without `sub` returns `{error: 'Invalid token'}`. The current
+`claims.sub && …` check becomes `!claims.sub || claims.sub !== input.webId`, which also refuses a
+missing `sub`.
+
+### Contracts
+
+```ts
+// src/types/auth.ts
+export type AuthSession<…> = { userAccount; user; sid?; emailVerified?: boolean; updateSessionData? };
+export type ReauthenticationMethod = 'password' | 'google' | 'apple';
+export type RemoveAccountProof =
+  | { password: string }
+  | { provider: 'google' | 'apple'; source: unknown }; // source: as signinOAuth's oauthUserData
+export type RemoveAccountResult =
+  | true
+  | { error: string; action: 'reauthenticate'; methods: ReauthenticationMethod[] }
+  | { error: string; action: 'rate_limited'; retryAfter: number };
+export type VerifyEmailResult = { verified: true } | { error: string; action?: string; retryAfter?: number };
+export type ResendEmailVerificationResult =
+  | { sent: true } | { verified: true } // already verified: nothing sent
+  | { error: string; action?: 'no_email' | 'rate_limited' | 'email_failed'; retryAfter?: number };
+
+// AuthBackendProvider
+createAccount(data: CreateAccount): Promise<AuthenticationResult>;           // unchanged shape; new refusals above
+signinWithPassword(email: string, password: string): Promise<AuthenticationResult>; // failure: {error: INVALID_CREDENTIALS_MESSAGE}
+sendResetPasswordLink(email: string): Promise<true | {error: string; action?: string; retryAfter?: number}>;
+verifyEmail(token: string): Promise<VerifyEmailResult>;                       // 'public'
+resendEmailVerification(): Promise<ResendEmailVerificationResult>;           // 'user'
+getReauthenticationMethods(): Promise<{ methods: ReauthenticationMethod[] }>; // 'user'
+removeAccount(proof?: RemoveAccountProof): Promise<RemoveAccountResult>;     // 'user' (unchanged level)
+```
+
+- `verifyEmail`:
+  - An unknown, used or expired token returns `{error: 'This verification link is invalid or
+    has expired.', action: 'resend_verification'}`.
+  - On success it calls `markEmailVerified(personId)`. It does not need a session, and it does
+    not sign anyone in.
+- `resendEmailVerification`:
+  - The email is taken from the session account's `email`. If there is none, it answers
+    `action: 'no_email'` (temporary accounts).
+  - It writes new token fields on the person's credential, or on a new row with `email` when
+    the person has none.
+  - On a send failure it clears the token and answers `{error: "Sorry, we couldn't send the
+    email, please try again later", action: 'email_failed'}`. That is fine here: the caller is
+    signed in, so nothing is enumerated.
+- `removeAccount`:
+  - missing proof: `{error: 'Confirm it is you to delete this account.', action:
+    'reauthenticate', methods}`
+  - wrong proof: `{error: 'That confirmation did not match this account.', action:
+    'reauthenticate', methods}`
+  - A rate-limit answer is counted only when a proof was checked.
+- Password reset with a token, and OAuth sign-in through any of the three `signinOAuth` paths
+  when the provider's verified email normalizes to the person's WebID, both call
+  `markEmailVerified`. For a linked-identity sign-in, the check is
+  `emailToWebID(identity.email) === person.id`. A new OAuth user's credential is created with
+  `emailVerifiedAt` already set.
+
+RPC declarations (`declareCallable(AuthBackendProvider, …)`):
+
+- `verifyEmail: 'public'`
+- `resendEmailVerification: 'user'`
+- `getReauthenticationMethods: 'user'`
+
+No new provider *methods* are internal: helpers stay module-level. `test/exposure.test.mjs`
+`SURFACE` and the readme RPC table get the same three entries.
+
+**`useAuth` additions** (`src/hooks/useAuth.tsx`):
+
+```ts
+emailVerified: boolean;                      // auth?.emailVerified === true
+verifyEmail: (token: string) => Promise<VerifyEmailResult>;  // on success + signed in: await refreshSession()
+resendEmailVerification: () => Promise<ResendEmailVerificationResult>;
+getReauthenticationMethods: () => Promise<{ methods: ReauthenticationMethod[] }>;
+removeAccount: (proof?: RemoveAccountProof) => Promise<RemoveAccountResult>;
+```
+
+**`RemoveAccountButton` props:**
+
+```ts
+interface RemoveAccountButtonProps {
+  confirmationText?: string;
+  agreeText?: string;
+  className?: string;
+  /** Run the provider's sign-in (popup / native) and resolve to what signinOAuth takes as its
+   *  second argument. Needed only for accounts without a password that use Google/Apple. */
+  getOAuthSource?: (provider: 'google' | 'apple') => Promise<unknown>;
+}
+```
+
+- When the dialog opens, call `getReauthenticationMethods()`.
+  - `['password']`: a password `Input` goes in `message`, with `confirmDisabled` until it is
+    filled.
+  - google/apple: one "Confirm with Google/Apple" button per method. It calls
+    `getOAuthSource(p)` and then `removeAccount({provider: p, source})` in the same click.
+    Without `getOAuthSource` it shows a hint and the confirm button stays disabled.
+  - `[]`: plain confirm.
+- `isLoading` while the call runs.
+- A `reauthenticate` answer shows its error inside the dialog, which stays open.
+- `true` → `signout()` → `/`.
+- Translation keys: `removeAccount.passwordLabel`, `.confirmWithProvider`, `.wrongProof`,
+  `.noOAuthSource`, each with `t(key, default)`.
+
+**New component** `src/components/VerifyEmailCallback.tsx`, mirroring `ForgotPasswordCallback`:
+
+- reads `?token=`
+- calls `useAuth().verifyEmail` once
+- shows verified / invalid (with a resend button when signed in)
+- keys under `verifyEmail.*`
+
+The app adds a route at `/auth/verify-email`, which the readme documents.
+
+### Expected file changes
+
+| File | Change |
+|---|---|
+| `src/ontologies/auth.ts`, `src/data/auth.json` | 4 new properties |
+| `src/shapes/AuthCredential.ts` | 4 new `@literalProperty` getters |
+| `src/helpers/credentialToken.ts` (new) | atomic consume via marker |
+| `src/helpers/password.ts` | `consumeResetPasswordToken` uses it; `MIN_PASSWORD_LENGTH`; dummy-hash compare helper |
+| `src/helpers/emailVerification.ts` (new) | token fields, `markEmailVerified`, `personEmailVerified`, TTL |
+| `src/utils/email.ts` (new) | `sendAuthEmail` |
+| `src/helpers/apple.ts` | return `iat` |
+| `src/types/auth.ts` | `emailVerified`, `issuedAt`, new result/proof types |
+| `src/utils/auth.ts` | `buildAuthSession` sets `emailVerified`; `setAuthentication` request guards; `updateSessionData` carries `emailVerified` |
+| `src/utils/rateLimit.ts` | 3 rules |
+| `src/backend.ts` | all method changes above; remove ZeptoMail; new declarations |
+| `src/hooks/useAuth.tsx` | additions above |
+| `src/components/RemoveAccountButton.tsx` | proof UI, `getOAuthSource` |
+| `src/components/ForgotPasswordForm.tsx` | always the uniform text on non-error |
+| `src/components/CreateAccountForm.tsx` | handles `invalid_password` (server text) — no logic change beyond showing it |
+| `src/components/VerifyEmailCallback.tsx` (new) | |
+| `src/index.ts` / exports | new component and types, if the index re-exports components |
+| `package.json` | drop `zeptomail` |
+| `readme.md` | RPC table, rate-limit table, email config, verification route, upgrade notes |
+| `test/*` | see Phases |
+
+### Pitfalls
+
+- **Tests run against `lib/esm`.** Run `npx linked build` before `npm test`, or the tests run
+  stale code. They mock `AuthCredential.select/create/update(...).for` with an in-memory table
+  (`password-reset.test.mjs` `fakeCredentialTable`), which does not support
+  `update(...).where(...)` yet. Extend the fake to support `.where`, and keep unsetting with
+  `null`.
+- **Tests that change:**
+  - `password-reset.test.mjs`, `rate-limit.test.mjs` and integration `sessions.fuseki.test.mjs`
+    assert `sendResetPasswordLink === true`. That still holds, but cases that expected an error
+    for an unknown email must now expect `true`.
+  - Integration `accounts.fuseki.test.mjs` and `sessions.fuseki.test.mjs` call `removeAccount()`
+    with no arguments on a password account. Pass `{password}`.
+  - `exposure.test.mjs` `SURFACE` and the subclass test.
+  - Readme line 38 quotes "No password found for this email" (2.0 migration). Reword it to the new
+    uniform message.
+- **`LinkedEmail.send` throws synchronously** without a provider. Always call it inside an
+  `async` function or a `try`, never `.then` on its return.
+- **Log hygiene.** `log-hygiene.test.mjs` forbids emails and tokens in logs. The dev link log
+  contains a token. Log it only under `DEV_AUTH`, never the address, and add a log-hygiene case
+  that a non-DEV_AUTH send failure logs no token and no email.
+- **The JWT carries `emailVerified`.** It goes stale until the next refresh. Document this, and
+  tell apps to re-check on the server before a sensitive action, using
+  `personEmailVerified`, exported from `@_linked/auth/helpers/emailVerification`.
+- **`buildAuthSession` runs on every refresh.** That is one more credential query per refresh.
+  It must catch errors and return false. Unit tests with no store reach it.
+- **`requireSessionUser()` throws `ServerCallError(401)` outside a session, and a plain `Error`
+  outside any call context.** Unit tests must wrap the provider with `serving()`.
+- **Strict null checks:**
+  - `AuthCredential` getters return `undefined as any` by convention. Keep that, and add no new
+    `as any` in backend code.
+  - Type `verifyOAuthIdentity`'s results.
+  - The `account.accountOf?.id` fallback needs a guard.
+- **Translations:** components use `useTranslate()` with `t(key, default)`. New keys need
+  defaults.
+- **Breaking-ish `removeAccount`.** Callers with no arguments now get `action:
+  'reauthenticate'` for password and OAuth accounts. This goes in the changeset as a minor release
+  with an explicit upgrade note.
+- **Apple redirect flow (`form_post`) cannot supply a proof** without losing page state. The
+  readme says to use popup mode.
+- **Stored emails on `UserAccount` may not be normalized.** The duplicate check compares both the
+  raw and the lower-cased form.
+- **No code comments with phase labels.**
+
+### Upgrade / readme outline (D3, D1)
+
+1. **Account deletion now asks for proof.**
+   - `removeAccount({password})` or `removeAccount({provider, source})`.
+   - `getReauthenticationMethods()`.
+   - `RemoveAccountButton`'s `getOAuthSource`, with a Google GIS and an Apple popup example.
+   - Temporary and dev accounts still need only a session.
+   - The Apple redirect flow is unsupported.
+2. **Email verification.**
+   - Soft flag: `useAuth().emailVerified`, and `auth.emailVerified` on the server.
+   - The app decides what to gate, and should re-check on the server.
+   - The `/auth/verify-email` route with `VerifyEmailCallback`.
+   - `resendEmailVerification`.
+   - What also verifies an email: a password reset, or Google/Apple.
+   - `AUTH_EMAIL_VERIFICATION_TTL`.
+3. **Email configuration.**
+   - Register a provider with `LinkedEmail.setDefaultProvider`. Replace the `lincd-zeptomail`
+     sentence.
+   - Without a provider: reset and verification links are not sent. With `DEV_AUTH` they are
+     logged.
+4. **Uniform answers.**
+   - The sign-in and reset messages.
+   - Signup still says "in use", and why.
+   - The timing note.
+5. **Rate limits and RPC tables:** the 3 new rules and the 3 new methods.
+6. **Changeset text** is drafted in Phase 6 and created in wrapup.
+
+### Plan deviations / open questions
+
+- **ID-token freshness window.** D3 relies on "a freshly issued ID token". The plan adds an
+  explicit `iat` age limit of 10 minutes for the deletion proof, on top of `exp`. Without it, a
+  cached Google token up to 1 hour old would pass. Confirm 10 minutes, or drop the check and rely
+  on `exp`.
+- **Dev accounts report `emailVerified: false`.** `signinDev` writes no credential. webid.email
+  does prove the email, but marking dev accounts verified is outside D1's list. This is harmless
+  while CN gates nothing on the flag.
+- **Server-side password length is enforced on signup only (D2).** A token reset or a password
+  change still accepts any length on the server. The client forms enforce 6. Should the reset path
+  share the check? It is a small addition, but not decided.
