@@ -905,23 +905,74 @@ Tasks:
   - Email configuration
   - Setup Verify Email route
   - the account-deletion section, with `getOAuthSource` examples
-- Draft the changeset text here. It is created with `npx changeset` in wrapup, as a minor:
+- Draft the changeset text here. It is created with `npx changeset` in wrapup, as a minor.
 
-  > Email verification (soft flag): signup sends a verification link; `auth.emailVerified` /
-  > `useAuth().emailVerified`; new `verifyEmail` (public) and `resendEmailVerification` (user).
-  > A completed password reset or a verified Google/Apple sign-in also verifies the email.
-  > Sign-in and password reset give the same answer whether or not an account exists.
-  > `createAccount` refuses any existing person, account or credential for the email and checks
-  > the password length on the server. Reset links are single-use atomically. Without an email
-  > provider, sends fail safely (the link is logged with `DEV_AUTH`). ZeptoMail dependency removed.
-  > **Upgrade:** `removeAccount()` now needs proof for accounts with a password or OAuth link —
-  > `removeAccount({password})` or `removeAccount({provider, source})`; see
-  > `getReauthenticationMethods()`. `RemoveAccountButton` takes `getOAuthSource` for OAuth-only
-  > accounts. Apple's redirect flow can't supply the proof; use popup mode.
+Changeset (`@_linked/auth`: minor):
+
+```md
+---
+'@_linked/auth': minor
+---
+
+Email verification, uniform sign-in and reset answers, and proof for account deletion.
+
+- Email verification (a soft flag): sign-up sends a verification link to
+  `${SITE_ROOT}/auth/verify-email?token=…`, valid for `AUTH_EMAIL_VERIFICATION_TTL` (default 7
+  days). The session reports `emailVerified` (`useAuth().emailVerified`,
+  `request.linkedAuth.emailVerified`); apps decide what to gate. A completed password reset or a
+  Google/Apple sign-in with a provider-verified email also verifies it. New: `verifyEmail`
+  (public), `resendEmailVerification` (user), the `VerifyEmailCallback` component and
+  `personEmailVerified` for server-side checks.
+- Sign-in answers "Invalid email / password combination." whether or not the email is
+  registered, and `sendResetPasswordLink` answers `true` for every well-formed email.
+- `createAccount` refuses an email that already has a person, account or credential, and the
+  server checks a minimum password length of 6 for sign-up, reset and password change
+  (`action: 'invalid_password'`).
+- Reset links are used up atomically, so one link cannot reset twice.
+- Without an email provider (`LinkedEmail.setDefaultProvider`), nothing is sent and nothing
+  fails; with `DEV_AUTH` the link is logged. The unused ZeptoMail dependency is removed.
+- New rate-limit rules: `emailVerificationRequest`, `emailVerify`, `reauthenticate`.
+
+**Upgrade notes**
+
+- `removeAccount()` with no proof now fails with `action: 'reauthenticate'` for accounts with a
+  password or a linked Google/Apple identity. Send `removeAccount({password})` or
+  `removeAccount({provider, source})`; `getReauthenticationMethods()` tells which. The ID token
+  must be at most 10 minutes old. Temporary and dev accounts need only a session.
+- `RemoveAccountButton` asks for the password itself. Apps that offer Google or Apple pass
+  `getOAuthSource(provider)`, the same function their sign-in uses to build `signinOAuth`'s
+  second argument. Apple's web redirect (`form_post`) flow cannot supply the proof; use popup
+  mode.
+- Apps on `rpcExposure: 'enforce'` that pin auth's surface in their own table must add
+  `verifyEmail` (public), `resendEmailVerification` (user) and `getReauthenticationMethods`
+  (user).
+- UIs that showed "this email is not registered" on sign-in or reset should show the generic
+  answer.
+- Add a `/auth/verify-email` route that renders `VerifyEmailCallback`.
+```
 
 Validation: the readme tables match `RATE_LIMIT_DEFAULTS` and `declareCallable` (compare them by
 eye against `exposure.test.mjs` `SURFACE`). A full `npm test` and `npm run test:integration` with
 Fuseki pass.
+
+Done:
+
+- Validation: `npx linked build && npm test` — 295/295 pass. `npm run test:integration` against
+  Fuseki (without `DEV_AUTH`) — 29/29 pass. The readme's RPC table matches `declareCallable` and
+  `SURFACE` in `exposure.test.mjs`; the rate-limit table matches `RATE_LIMIT_DEFAULTS`. Every
+  import path in the new snippets resolves to a file in `lib/esm`.
+- Readme: new "Upgrading to 3.4", "Sign-in and reset answers", "Email verification", "Delete
+  account" and "Setup Verify Email" sections; `AUTH_EMAIL_VERIFICATION_TTL` in the env table; the
+  `lincd-zeptomail` sentence replaced by `LinkedEmail.setDefaultProvider` setup and the
+  no-provider/`DEV_AUTH` behaviour.
+- Deviations:
+  - The OAuth note "Account creation does not verify email" now says a password account can be
+    created before its email is verified.
+  - The reset-password route's import path is corrected from `lincd-auth/lib/...` to
+    `@_linked/auth/components/ForgotPasswordCallback`, to match the new verify route. Older
+    `lincd-*` imports elsewhere in the readme are left as they were.
+  - The `getOAuthSource` example calls app-side placeholders (`getGoogleIdToken`,
+    `getAppleIdentityToken`) instead of quoting the Google GIS and Apple JS SDKs in full.
 
 ### Dependencies and parallelization
 
