@@ -45,6 +45,8 @@ export type VerifiedOAuthIdentity = {
   emailVerified: boolean;
   givenName?: string;
   familyName?: string;
+  /** When the provider issued the token (`iat`). */
+  issuedAt?: Date;
 };
 
 /** The result of `linkOAuthIdentity`. */
@@ -64,6 +66,27 @@ export type ResendEmailVerificationResult =
       action?: 'no_email' | 'rate_limited' | 'email_failed';
       retryAfter?: number;
     };
+
+/** A way to confirm it is the account holder, as `removeAccount` asks for it. */
+export type ReauthenticationMethod = 'password' | 'google' | 'apple';
+
+/**
+ * The proof `removeAccount` takes: the account's password, or a fresh ID token of a Google or
+ * Apple identity linked to the account. `source` is what `signinOAuth` takes as its second
+ * argument.
+ */
+export type RemoveAccountProof =
+  | { password: string }
+  | { provider: 'google' | 'apple'; source: unknown };
+
+/**
+ * The result of `removeAccount`. `action: 'reauthenticate'`: the proof was missing or did not
+ * match; `methods` lists what this account can confirm with.
+ */
+export type RemoveAccountResult =
+  | true
+  | { error: string; action: 'reauthenticate'; methods: ReauthenticationMethod[] }
+  | { error: string; action: 'rate_limited'; retryAfter: number };
 
 /**
  * Create a new account signin with email and password.

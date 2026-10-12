@@ -68,9 +68,10 @@ async function assertRejected(promise) {
   assert.equal(result, null, `token was accepted: ${JSON.stringify(result)}`);
 }
 
-test('a valid token for a configured client ID is accepted', async () => {
-  const result = await AppleHelper.decodeIdentityToken(sign());
-  assert.deepEqual(result, { email: 'ada@example.test', sub: '001234.abcdef.0001' });
+test('a valid token for a configured client ID is accepted, with its issue time', async () => {
+  const iat = Math.floor(Date.now() / 1000) - 30;
+  const result = await AppleHelper.decodeIdentityToken(sign({ iat }));
+  assert.deepEqual(result, { email: 'ada@example.test', sub: '001234.abcdef.0001', iat });
 });
 
 test('a token for the iOS bundle ID (APPLE_CLIENT_ID_IOS) is accepted', async () => {

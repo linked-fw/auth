@@ -808,6 +808,30 @@ Validation:
 - Integration (Fuseki): update the `removeAccount()` calls in `accounts.fuseki.test.mjs` and
   `sessions.fuseki.test.mjs` to pass `{password}`, and add one refused-without-proof case.
 
+Done:
+
+- Validation: `npx linked build && npm test` — 287/287 pass (new: `remove-account.test.mjs`,
+  12 cases: the plan's list plus a linked Google token on a password account, an invalid token
+  and an unsupported provider, a token without `iat`, the `reauthenticate` limit, and 401 for
+  both methods; `apple.test.mjs` checks the returned `iat`; `exposure.test.mjs` `SURFACE` has
+  `getReauthenticationMethods: 'user'`). `npm run test:integration` — 29/29 pass. The
+  `accounts.fuseki.test.mjs` removal case is now refused without proof (`methods:
+  ['password']`) and with a wrong password, deletes nothing, then deletes with `{password}`.
+  `sessions.fuseki.test.mjs` passes `{password}`.
+- Deviations:
+  - `verifyReauthentication(provider, accountId, personId, proof)` takes the backend provider
+    for `getPasswordForUser`. A token without `iat` counts as not fresh. `REAUTH_MAX_TOKEN_AGE`
+    (ms) is exported from `backend.ts` for the tests.
+  - A proof is "sent" when the object has a `password` or `provider` key. A malformed one (a
+    non-string password, an unsupported provider, a non-object `source`) gets the wrong-proof
+    answer and is counted by the rate limit. An account with no methods ignores any proof.
+  - The integration removal case used to add a hashed credential with a different password.
+    Which hashed row `getPasswordForUser` picks is not defined, so that row now holds a second
+    hash of the same password. The "old password does not carry over" check stays (`PASSWORD_1`
+    after re-signup).
+  - The readme's RPC and rate-limit tables are left for Phase 6, together with Phase 3's
+    entries.
+
 ### Phase 5 — Client: `useAuth`, `RemoveAccountButton`, forms, `VerifyEmailCallback`
 
 Tasks:

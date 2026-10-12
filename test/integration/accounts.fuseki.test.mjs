@@ -72,24 +72,33 @@ test('password sign-in uses the credential that has a password when a person has
   assert.ok(credential?.passwordHash, 'getPasswordForUser returns the row with the hash');
 });
 
-test('removeAccount deletes every credential and identity token of the account', async () => {
+test('removeAccount asks for the password, then deletes every credential and identity token', async () => {
   const email = newEmail();
   const created = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_1 });
   assert.equal(created.error, undefined, created.error);
   const personId = created.auth.user.id;
   const accountId = created.auth.userAccount.id;
   await AuthCredential.create({ credentialOf: { id: personId }, email });
+  // a second hash of the same password: which hashed row the proof is checked against must not
+  // decide whether the deletion goes through
   await AuthCredential.create({
     credentialOf: { id: personId },
     email,
-    passwordHash: await PasswordHelper.generateHashedPassword('leftover-Passw0rd!'),
+    passwordHash: await PasswordHelper.generateHashedPassword(PASSWORD_1),
   });
   await IdentityToken.create({ sub: 'apple-sub-1', email, account: { id: accountId } });
   assert.equal(await countSubjectsWith(`${AUTH}credentialOf`, personId), 3);
   assert.equal(await countSubjectsWith(`${AUTH}account`, accountId) > 0, true);
 
   const p = await signedInProvider(created.accessToken);
-  assert.equal(await p.removeAccount(), true);
+  assert.deepEqual(await p.removeAccount(), {
+    error: 'Confirm it is you to delete this account.',
+    action: 'reauthenticate',
+    methods: ['password'],
+  });
+  assert.equal((await p.removeAccount({ password: PASSWORD_2 })).action, 'reauthenticate');
+  assert.equal(await countSubjectsWith(`${AUTH}credentialOf`, personId), 3, 'nothing deleted');
+  assert.equal(await p.removeAccount({ password: PASSWORD_1 }), true);
 
   assert.equal(await countSubjectsWith(`${AUTH}credentialOf`, personId), 0, 'credentials left');
   assert.equal(await countSubjectsWith(`${AUTH}account`, accountId), 0, 'identity tokens or sessions left');
@@ -102,7 +111,6 @@ test('removeAccount deletes every credential and identity token of the account',
   // The same email gives the same WebID: a new account must not inherit an old password.
   const again = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_2 });
   assert.equal(again.error, undefined, again.error);
-  assert.ok((await provider().signinWithPassword(email, 'leftover-Passw0rd!')).error);
   assert.ok((await provider().signinWithPassword(email, PASSWORD_1)).error);
   assert.equal((await provider().signinWithPassword(email, PASSWORD_2)).error, undefined);
 });

@@ -353,7 +353,7 @@ test('removeAccount deletes the account\'s refresh token records', async () => {
   assert.ok((await countFor()) > 0, 'records exist before removal');
 
   const p = await signedInProvider(signin.accessToken);
-  assert.equal(await p.removeAccount(), true);
+  assert.equal(await p.removeAccount({ password: PASSWORD_2 }), true);
   assert.equal(await countFor(), 0, 'no records left for the removed account');
   assert.ok((await refresh(signin)).error, 'refresh fails for a removed account');
 });

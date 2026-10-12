@@ -41,12 +41,12 @@ const AppleHelper = {
    * Fails closed: with no Apple client ID configured every token is rejected.
    *
    * @param identityToken The identity token to verify.
-   * @returns The email, subject and (when present) nonce claim of the verified token, or null if
-   *   the token is not valid.
+   * @returns The email, subject, issue time (`iat`, seconds) and (when present) nonce claim of the
+   *   verified token, or null if the token is not valid.
    */
   async decodeIdentityToken(
     identityToken: string
-  ): Promise<{ email: string | undefined; sub: string; nonce?: string } | null> {
+  ): Promise<{ email: string | undefined; sub: string; iat?: number; nonce?: string } | null> {
     try {
       const audiences = configuredAppleClientIds();
       if (audiences.length === 0) {
@@ -84,7 +84,10 @@ const AppleHelper = {
 
       // the nonce claim is checked by the caller against the nonce the client sent back
       const nonce = typeof tokenLoad['nonce'] === 'string' ? tokenLoad['nonce'] : undefined;
-      return nonce ? { email, sub: tokenLoad.sub, nonce } : { email, sub: tokenLoad.sub };
+      const iat = typeof tokenLoad.iat === 'number' ? tokenLoad.iat : undefined;
+      const claims =
+        iat === undefined ? { email, sub: tokenLoad.sub } : { email, sub: tokenLoad.sub, iat };
+      return nonce ? { ...claims, nonce } : claims;
     } catch (error) {
       console.error('Error verifying Apple identity token:', error?.message ?? error);
       return null;

@@ -65,6 +65,7 @@ const SURFACE = {
       signout: 'public',
       linkOAuthIdentity: 'user',
       resendEmailVerification: 'user',
+      getReauthenticationMethods: 'user',
       removeAccount: 'user',
     },
     internal: [

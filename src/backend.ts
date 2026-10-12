@@ -17,6 +17,9 @@ import type {
   CreateAccount,
   LinkOAuthIdentityResult,
   OAuthProvider,
+  ReauthenticationMethod,
+  RemoveAccountProof,
+  RemoveAccountResult,
   ResendEmailVerificationResult,
   UserAccountData,
   UserData,
@@ -138,6 +141,7 @@ async function verifyOAuthIdentity(
       emailVerified: Boolean(apple.email),
       givenName: stringOrUndefined(oauthUserData.givenName),
       familyName: stringOrUndefined(oauthUserData.familyName),
+      issuedAt: issuedAtOf(apple.iat),
     };
   }
 
@@ -159,6 +163,7 @@ async function verifyOAuthIdentity(
       emailVerified: google.email_verified === true,
       givenName: stringOrUndefined(google.given_name),
       familyName: stringOrUndefined(google.family_name),
+      issuedAt: issuedAtOf(google.iat),
     };
   }
 
@@ -167,6 +172,11 @@ async function verifyOAuthIdentity(
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+/** A token's `iat` claim (seconds since the epoch) as a date. */
+function issuedAtOf(iat: unknown): Date | undefined {
+  return typeof iat === 'number' && Number.isFinite(iat) ? new Date(iat * 1000) : undefined;
 }
 
 /**
@@ -377,6 +387,79 @@ async function markOAuthEmailVerified(identity: VerifiedOAuthIdentity, personId:
   } catch (error) {
     console.error(`${identity.provider} sign-in: could not mark the email verified`, error);
   }
+}
+
+/**
+ * How old a provider's ID token may be to confirm an account deletion. The token's own expiry
+ * (about an hour for Google) is too long for a "you just signed in" check.
+ */
+export const REAUTH_MAX_TOKEN_AGE = 10 * 60 * 1000;
+
+const REAUTH_MISSING_MESSAGE = 'Confirm it is you to delete this account.';
+const REAUTH_MISMATCH_MESSAGE = 'That confirmation did not match this account.';
+
+function isReauthenticationProvider(provider: unknown): provider is 'google' | 'apple' {
+  return typeof provider === 'string' && VERIFIED_OAUTH_PROVIDERS.includes(provider);
+}
+
+/**
+ * What the account can confirm it is the account holder with: its password when it has one,
+ * otherwise its linked Google/Apple identities. None (temporary and dev accounts): a session is
+ * all there is to check.
+ */
+async function reauthenticationMethods(
+  accountId: string,
+  personId: string
+): Promise<ReauthenticationMethod[]> {
+  if (await OAuthIdentityStore.personHasPassword(personId)) return ['password'];
+  return (await OAuthIdentityStore.findLinkedProviders(accountId)).filter(
+    isReauthenticationProvider
+  );
+}
+
+/** Whether `proof` was sent at all, as opposed to checked: a password or a provider. */
+function hasReauthenticationProof(proof: unknown): proof is Record<string, unknown> {
+  return (
+    typeof proof === 'object' &&
+    proof !== null &&
+    ('password' in proof || 'provider' in proof)
+  );
+}
+
+/**
+ * Check a deletion proof against the account. Any valid proof counts, not only the preferred
+ * method: a linked Google identity is as strong as the password.
+ *
+ * - `{password}`: checked against the person's password, as a password change checks it.
+ * - `{provider, source}`: verified exactly as `signinOAuth` verifies it (signature, audience,
+ *   expiry, Apple's nonce), issued no more than `REAUTH_MAX_TOKEN_AGE` ago, and its subject
+ *   linked to this account.
+ */
+async function verifyReauthentication(
+  provider: AuthBackendProvider,
+  accountId: string,
+  personId: string,
+  proof: Record<string, unknown>,
+  now: number = Date.now()
+): Promise<boolean> {
+  if ('password' in proof) {
+    if (typeof proof.password !== 'string' || !proof.password) return false;
+    const credential = await provider.getPasswordForUser({ id: personId });
+    if (!credential?.passwordHash) return false;
+    return PasswordHelper.checkPassword(proof.password, credential.passwordHash);
+  }
+
+  if (!isReauthenticationProvider(proof.provider)) return false;
+  const source = proof.source;
+  if (typeof source !== 'object' || source === null) return false;
+  const identity = await verifyOAuthIdentity(proof.provider, source as Record<string, unknown>);
+  if ('error' in identity) return false;
+  if (!identity.issuedAt || now - identity.issuedAt.getTime() > REAUTH_MAX_TOKEN_AGE) {
+    console.warn(`${proof.provider} confirmation refused: the ID token is not fresh`);
+    return false;
+  }
+  const links = await OAuthIdentityStore.findLinks(proof.provider, identity.subject);
+  return links.some((link) => link.accountId === accountId);
 }
 
 export default class AuthBackendProvider extends BackendProvider {
@@ -1504,17 +1587,55 @@ export default class AuthBackendProvider extends BackendProvider {
     return Auth.onSigninSuccessful(this, person, account as UserAccountData);
   }
 
-  async removeAccount() {
-    const auth = this.request.linkedAuth;
-    if (!auth) {
-      return null;
+  /**
+   * What the signed-in account confirms an account deletion with (see `removeAccount`):
+   * `['password']`, its linked providers (`'google'`, `'apple'`), or none (temporary and dev
+   * accounts, which a session alone may delete).
+   */
+  async getReauthenticationMethods(): Promise<{ methods: ReauthenticationMethod[] }> {
+    const account: UserAccountData = requireSessionUser();
+    const personId: string | undefined =
+      this.request?.linkedAuth?.user?.id ?? account.accountOf?.id;
+    if (!personId) {
+      throw new Error('Cannot list confirmation methods: the session has no person');
+    }
+    return { methods: await reauthenticationMethods(account.id, personId) };
+  }
+
+  /**
+   * Delete the signed-in account, its person, credentials, identity links and sessions.
+   *
+   * An account with a password or a linked Google/Apple identity must confirm it is the account
+   * holder in the same call: `{password}`, or `{provider, source}` with a freshly issued ID token
+   * (`source` as for `signinOAuth`). A missing or wrong proof answers `action: 'reauthenticate'`
+   * with the `methods` the account can use (also given by `getReauthenticationMethods`).
+   * Checking a proof is rate-limited (`reauthenticate`).
+   *
+   * @param proof - The password, or the provider credential
+   */
+  async removeAccount(proof?: RemoveAccountProof): Promise<RemoveAccountResult> {
+    const account: UserAccountData = requireSessionUser();
+    const personId: string | undefined =
+      this.request?.linkedAuth?.user?.id ?? account.accountOf?.id;
+    if (!account.id || !personId) {
+      throw new Error('Cannot remove account: the session has no account or user id');
     }
 
-    const account = auth.userAccount;
-    const user = auth.user;
-
-    if (!account?.id || !user?.id) {
-      throw new Error('Cannot remove account: the session has no account or user id');
+    const methods = await reauthenticationMethods(account.id, personId);
+    if (methods.length) {
+      if (!hasReauthenticationProof(proof)) {
+        return { error: REAUTH_MISSING_MESSAGE, action: 'reauthenticate', methods };
+      }
+      const limited = await limitRequest(
+        'reauthenticate',
+        this.request,
+        this.response,
+        account.id
+      );
+      if (limited) return limited;
+      if (!(await verifyReauthentication(this, account.id, personId, proof))) {
+        return { error: REAUTH_MISMATCH_MESSAGE, action: 'reauthenticate', methods };
+      }
     }
 
     await emitAccountWillBeRemovedEvent(account);
@@ -1524,7 +1645,7 @@ export default class AuthBackendProvider extends BackendProvider {
     // person and account: deleting those also removes the links pointing at them, which would
     // leave these nodes unreachable but still holding the email, password hashes and subject.
     await AuthCredential.deleteWhere((credential) =>
-      credential.credentialOf.equals({ id: user.id })
+      credential.credentialOf.equals({ id: personId })
     );
     await IdentityToken.deleteWhere((token) =>
       token.account.equals({ id: account.id })
@@ -1532,7 +1653,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     //remove account and user
     await this.accountShape.delete({ id: account.id });
-    await this.userShape.delete({ id: user.id });
+    await this.userShape.delete({ id: personId });
 
     console.log('Account has been deleted', account.id);
     await this.signout();
@@ -1810,6 +1931,7 @@ declareCallable(AuthBackendProvider, {
   signout: 'public',
   linkOAuthIdentity: 'user',
   resendEmailVerification: 'user',
+  getReauthenticationMethods: 'user',
   removeAccount: 'user',
 });
 
