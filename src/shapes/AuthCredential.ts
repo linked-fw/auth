@@ -79,10 +79,6 @@ export class AuthCredential extends Shape {
     return Server.call(this, 'userHasPassword');
   }
 
-  static hasAuthCredential(person: QResult<Person>): Promise<boolean> {
-    return Server.call(this, 'hasAuthCredential', person);
-  }
-
   static createNewCredential(
     email: string,
     password: string,

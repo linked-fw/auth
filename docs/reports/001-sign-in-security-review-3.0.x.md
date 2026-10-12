@@ -7,7 +7,9 @@ summary: >
   ask for the current password. Each was fixed in its own patch release. 3.0.6 stops the server
   dispatching auth's internal provider methods over HTTP and fixes the `types` entry. Lists the
   open items (Apple nonce, matching accounts by email, no rate limit) and what consumers must
-  configure. The rate limit item was closed in 3.2.0 (see the section on it).
+  configure. The rate limit item was closed in 3.2.0 (see the section on it). From 3.3.0 auth
+  declares its whole RPC surface, so apps in `rpcExposure: 'enforce'` need no declarations of
+  their own (see the section on it).
 ---
 
 # 001 — Sign-in security review, 3.0.1 to 3.0.6
@@ -119,7 +121,7 @@ its arguments, with no check of who is asking, and that no frontend calls.
 backend-to-backend `Server.call`, which keeps working. `test/exposure.test.mjs` checks these
 declarations, and that the methods auth's frontend calls are not internal.
 
-Left undeclared on purpose:
+Left undeclared on purpose (all three resolved in 3.3.0, see *3.3.0: auth declares its RPC surface*):
 
 - `hasAuthCredential` tells whether any person has a password. It is an account-enumeration leak
   rather than a takeover, and `AuthCredential.hasAuthCredential` is a client-side wrapper for it,
@@ -218,6 +220,30 @@ Decisions:
 - **In-memory counters, per process**, with a `setRateLimitStore` interface for a shared store.
   The client IP is Express's `request.ip`, so a deployment behind a proxy must set `trust proxy`.
 
+## 3.3.0: auth declares its RPC surface
+
+The three items left undeclared in 3.0.6 are closed. auth now declares every method of both
+providers, callable or internal, so a server in `rpcExposure: 'enforce'` keeps sign-in working
+without the app declaring anything (Create Now had been declaring auth's whole table itself).
+The table is in the readme (*RPC surface*).
+
+- **Callable.** What auth's frontend calls: sign-in, sign-up, recovery, `validateToken` and
+  `signout` are `public` (they run before there is a session, or after the access token
+  expired); `linkOAuthIdentity`, `removeAccount`, `userHasAuthCredential` and `userHasPassword`
+  are `user`.
+- **`hasAuthCredential` is internal,** and the client wrapper `AuthCredential.hasAuthCredential`
+  is removed: nothing called it, and it answered for any person. `userHasAuthCredential` /
+  `userHasPassword` answer for the signed-in user.
+- **`checkSignin`, `validateRequestToken`, `refreshSession`, `getTokenFromRequest`,
+  `getTokenCandidates` and `getRefreshTokenFromRequest` are internal.** No client code calls
+  them; the client refreshes through `validateToken`.
+- A dead call in `SigninWithPasswordForm` to `signinDevelopment`, a method that does not exist,
+  is removed.
+
+`test/exposure.test.mjs` runs each method through the server's own gates in `enforce` mode, reads
+every `Server.call` in `src/` and checks it reaches a callable method at the intended level, and
+fails when a provider method is added without a declaration.
+
 ## For consumers
 
 - **Set `APPLE_CLIENT_ID` (web) and/or `APPLE_CLIENT_ID_IOS` (iOS) wherever Apple sign-in is
@@ -237,6 +263,10 @@ Decisions:
   declaration of the same method is harmless.
 - **3.0.6 needs `@_linked/server-utils` 1.9 or later.** An app pinned to 1.8 would get a second
   copy of server-utils.
+- **From 3.3.0, an app needs no declarations for auth's methods** in `rpcExposure: 'enforce'`;
+  its own copies are harmless and can go. Code that called `AuthCredential.hasAuthCredential`
+  from a browser must use `userHasAuthCredential` / `userHasPassword`. Wrap the store holding
+  auth's shapes (including `UsedOAuthNonce`) with `withAccess({read: 'none', write: 'none'})`.
 - **From 3.2.0, behind a reverse proxy, set Express's `trust proxy`** to the proxies in front of
   the app, or every client shares the proxy's rate limit budget. Run several instances with a
   shared `setRateLimitStore` for global limits, and set `AUTH_RATE_LIMIT=off` in test runs that

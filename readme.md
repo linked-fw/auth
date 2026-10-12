@@ -261,6 +261,74 @@ export default class SPBackendProvider extends BackendProvider {
 }
 ```
 
+## RPC surface
+
+auth declares which of its provider methods the server may dispatch over HTTP
+(`/call/@_linked/auth/<method>` for `AuthBackendProvider`,
+`/call/@_linked/auth/<AuthCredential shape>/<method>` for `AuthCredentialProvider`), with
+`declareCallable` and `declareInternal` from `@_linked/server-utils/utils/callable`. Every method
+of both providers is declared, so a server running `server.rpcExposure: 'enforce'` (or
+`LINKED_RPC_EXPOSURE=enforce`) keeps sign-in working **without the app declaring any of auth's
+methods**, and in `warn` mode nothing of auth's is logged as undeclared.
+
+| Level | Methods | What the server does |
+|---|---|---|
+| `public` | `AuthBackendProvider`: `signinWithPassword`, `createAccount`, `signinOAuth`, `createOAuthNonce`, `signinTemporary`, `signinDev`, `sendResetPasswordLink`, `resetPassword`, `validateToken`, `signout` | runs, signed in or not |
+| `user` | `AuthBackendProvider`: `linkOAuthIdentity`, `removeAccount`; `AuthCredentialProvider`: `userHasAuthCredential`, `userHasPassword` | 401 without a session, before the method runs |
+| internal | `AuthBackendProvider`: `upgradePasswordHash`, `getPasswordForUser`, `getOrCreateAccount`, `loadAccountForSession`, `loadUserForSession`, `checkSignin`, `validateRequestToken`, `refreshSession`, `getTokenFromRequest`, `getTokenCandidates`, `getRefreshTokenFromRequest`; `AuthCredentialProvider`: `createNewCredential`, `hasAuthCredential` | 501 over HTTP in every mode; backend code can still call them |
+
+Why these levels:
+
+- Sign-in, sign-up and recovery run before there is a session. `validateToken` (the refresh-token
+  exchange) and `signout` must answer a caller whose access token has already expired, so they
+  are public too. `resetPassword` without a reset token is the signed-in password change; it
+  checks the session and the current password itself.
+- The internal methods either act on a person, credential or account named by their arguments
+  (setting a password hash, reading one, creating an account, telling whether any person has a
+  password), or are the request and token plumbing behind sign-in, which the client never calls.
+  `AuthCredential.hasAuthCredential(person)` is gone from the client for that reason: ask about
+  the signed-in user with `AuthCredential.userHasAuthCredential()` or `userHasPassword()`.
+
+**Subclassing `AuthBackendProvider`.** An override of a callable method keeps the level auth
+declared (the strictest one up the class chain), and an override of an internal method stays
+internal. A method the subclass adds is undeclared until the subclass declares it on its own
+class:
+
+```ts
+import { declareCallable } from '@_linked/server-utils/utils/callable';
+
+export default class AppAuthProvider extends AuthBackendProvider {
+  async myExtraMethod() { /* ... */ }
+}
+declareCallable(AppAuthProvider, { myExtraMethod: 'user' });
+```
+
+An app that used to declare auth's methods itself can drop those declarations. Declaring the same
+level again is harmless, and an app's `declareInternal` still wins over auth's `declareCallable`.
+
+**Keep auth's data off the generic query plane.** The declarations above cover auth's provider
+methods only. The generic query endpoints (`/call/@_linked/server/*Query`, `/api/*`) read and write
+shapes directly, so wrap the store that holds auth's shapes with `withAccess` and give it no
+access, as its own store object (it may point at the same dataset as other shapes):
+
+```js
+// linked.backend.storage.js
+import { withAccess } from '@_linked/server-utils/utils/QueryAccess';
+import { AuthCredential } from '@_linked/auth/shapes/AuthCredential';
+import { Password } from '@_linked/auth/shapes/Password';
+import { RefreshToken } from '@_linked/auth/shapes/RefreshToken';
+import { IdentityToken } from '@_linked/auth/shapes/IdentityToken';
+import { Authentication } from '@_linked/auth/shapes/Authentication';
+import { UsedOAuthNonce } from '@_linked/auth/shapes/UsedOAuthNonce';
+
+const credentials = withAccess(new FusekiStore({ endpoint }), { read: 'none', write: 'none' });
+LinkedStorage.setDatasetForShapes(credentials,
+  AuthCredential, Password, RefreshToken, IdentityToken, Authentication, UsedOAuthNonce);
+```
+
+Without it, a store's default rule decides who may query password hashes, refresh tokens and
+reset tokens.
+
 ## Rate limits
 
 The calls that check a credential, send an email or create something are rate limited by the
