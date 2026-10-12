@@ -37,7 +37,7 @@ import {
   hashRefreshToken,
   looksLikeOpaqueRefreshToken,
 } from './refreshTokenHash.js';
-import { toDate } from '../helpers/credentialToken.js';
+import { toDate } from './date.js';
 
 export { generateRefreshToken, hashRefreshToken };
 

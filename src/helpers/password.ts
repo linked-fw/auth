@@ -6,10 +6,10 @@ import { QResult } from '@_linked/core/queries/SelectQuery';
 import {
   consumeCredentialToken,
   hashToken,
-  toDate,
   tokenExpiresAt,
   TOKEN_KINDS,
 } from './credentialToken.js';
+import { toDate } from '../utils/date.js';
 
 export { DEFAULT_PASSWORD_RESET_TTL } from './credentialToken.js';
 

@@ -64,8 +64,8 @@ Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/t
     state is lost on the redirect. Use Apple's popup mode.
 - **Three new callable methods:** `verifyEmail` (`public`), `resendEmailVerification` (`user`) and
   `getReauthenticationMethods` (`user`). auth declares them itself. An app on
-  `rpcExposure: 'enforce'` that pins auth's surface in its own table (as Create Now's
-  `authExposure` does) must add them, or its drift check refuses to start.
+  `rpcExposure: 'enforce'` that pins auth's surface in its own table must add them, or a drift
+  check against that table will refuse to start.
 - **Sign-in and password reset no longer say whether an email is registered.** Sign-in answers
   "Invalid email / password combination." for an unknown email, an account without a password and
   a wrong password alike; it used to answer "This email is not registered" or "No password found

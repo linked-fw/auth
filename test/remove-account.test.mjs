@@ -33,9 +33,8 @@ const { default: PasswordHelper } = await import(new URL('helpers/password.js', 
 const { default: GoogleHelper } = await import(new URL('helpers/google.js', libDir));
 const { OAuthIdentityStore } = await import(new URL('utils/oauthIdentities.js', libDir));
 const sessions = await import(new URL('utils/sessions.js', libDir));
-const { default: AuthBackendProvider, REAUTH_MAX_TOKEN_AGE } = await import(
-  new URL('backend.js', libDir)
-);
+const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
+const { REAUTH_MAX_TOKEN_AGE } = await import(new URL('helpers/reauthentication.js', libDir));
 const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
 
 const PERSON = 'https://id.test/person/ada';

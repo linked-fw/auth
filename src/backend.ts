@@ -69,6 +69,7 @@ import {
   personEmailVerified,
   verificationTokenFields,
 } from './helpers/emailVerification.js';
+import { REAUTH_MAX_TOKEN_AGE } from './helpers/reauthentication.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import type { AuthSession } from './types/auth.js';
 
@@ -360,12 +361,6 @@ async function markOAuthEmailVerified(identity: VerifiedOAuthIdentity, personId:
   }
 }
 
-/**
- * How old a provider's ID token may be to confirm an account deletion. The token's own expiry
- * (about an hour for Google) is too long for a "you just signed in" check.
- */
-export const REAUTH_MAX_TOKEN_AGE = 10 * 60 * 1000;
-
 const REAUTH_MISSING_MESSAGE = 'Confirm it is you to delete this account.';
 const REAUTH_MISMATCH_MESSAGE = 'That confirmation did not match this account.';
 
@@ -429,6 +424,7 @@ async function verifyReauthentication(
     console.warn(`${proof.provider} confirmation refused: the ID token is not fresh`);
     return false;
   }
+  // a valid token of some other Google/Apple user proves nothing about this account
   const links = await OAuthIdentityStore.findLinks(proof.provider, identity.subject);
   return links.some((link) => link.accountId === accountId);
 }

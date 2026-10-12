@@ -3,6 +3,7 @@ import { Person } from '@_linked/schema/shapes/Person';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import { AuthCredential } from '../shapes/AuthCredential.js';
 import { readTtlFromEnv } from '../utils/token.js';
+import { toDate } from '../utils/date.js';
 
 /** How long a password reset link works, in seconds, unless `AUTH_PASSWORD_RESET_TTL` is set. */
 export const DEFAULT_PASSWORD_RESET_TTL = 60 * 60;
@@ -40,13 +41,6 @@ export type CredentialTokenKind = keyof typeof TOKEN_KINDS;
  */
 export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token, 'utf8').digest('base64url');
-}
-
-/** A stored value as a Date (stores may return dateTime literals as strings). */
-export function toDate(value: unknown): Date | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const date = value instanceof Date ? value : new Date(value as string | number);
-  return isNaN(date.getTime()) ? undefined : date;
 }
 
 /** When a token of `kind` issued at `now` stops working. */
@@ -110,8 +104,10 @@ export async function consumeCredentialToken(
     .where((cred) => cred[markerField].equals(marker))
     .one();
   if (!won) return undefined;
+  // the marker has done its job; it must not stay behind on the credential
   await AuthCredential.update({ [markerField]: null }).for({ id: won.id });
 
+  // the expiry read above belongs to `stored`, so it only applies to that same credential
   if (won.id !== stored.id) return undefined;
   const expiresAt = toDate(stored[expiresField]);
   if (!expiresAt || expiresAt.getTime() <= now.getTime()) return undefined;
