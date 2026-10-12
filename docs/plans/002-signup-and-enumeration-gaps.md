@@ -4,7 +4,7 @@ summary: >
   account exists. createAccount refuses any existing account for the email and validates the
   password on the server. Signup gets email verification. Request reads in checkSignin,
   removeAccount and setAuthentication are guarded, and removeAccount re-authenticates the user.
-status: Implementation
+status: Review
 source: docs/backlog/003-remaining-rpc-and-signup-gaps.md
 ---
 
