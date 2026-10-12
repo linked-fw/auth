@@ -14,5 +14,5 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      require-tests: false
+      require-tests: true
       run-e2e: false
