@@ -17,7 +17,7 @@ This report is for whoever works on `@_linked/auth` next. It replaces plan 002 a
 3.4.0 changed, why each design was chosen, and what was deliberately left open. The CHANGELOG
 says what changed; this says why.
 
-PR: (to be added)
+PR: [linked-fw/auth#108](https://github.com/linked-fw/auth/pull/108)
 
 ## Problem
 
