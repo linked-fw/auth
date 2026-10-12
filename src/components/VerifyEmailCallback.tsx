@@ -28,13 +28,15 @@ export default function VerifyEmailCallback({ onEmailVerified }: VerifyEmailCall
   const [state, setState] = useState<VerifyState>({ status: 'verifying' });
   const [resendText, setResendText] = useState('');
   const [resending, setResending] = useState(false);
-  // a token is single-use: a second call (StrictMode, a re-render) would report it as used
-  const requested = useRef(false);
+  // a token is single-use: a second call for the same token (StrictMode, a re-render) would
+  // report it as used. Keyed on the token so a route reused for a new link still redeems it.
+  const requested = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     // wait for the session check: when signed in, verifying refreshes the session
-    if (auth.validating || requested.current) return;
-    requested.current = true;
+    if (auth.validating || requested.current === token) return;
+    requested.current = token;
+    setState({ status: 'verifying' });
     if (!token) {
       setState({
         status: 'invalid',

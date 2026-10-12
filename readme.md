@@ -33,7 +33,7 @@ The client refreshes ~60 s before the access token's `exp`, again when the tab b
 
 Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/token`) before rendering `ProvideAuth`. The client then sends `x-linked-auth-transport: body`, the server returns the refresh token in the response body, and both tokens are stored through your functions (`expires` in seconds). Other non-browser clients (scripts, tests) can send that header too.
 
-## Upgrading to 4.0
+## Upgrading to 3.4
 
 > **Breaking: `removeAccount()` no longer answers a plain boolean.** It answers `true` when the
 > account was deleted, and `{error, action, …}` otherwise. That object is truthy, so a truthy
@@ -43,13 +43,13 @@ Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/t
 > // before (3.x): signs the user out even when nothing was deleted
 > if (await auth.removeAccount()) signout();
 >
-> // after (4.0)
+> // after (3.4)
 > const result = await auth.removeAccount({ password });
 > if (result === true) signout();
 > else showError(result.error);
 > ```
 
-4.0 is a major release because of the point above. Most apps only need the first point below.
+3.4 is released as a minor version, so check every `removeAccount()` call when you upgrade. Most apps only need the first point below.
 
 - **Deleting an account now needs proof.** `removeAccount()` with no argument fails with
   `{error, action: 'reauthenticate', methods}` for any account with a password or a linked

@@ -825,7 +825,7 @@ export default class AuthBackendProvider extends BackendProvider {
           person: user,
         };
       },
-      `createAccount - ${firstName} ${lastName} - ${email}`
+      'createAccount'
     );
 
     // the sign-in result is the same whether or not the email went out

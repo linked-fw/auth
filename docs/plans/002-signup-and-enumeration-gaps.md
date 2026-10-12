@@ -906,13 +906,13 @@ Tasks:
   - Email configuration
   - Setup Verify Email route
   - the account-deletion section, with `getOAuthSource` examples
-- Draft the changeset text here. It is created with `npx changeset` in wrapup, as a major.
+- Draft the changeset text here. It is created with `npx changeset` in wrapup, as a minor (user decision after review 2).
 
-Changeset (`@_linked/auth`: major):
+Changeset (`@_linked/auth`: minor):
 
 ````md
 ---
-'@_linked/auth': major
+'@_linked/auth': minor
 ---
 
 Email verification, uniform sign-in and reset answers, and proof for account deletion.
@@ -925,7 +925,7 @@ no longer means deleted: compare `=== true`.
 // before (3.x): signs the user out even when nothing was deleted
 if (await auth.removeAccount()) signout();
 
-// after (4.0)
+// after (3.4)
 const result = await auth.removeAccount({ password });
 if (result === true) signout();
 else showError(result.error);
@@ -1231,3 +1231,13 @@ Done:
     environment parsing. Open.
 - The low findings from the first review are still open. They are listed under "Low (left for
   the pause)".
+
+## After review 2 (user decisions)
+
+- **Release bump: minor.** This overrides iteration 1's Finding 1 choice. The readme section is
+  "Upgrading to 3.4" and keeps the `=== true` warning first.
+- **Signup no longer logs the name or email.** The `Auth.login` label for signup is now just
+  `createAccount`.
+- **`VerifyEmailCallback`'s once-only guard is keyed on the token**, so a route reused for a new
+  link redeems the new token. Covered by `test/verify-email-callback.test.mjs`.
+- Other low findings are accepted as-is for this release.
