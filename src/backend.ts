@@ -2,7 +2,7 @@ import { Person as SchemaPerson } from '@_linked/schema/shapes/Person';
 import type { Shape } from '@_linked/core/shapes/Shape';
 import { UserAccount } from '@_linked/sioc/shapes/UserAccount';
 import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider';
-import { declareInternal } from '@_linked/server-utils/utils/callable';
+import { declareCallable, declareInternal } from '@_linked/server-utils/utils/callable';
 import session from 'express-session';
 
 import { Auth } from './utils/auth.js';
@@ -1504,15 +1504,46 @@ export default class AuthBackendProvider extends BackendProvider {
 }
 
 /**
- * Methods the server must never dispatch over HTTP (`/call/@_linked/auth/...`). They act on a
- * credential, person or account the caller names, without checking who is asking, and are only
- * meant to be called by this provider's own sign-in, reset and refresh code. Exposed, they would
- * let anyone set a credential's password hash (`upgradePasswordHash`), read a password hash
- * (`getPasswordForUser`), create an account for any WebID (`getOrCreateAccount`), or read an
- * account's email or a person's details (`loadAccountForSession`, `loadUserForSession`).
+ * The RPC surface of this provider: which methods `/call/@_linked/auth/<method>` may reach. A
+ * server running `rpcExposure: 'enforce'` refuses (501) any method not declared here, so every
+ * method this provider defines is declared one way or the other (test/exposure.test.mjs fails on
+ * one that is not).
  *
- * An internal declaration is inherited, so a subclass that overrides one of these stays covered.
- * Backend-to-backend calls are unaffected.
+ * Callable (what auth's own frontend calls):
+ * - `'public'`: sign-in, sign-up and recovery run before there is a session. `validateToken` and
+ *   `signout` must also answer a caller whose access token has expired: `validateToken` is the
+ *   refresh-token exchange, and a 401 there would only send the client into another refresh.
+ *   `resetPassword` without a reset token checks the session itself.
+ * - `'user'`: the server answers 401 before the method runs when the request has no session.
+ *
+ * A subclass that overrides one of these keeps its level (the strictest one declared up the class
+ * chain). A method a subclass adds is undeclared until the subclass declares it.
+ */
+declareCallable(AuthBackendProvider, {
+  signinWithPassword: 'public',
+  createAccount: 'public',
+  signinOAuth: 'public',
+  createOAuthNonce: 'public',
+  signinTemporary: 'public',
+  signinDev: 'public',
+  sendResetPasswordLink: 'public',
+  resetPassword: 'public',
+  validateToken: 'public',
+  signout: 'public',
+  linkOAuthIdentity: 'user',
+  removeAccount: 'user',
+});
+
+/**
+ * Methods the server must never dispatch over HTTP, in any exposure mode. Backend-to-backend
+ * calls are unaffected, and the declaration is inherited, so a subclass that overrides one of
+ * these stays covered.
+ *
+ * These act on a credential, person or account the caller names, without checking who is asking.
+ * Exposed, they would let anyone set a credential's password hash (`upgradePasswordHash`), read a
+ * password hash (`getPasswordForUser`), create an account for any WebID (`getOrCreateAccount`),
+ * or read an account's email or a person's details (`loadAccountForSession`,
+ * `loadUserForSession`).
  */
 declareInternal(AuthBackendProvider, [
   'upgradePasswordHash',
@@ -1520,4 +1551,18 @@ declareInternal(AuthBackendProvider, [
   'getOrCreateAccount',
   'loadAccountForSession',
   'loadUserForSession',
+]);
+
+/**
+ * The request and token plumbing behind sign-in and refresh. They act on the caller's own request,
+ * so reachable they would give a caller nothing it does not already have, but nothing on the
+ * client calls them either (the client refreshes through `validateToken`).
+ */
+declareInternal(AuthBackendProvider, [
+  'checkSignin',
+  'validateRequestToken',
+  'refreshSession',
+  'getTokenFromRequest',
+  'getTokenCandidates',
+  'getRefreshTokenFromRequest',
 ]);

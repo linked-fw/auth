@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import style from './SigninWithPasswordForm.module.css';
 import { Input } from '@_linked/primitives/components/Input';
@@ -63,31 +63,6 @@ export const SigninWithPasswordForm = ({
   const [searchParam] = useSearchParams();
   const { t } = useTranslate();
   let prefix = 'signIn';
-
-  const adminLogin = () => {
-    return Server.call(
-      packageName,
-      'signinDevelopment',
-      searchParam.get('email')
-    ).then((response) => {
-      // if (response.auth) {
-      //   const result = auth.updateAuth(
-      //     response.auth,
-      //     response.accessToken,
-      //     response.refreshToken,
-      //   );
-      //   if (onLoggedIn) {
-      //     onLoggedIn(result);
-      //   }
-      //   return true;
-      // }
-    });
-  };
-  useEffect(() => {
-    if (searchParam.get('email') && process.env.NODE_ENV !== 'production') {
-      adminLogin();
-    }
-  }, [searchParam]);
 
   const createAccountRedirect = () => {
     onCreateAccount

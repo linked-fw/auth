@@ -1,5 +1,5 @@
 import { ShapeProvider } from '@_linked/server-utils/utils/ShapeProvider';
-import { declareInternal } from '@_linked/server-utils/utils/callable';
+import { declareCallable, declareInternal } from '@_linked/server-utils/utils/callable';
 import { AuthCredential } from './AuthCredential.js';
 import PasswordHelper from '../helpers/password.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
@@ -45,8 +45,8 @@ export class AuthCredentialProvider extends ShapeProvider {
   }
 
   /**
-   * Whether `person` has a credential. It answers for any person, so a client could probe many:
-   * it is limited by address, and a limited call fails with status 429.
+   * Whether `person` has a credential. Internal (backend code only): it answers for any person.
+   * It is also limited by address, and a limited call fails with status 429.
    */
   async hasAuthCredential(person: QResult<Person>) {
     const limited = await limitRequest('credentialLookup', this.request, this.response);
@@ -78,8 +78,19 @@ export class AuthCredentialProvider extends ShapeProvider {
 }
 
 /**
- * `createNewCredential` adds a password to any person the caller names, so the server must never
- * dispatch it over HTTP. `resetPassword` reaches it through `AuthCredential.createNewCredential`,
- * a backend-to-backend call, which this does not affect.
+ * The RPC surface of this provider (`/call/@_linked/auth/<AuthCredential shape>/<method>`).
+ * `userHasAuthCredential` and `userHasPassword` answer for the signed-in user only.
  */
-declareInternal(AuthCredentialProvider, ['createNewCredential']);
+declareCallable(AuthCredentialProvider, {
+  userHasAuthCredential: 'user',
+  userHasPassword: 'user',
+});
+
+/**
+ * Never dispatched over HTTP. `createNewCredential` adds a password to any person the caller
+ * names; `resetPassword` reaches it through `AuthCredential.createNewCredential`, a
+ * backend-to-backend call, which this does not affect. `hasAuthCredential` tells whether any
+ * person has a credential (account enumeration); a client asks about the signed-in user with
+ * `userHasAuthCredential` / `userHasPassword` instead.
+ */
+declareInternal(AuthCredentialProvider, ['createNewCredential', 'hasAuthCredential']);
