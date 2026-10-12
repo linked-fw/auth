@@ -555,18 +555,15 @@ The app adds a route at `/auth/verify-email`, which the readme documents.
 5. **Rate limits and RPC tables:** the 3 new rules and the 3 new methods.
 6. **Changeset text** is drafted in Phase 6 and created in wrapup.
 
-### Plan deviations / open questions
+### Plan deviations / open questions (resolved)
 
-- **ID-token freshness window.** D3 relies on "a freshly issued ID token". The plan adds an
-  explicit `iat` age limit of 10 minutes for the deletion proof, on top of `exp`. Without it, a
-  cached Google token up to 1 hour old would pass. Confirm 10 minutes, or drop the check and rely
-  on `exp`.
-- **Dev accounts report `emailVerified: false`.** `signinDev` writes no credential. webid.email
-  does prove the email, but marking dev accounts verified is outside D1's list. This is harmless
-  while CN gates nothing on the flag.
-- **Server-side password length is enforced on signup only (D2).** A token reset or a password
-  change still accepts any length on the server. The client forms enforce 6. Should the reset path
-  share the check? It is a small addition, but not decided.
+- **ID token age.** The deletion proof requires the ID token's `iat` to be no more than 10 minutes
+  old, in addition to the `exp` check. Without that limit, a cached Google token up to an hour old
+  would pass, and D3's "recent sign-in" would mean nothing.
+- **Dev accounts report `emailVerified: false`.** Accepted. `signinDev` stores no credential, and
+  dev accounts exist only for development.
+- **Password length.** Signup, token reset and password change all use the same
+  `MIN_PASSWORD_LENGTH` check on the server. One rule, so the paths cannot drift.
 
 ## Phases
 
@@ -588,6 +585,8 @@ Tasks:
     - checks for an existing Person, UserAccount or AuthCredential
     - normalizes the email it stores
     - writes `email` on the new credential
+- `resetPassword` (with a token) and `changePassword` use the same `MIN_PASSWORD_LENGTH` check and
+  return `invalid_password`.
 - `src/helpers/password.ts`: `MIN_PASSWORD_LENGTH`, `INVALID_CREDENTIALS_MESSAGE`, and
   `compareWithDummyHash(plain)`, whose hash is computed lazily once.
 - `src/utils/auth.ts`: `setAuthentication` and `updateSessionData` work without a request.
@@ -602,6 +601,8 @@ Validation (new tests):
   - refuses when only an AuthCredential with the email exists
   - refuses a missing or short password with `invalid_password` and creates nothing
   - creates the account when nothing exists, and the credential carries the normalized email
+- `test/password-reset.test.mjs`: a short password is refused for a token reset and for a password
+  change.
 - `test/password.test.mjs` or a new `test/enumeration.test.mjs`: for an unknown email, an
   account with no credential, and a wrong password, the result is the same
   `{error: INVALID_CREDENTIALS_MESSAGE}`, and the unknown-email path calls `bcrypt.compare` once.
