@@ -3,10 +3,10 @@ import type { Shape } from '@_linked/core/shapes/Shape';
 import { UserAccount } from '@_linked/sioc/shapes/UserAccount';
 import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider';
 import { declareCallable, declareInternal } from '@_linked/server-utils/utils/callable';
+import { requireSessionUser } from '@_linked/server-utils/utils/CallContext';
 import session from 'express-session';
 
 import { Auth } from './utils/auth.js';
-import { SendMailClient } from 'zeptomail';
 import { AuthCredential } from './shapes/AuthCredential.js';
 import { auth } from './ontologies/auth.js';
 import { expressjwt, Request } from 'express-jwt';
@@ -17,9 +17,14 @@ import type {
   CreateAccount,
   LinkOAuthIdentityResult,
   OAuthProvider,
+  ReauthenticationMethod,
+  RemoveAccountProof,
+  RemoveAccountResult,
+  ResendEmailVerificationResult,
   UserAccountData,
   UserData,
   VerifiedOAuthIdentity,
+  VerifyEmailResult,
 } from './types/auth.js';
 import {
   createAccessToken,
@@ -46,14 +51,25 @@ import {
 } from './utils/events.js';
 import AppleHelper from './helpers/apple.js';
 import GoogleHelper from './helpers/google.js';
-import PasswordHelper from './helpers/password.js';
+import PasswordHelper, {
+  INVALID_CREDENTIALS_MESSAGE,
+  INVALID_PASSWORD_RESULT,
+  isAcceptablePassword,
+} from './helpers/password.js';
 import { IdentityToken } from './shapes/IdentityToken.js';
 import { decideEmailMatchedAccount } from './helpers/oauth-account.js';
 import { OAuthIdentityStore } from './utils/oauthIdentities.js';
 import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
 import path, { dirname, basename } from 'path';
-import { LinkedEmail } from '@_linked/server-utils/utils/LinkedEmail';
+import { escapeHtml, sendAuthEmail } from './utils/email.js';
+import { clearUnsentToken, consumeCredentialToken } from './helpers/credentialToken.js';
+import {
+  markEmailVerified,
+  personEmailVerified,
+  verificationTokenFields,
+} from './helpers/emailVerification.js';
+import { REAUTH_MAX_TOKEN_AGE } from './helpers/reauthentication.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import type { AuthSession } from './types/auth.js';
 
@@ -125,6 +141,7 @@ async function verifyOAuthIdentity(
       emailVerified: Boolean(apple.email),
       givenName: stringOrUndefined(oauthUserData.givenName),
       familyName: stringOrUndefined(oauthUserData.familyName),
+      issuedAt: issuedAtOf(apple.iat),
     };
   }
 
@@ -146,6 +163,7 @@ async function verifyOAuthIdentity(
       emailVerified: google.email_verified === true,
       givenName: stringOrUndefined(google.given_name),
       familyName: stringOrUndefined(google.family_name),
+      issuedAt: issuedAtOf(google.iat),
     };
   }
 
@@ -154,6 +172,45 @@ async function verifyOAuthIdentity(
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+/** A token's `iat` claim (seconds since the epoch) as a date. */
+function issuedAtOf(iat: unknown): Date | undefined {
+  return typeof iat === 'number' && Number.isFinite(iat) ? new Date(iat * 1000) : undefined;
+}
+
+/**
+ * Whether anything already exists for this email: a person at its WebID, an account with the
+ * email (stored as typed by older releases, or normalized), or a credential with the email or
+ * of that person. Signup refuses all of them, so it never adds a second set of rows for an
+ * email that someone already holds.
+ */
+async function emailAlreadyRegistered(
+  provider: AuthBackendProvider,
+  email: string,
+  normalizedEmail: string,
+  webID: string
+): Promise<boolean> {
+  const person = await provider.userShape.select((p) => [p.givenName]).for(webID);
+  if (person) return true;
+
+  const emails = email === normalizedEmail ? [normalizedEmail] : [normalizedEmail, email];
+  for (const candidate of emails) {
+    const account = await provider.accountShape
+      .select((a) => [a.email])
+      .where((a) => a.email.equals(candidate))
+      .one();
+    if (account) return true;
+    const credential = await AuthCredential.select((c) => [c.email])
+      .where((c) => c.email.equals(candidate))
+      .one();
+    if (credential) return true;
+  }
+
+  const credentialOfPerson = await AuthCredential.select((c) => [c.credentialOf])
+    .where((c) => c.credentialOf.equals({ id: webID }))
+    .one();
+  return Boolean(credentialOfPerson);
 }
 
 /** An account with its person's profile, as sign-in returns it, or null when it is gone. */
@@ -168,6 +225,37 @@ async function loadAccountWithPerson(
     ])
     .for({ id: accountId });
   return (account as unknown as UserAccountData) || null;
+}
+
+/** The stored email of an account, else the one in its session, else ''. */
+async function accountEmail(
+  provider: AuthBackendProvider,
+  account: UserAccountData
+): Promise<string> {
+  try {
+    const stored = await provider.accountShape.select((a) => [a.email]).for({ id: account.id });
+    if (stored?.email) return stored.email;
+  } catch (error) {
+    console.warn('Could not read the email of an account', error);
+  }
+  const sessionEmail: unknown = (account as { email?: unknown }).email;
+  return typeof sessionEmail === 'string' ? sessionEmail : '';
+}
+
+/** The given name of a person, for an email greeting, if it can be read. */
+async function givenNameOf(
+  provider: AuthBackendProvider,
+  personId: string
+): Promise<string | undefined> {
+  try {
+    const person = await provider.userShape
+      .select((u) => u.givenName)
+      .for({ id: personId })
+      .one();
+    return typeof person?.givenName === 'string' && person.givenName ? person.givenName : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -206,10 +294,144 @@ const filename__ =
     : //@ts-ignore
       basename(import.meta.url).replace('file:/', '');
 
+/**
+ * Email the verification link for `token` (already stored, hashed, on a credential) to `email`.
+ * When the email is not sent, the stored token is removed again.
+ *
+ * @returns false when the email could not be sent
+ */
+async function sendVerificationEmail(
+  email: string,
+  givenName: string | undefined,
+  token: string,
+  tokenHash: string
+): Promise<boolean> {
+  const verifyUrl = `${process.env.SITE_ROOT}/auth/verify-email?token=${token}`;
+  const emailOptions = {
+    to: [
+      {
+        email_address: {
+          address: email,
+          name: email,
+        },
+      },
+    ],
+    subject: `Verify your ${process.env.APP_NAME} email address`,
+    htmlbody: `
+          <table role='presentation' border='0' cellpadding='0' cellspacing='0' class='body' style='border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #fff; width: 100%;' width='100%' bgcolor='#fff'>
+            <tr>
+              <td>
+                <p>Hey${givenName ? ` ${escapeHtml(givenName)}` : ''} 👋</p>
+                <p>Click the button below to confirm your email address:</p>
+                <a href='${escapeHtml(verifyUrl)}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Verify Email</a>
+                <p>Cheers,</p>
+                <p>${escapeHtml(process.env.APP_NAME)} Team</p>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <p style='font-size: 12px; color: #999;'>Alternatively, you can also copy and paste the link into your browser:</p>
+                <a href='${escapeHtml(verifyUrl)}' target='_blank' style='font-size: 12px;'>${escapeHtml(verifyUrl)}</a>
+              </td>
+            </tr>
+          </table>
+        `,
+  };
+  const outcome = await sendAuthEmail(emailOptions, { purpose: 'verify', url: verifyUrl });
+  if (outcome === 'failed') {
+    await clearUnsentToken('verify', tokenHash);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * After an OAuth sign-in reached `personId`: the provider vouches for its email, so when that
+ * email is the person's (it gives their WebID), the person's email counts as verified. A failure
+ * is logged and never fails the sign-in.
+ */
+async function markOAuthEmailVerified(identity: VerifiedOAuthIdentity, personId: string) {
+  if (!identity.email || !identity.emailVerified) return;
+  try {
+    const email = identity.email.trim().toLowerCase();
+    if (emailToWebID(email) !== personId) return;
+    await markEmailVerified(personId, email);
+  } catch (error) {
+    console.error(`${identity.provider} sign-in: could not mark the email verified`, error);
+  }
+}
+
+const REAUTH_MISSING_MESSAGE = 'Confirm it is you to delete this account.';
+const REAUTH_MISMATCH_MESSAGE = 'That confirmation did not match this account.';
+
+function isReauthenticationProvider(provider: unknown): provider is 'google' | 'apple' {
+  return typeof provider === 'string' && VERIFIED_OAUTH_PROVIDERS.includes(provider);
+}
+
+/**
+ * What the account can confirm it is the account holder with: its password when it has one,
+ * otherwise its linked Google/Apple identities. None (temporary and dev accounts): a session is
+ * all there is to check.
+ */
+async function reauthenticationMethods(
+  accountId: string,
+  personId: string
+): Promise<ReauthenticationMethod[]> {
+  if (await OAuthIdentityStore.personHasPassword(personId)) return ['password'];
+  return (await OAuthIdentityStore.findLinkedProviders(accountId)).filter(
+    isReauthenticationProvider
+  );
+}
+
+/** Whether `proof` was sent at all, as opposed to checked: a password or a provider. */
+function hasReauthenticationProof(proof: unknown): proof is Record<string, unknown> {
+  return (
+    typeof proof === 'object' &&
+    proof !== null &&
+    ('password' in proof || 'provider' in proof)
+  );
+}
+
+/**
+ * Check a deletion proof against the account. Any valid proof counts, not only the preferred
+ * method: a linked Google identity is as strong as the password.
+ *
+ * - `{password}`: checked against the person's password, as a password change checks it.
+ * - `{provider, source}`: verified exactly as `signinOAuth` verifies it (signature, audience,
+ *   expiry, Apple's nonce), issued no more than `REAUTH_MAX_TOKEN_AGE` ago, and its subject
+ *   linked to this account.
+ */
+async function verifyReauthentication(
+  provider: AuthBackendProvider,
+  accountId: string,
+  personId: string,
+  proof: Record<string, unknown>,
+  now: number = Date.now()
+): Promise<boolean> {
+  if ('password' in proof) {
+    if (typeof proof.password !== 'string' || !proof.password) return false;
+    const credential = await provider.getPasswordForUser({ id: personId });
+    if (!credential?.passwordHash) return false;
+    return PasswordHelper.checkPassword(proof.password, credential.passwordHash);
+  }
+
+  if (!isReauthenticationProvider(proof.provider)) return false;
+  const source = proof.source;
+  if (typeof source !== 'object' || source === null) return false;
+  const identity = await verifyOAuthIdentity(proof.provider, source as Record<string, unknown>);
+  if ('error' in identity) return false;
+  if (!identity.issuedAt || now - identity.issuedAt.getTime() > REAUTH_MAX_TOKEN_AGE) {
+    console.warn(`${proof.provider} confirmation refused: the ID token is not fresh`);
+    return false;
+  }
+  // a valid token of some other Google/Apple user proves nothing about this account
+  const links = await OAuthIdentityStore.findLinks(proof.provider, identity.subject);
+  return links.some((link) => link.accountId === accountId);
+}
+
 export default class AuthBackendProvider extends BackendProvider {
   public accountShape: typeof UserAccount = UserAccount;
   public userShape: typeof SchemaPerson = SchemaPerson;
-  protected zeptoMail: SendMailClient;
   // Plan-011 — store the listener so dispose() can unsubscribe it.
   // Anonymous inline callbacks would leak across HMR reloads.
   private accountRemovedListener?: (account: UserAccountData) => Promise<void>;
@@ -241,12 +463,6 @@ export default class AuthBackendProvider extends BackendProvider {
     // set the user and account shapes for auth
     Auth.userType = this.userShape;
     Auth.accountType = this.accountShape;
-
-    // set zeptoMail client
-    this.zeptoMail = new SendMailClient({
-      url: 'api.zeptomail.com/',
-      token: process.env.ZEPTOMAIL_TOKEN,
-    });
 
     // FOR initial page requests we send the JWT token as a cookie (Stored in the browser)
     // see getToken for how we use the cookie and set this.request.linkedAuth
@@ -366,7 +582,7 @@ export default class AuthBackendProvider extends BackendProvider {
   // TODO: check possible to remove this method?
   checkSignin() {
     //this is a temporary fix that allows the frontend to check if the user is still logged in on the backend
-    return this.request.linkedAuth?.userAccount;
+    return this.request?.linkedAuth?.userAccount;
   }
 
   /**
@@ -432,10 +648,10 @@ export default class AuthBackendProvider extends BackendProvider {
         })
         .one();
 
-      if (!account) {
-        return {
-          error: 'This email is not registered',
-        };
+      // every failure gives the same answer, and costs about as much as a wrong password
+      if (!account?.accountOf?.id) {
+        await PasswordHelper.compareWithDummyHash(plainPassword);
+        return { error: INVALID_CREDENTIALS_MESSAGE };
       }
 
       existingCredential = preferCredentialWithPassword(
@@ -450,12 +666,11 @@ export default class AuthBackendProvider extends BackendProvider {
           return ac.credentialOf.equals({ id: account.accountOf.id });
         })
       );
+    }
 
-      if (!existingCredential) {
-        return {
-          error: 'No password found for this email',
-        };
-      }
+    if (!existingCredential?.passwordHash) {
+      await PasswordHelper.compareWithDummyHash(plainPassword);
+      return { error: INVALID_CREDENTIALS_MESSAGE };
     }
 
     const passwordIsValid = await PasswordHelper.checkPassword(
@@ -464,9 +679,7 @@ export default class AuthBackendProvider extends BackendProvider {
     );
 
     if (!passwordIsValid) {
-      return {
-        error: 'Invalid email / password combination',
-      };
+      return { error: INVALID_CREDENTIALS_MESSAGE };
     }
 
     await this.upgradePasswordHash(existingCredential, plainPassword);
@@ -518,6 +731,11 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
 
+    // before anything is looked up
+    if (!isAcceptablePassword(password)) {
+      return { ...INVALID_PASSWORD_RESULT };
+    }
+
     let webIDFromEmail: string;
     try {
       webIDFromEmail = emailToWebID(email);
@@ -527,12 +745,9 @@ export default class AuthBackendProvider extends BackendProvider {
         error: 'Invalid email format',
       };
     }
+    const normalizedEmail = email.trim().toLowerCase();
 
-    //check if this user has already been created/stored locally
-    let existingWebID = await (this.userShape as any)
-      .select((p) => [p.givenName, p.familyName, p.telephone])
-      .for(webIDFromEmail);
-    if (existingWebID) {
+    if (await emailAlreadyRegistered(this, email, normalizedEmail, webIDFromEmail)) {
       console.warn(
         `Account creation attempted with an email already in use (webID: ${webIDFromEmail})`
       );
@@ -543,7 +758,13 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
 
-    return Auth.login(
+    // The new account is unverified until the link in this email is opened. Only its hash is
+    // stored. Signup waits for the email to be sent, but works without an email provider: a
+    // failed send only removes the token again.
+    const verificationToken = PasswordHelper.generateToken();
+    const verificationFields = verificationTokenFields(verificationToken);
+
+    const result = await Auth.login(
       this,
       async () => {
         //we're not trying to log in with an existing account, a new one should be created
@@ -569,11 +790,13 @@ export default class AuthBackendProvider extends BackendProvider {
         const passwordHash = await PasswordHelper.generateHashedPassword(
           password
         );
-        const newCredential = await AuthCredential.create({
+        await AuthCredential.create({
           credentialOf: {
             id: user.id,
           },
+          email: normalizedEmail,
           passwordHash: passwordHash,
+          ...verificationFields,
         }).catch((err) => {
           console.error(`Error creating password for user ${user.id}:`, err);
           throw new Error(`Could not create password for user ${user.id}`);
@@ -584,7 +807,7 @@ export default class AuthBackendProvider extends BackendProvider {
         const account = await this.accountShape
           .create({
             accountOf: user,
-            email: email,
+            email: normalizedEmail,
           })
           .catch((err) => {
             console.error(`Error creating account for user ${user.id}:`, err);
@@ -598,8 +821,19 @@ export default class AuthBackendProvider extends BackendProvider {
           person: user,
         };
       },
-      `createAccount - ${firstName} ${lastName} - ${email}`
+      'createAccount'
     );
+
+    // the sign-in result is the same whether or not the email went out
+    if (!('error' in result)) {
+      await sendVerificationEmail(
+        normalizedEmail,
+        firstName,
+        verificationToken,
+        verificationFields.emailVerificationToken
+      );
+    }
+    return result;
   }
 
   /**
@@ -672,6 +906,10 @@ export default class AuthBackendProvider extends BackendProvider {
       return {
         error: 'Passwords do not match',
       };
+    }
+    // checked before a token is used up, like the match above
+    if (!isAcceptablePassword(password)) {
+      return { ...INVALID_PASSWORD_RESULT };
     }
 
     //reset password works both if a token is provided, and if a user is currently logged in
@@ -757,6 +995,13 @@ export default class AuthBackendProvider extends BackendProvider {
       }).for(dbPassword);
     }
 
+    // The reset link was opened from the inbox, which proves the email as well.
+    if (token) {
+      await markEmailVerified(user.id, email).catch((error) =>
+        console.error('Could not mark the email verified after a password reset', error)
+      );
+    }
+
     // A new password ends every existing session (other devices, and anyone holding a stolen
     // refresh token). The current device gets a fresh session below.
     await revokeAllSessionsForAccount(account.id);
@@ -785,10 +1030,14 @@ export default class AuthBackendProvider extends BackendProvider {
   }
 
   /**
-   * Send the reset password link with zeptoMail
+   * Send a reset password link to `email`, through the registered email provider.
+   *
+   * Answers `true` for every well-formed email, whether or not an account exists for it and
+   * whether or not the email could be sent, so the answer never tells which emails have an
+   * account. When the email is not sent, the stored token is removed again.
    *
    * @param email - The email address
-   * @returns
+   * @returns true, or an error for a malformed email or a rate-limited request
    */
   async sendResetPasswordLink(email: string) {
     // every request sends an email; counted by the address asked for, existing or not
@@ -832,10 +1081,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
       if (!account?.accountOf?.id) {
         console.warn('No account found for a reset password request');
-        return {
-          error:
-            'No password is associated with this account. Please try another login method or contact support.',
-        };
+        return true;
       }
 
       webID = account.accountOf.id;
@@ -857,10 +1103,9 @@ export default class AuthBackendProvider extends BackendProvider {
       .one();
 
     if (!person) {
-      console.warn(`No user found for reset password webID ${webID}`);
-      return {
-        error: 'We could not prepare the reset password link for this account.',
-      };
+      console.warn('No user found for a reset password request');
+      await clearUnsentToken('reset', resetTokenFields.forgotPasswordToken);
+      return true;
     }
 
     const confirmUrl = `${process.env.SITE_ROOT}/auth/reset-password?token=${newToken}`;
@@ -879,34 +1124,28 @@ export default class AuthBackendProvider extends BackendProvider {
           <table role='presentation' border='0' cellpadding='0' cellspacing='0' class='body' style='border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #fff; width: 100%;' width='100%' bgcolor='#fff'>
             <tr>
               <td>
-                <p>Hey ${person.givenName} 👋</p>
+                <p>Hey ${escapeHtml(person.givenName)} 👋</p>
                 <p>Click the button below to reset your password:</p>
-                <a href='${confirmUrl}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Reset Password</a>
+                <a href='${escapeHtml(confirmUrl)}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Reset Password</a>
                 <p>Cheers,</p>
-                <p>${process.env.APP_NAME} Team</p>
+                <p>${escapeHtml(process.env.APP_NAME)} Team</p>
               </td>
             </tr>
             <tr>
               <td>
                 <p style='font-size: 12px; color: #999;'>Alternatively, you can also copy and paste the link into your browser:</p>
-                <a href='${confirmUrl}' target='_blank' style='font-size: 12px;'>${confirmUrl}</a>
+                <a href='${escapeHtml(confirmUrl)}' target='_blank' style='font-size: 12px;'>${escapeHtml(confirmUrl)}</a>
               </td>
             </tr>
           </table>
         `,
     };
 
-    // await this.zeptoMail.sendMail(emailOptions);
-    return LinkedEmail.send(emailOptions)
-      .then(() => {
-        return true;
-      })
-      .catch((error) => {
-        console.error('Error sending reset link:', error);
-        return {
-          error: "Sorry, we couldn't send the email, please try again later",
-        };
-      });
+    const outcome = await sendAuthEmail(emailOptions, { purpose: 'reset', url: confirmUrl });
+    if (outcome === 'failed') {
+      await clearUnsentToken('reset', resetTokenFields.forgotPasswordToken);
+    }
+    return true;
   }
 
   /**
@@ -972,6 +1211,7 @@ export default class AuthBackendProvider extends BackendProvider {
             console.warn(`${provider} sign-in: could not upgrade a legacy identity link`, err)
           );
         }
+        await markOAuthEmailVerified(identity, account.accountOf.id);
         return Auth.onSigninSuccessful(this, account.accountOf as UserData, account);
       }
       // a link to an account that no longer exists: fall through to the email
@@ -1008,6 +1248,7 @@ export default class AuthBackendProvider extends BackendProvider {
       const account =
         existing.account ?? ((await this.getOrCreateAccount(person)) as UserAccountData);
       await OAuthIdentityStore.createLink(identity, account.id);
+      await markOAuthEmailVerified(identity, existing.personId);
       return Auth.onSigninSuccessful(
         this,
         (existing.account?.accountOf as UserData) ?? person,
@@ -1032,12 +1273,14 @@ export default class AuthBackendProvider extends BackendProvider {
             throw new Error(`Could not create ${provider} user ${webID}`);
           });
 
-        // A credential without a password hash: it carries the email for password reset.
+        // A credential without a password hash: it carries the email for password reset. The
+        // provider verified that email.
         await AuthCredential.create({
           credentialOf: {
             id: user.id,
           },
           email: email,
+          emailVerifiedAt: new Date(),
         }).catch((err) => {
           console.error(`Error creating credential for ${provider} user ${user.id}:`, err);
           throw new Error(`Could not create credential for ${provider} user ${user.id}`);
@@ -1067,6 +1310,87 @@ export default class AuthBackendProvider extends BackendProvider {
       },
       `${provider} OAuth`
     );
+  }
+
+  /**
+   * Verify the email of an account with the token from a link sent by `createAccount` or
+   * `resendEmailVerification`. The token works once, and only until it expires
+   * (`AUTH_EMAIL_VERIFICATION_TTL`). Needs no session and signs no one in: a signed-in client
+   * refreshes its session afterwards to see `emailVerified`.
+   *
+   * @param token - The token from the link
+   */
+  async verifyEmail(token: string): Promise<VerifyEmailResult> {
+    const limited = await limitRequest('emailVerify', this.request, this.response);
+    if (limited) return limited;
+
+    const person = await consumeCredentialToken('verify', token);
+    if (!person?.id) {
+      return {
+        error: 'This verification link is invalid or has expired.',
+        action: 'resend_verification',
+      };
+    }
+    await markEmailVerified(person.id);
+    return { verified: true };
+  }
+
+  /**
+   * Send the signed-in account a new email verification link, to the account's email. The new
+   * link replaces any earlier one. An account that is already verified gets no email
+   * (`{verified: true}`), and one without an email (a temporary account) gets `action:
+   * 'no_email'`.
+   */
+  async resendEmailVerification(): Promise<ResendEmailVerificationResult> {
+    const account: UserAccountData = requireSessionUser();
+    const limited = await limitRequest(
+      'emailVerificationRequest',
+      this.request,
+      this.response,
+      account.id
+    );
+    if (limited) return limited;
+
+    const personId: string | undefined =
+      this.request?.linkedAuth?.user?.id ?? account.accountOf?.id;
+    if (!personId) {
+      throw new Error('Cannot send a verification email: the session has no person');
+    }
+    if (await personEmailVerified(personId)) {
+      return { verified: true };
+    }
+
+    const email = (await accountEmail(this, account)).trim().toLowerCase();
+    if (!email) {
+      return { error: 'This account has no email address.', action: 'no_email' };
+    }
+
+    const token = PasswordHelper.generateToken();
+    const fields = verificationTokenFields(token);
+    const credential = preferCredentialWithPassword(
+      await AuthCredential.select((cred) => [cred.passwordHash]).where((cred) =>
+        cred.credentialOf.equals({ id: personId })
+      )
+    );
+    if (credential) {
+      await AuthCredential.update(fields).for({ id: credential.id });
+    } else {
+      await AuthCredential.create({ credentialOf: { id: personId }, email, ...fields });
+    }
+
+    const sent = await sendVerificationEmail(
+      email,
+      await givenNameOf(this, personId),
+      token,
+      fields.emailVerificationToken
+    );
+    if (!sent) {
+      return {
+        error: "Sorry, we couldn't send the email, please try again later",
+        action: 'email_failed',
+      };
+    }
+    return { sent: true };
   }
 
   /**
@@ -1204,7 +1528,11 @@ export default class AuthBackendProvider extends BackendProvider {
       return { error: (tokenResult as any)?.error ?? 'Invalid token' };
     }
     const claims = (tokenResult as any).payload ?? tokenResult;
-    if (claims.sub && claims.sub !== input.webId) {
+    // a token must name its subject: one without `sub` could otherwise sign in as any WebID
+    if (!claims.sub) {
+      return { error: 'Invalid token' };
+    }
+    if (claims.sub !== input.webId) {
       return { error: 'WebID does not match token subject' };
     }
     // Only the verified token's email claim; `input.email` is the client's word and never stored.
@@ -1227,17 +1555,55 @@ export default class AuthBackendProvider extends BackendProvider {
     return Auth.onSigninSuccessful(this, person, account as UserAccountData);
   }
 
-  async removeAccount() {
-    const auth = this.request.linkedAuth;
-    if (!auth) {
-      return null;
+  /**
+   * What the signed-in account confirms an account deletion with (see `removeAccount`):
+   * `['password']`, its linked providers (`'google'`, `'apple'`), or none (temporary and dev
+   * accounts, which a session alone may delete).
+   */
+  async getReauthenticationMethods(): Promise<{ methods: ReauthenticationMethod[] }> {
+    const account: UserAccountData = requireSessionUser();
+    const personId: string | undefined =
+      this.request?.linkedAuth?.user?.id ?? account.accountOf?.id;
+    if (!personId) {
+      throw new Error('Cannot list confirmation methods: the session has no person');
+    }
+    return { methods: await reauthenticationMethods(account.id, personId) };
+  }
+
+  /**
+   * Delete the signed-in account, its person, credentials, identity links and sessions.
+   *
+   * An account with a password or a linked Google/Apple identity must confirm it is the account
+   * holder in the same call: `{password}`, or `{provider, source}` with a freshly issued ID token
+   * (`source` as for `signinOAuth`). A missing or wrong proof answers `action: 'reauthenticate'`
+   * with the `methods` the account can use (also given by `getReauthenticationMethods`).
+   * Checking a proof is rate-limited (`reauthenticate`).
+   *
+   * @param proof - The password, or the provider credential
+   */
+  async removeAccount(proof?: RemoveAccountProof): Promise<RemoveAccountResult> {
+    const account: UserAccountData = requireSessionUser();
+    const personId: string | undefined =
+      this.request?.linkedAuth?.user?.id ?? account.accountOf?.id;
+    if (!account.id || !personId) {
+      throw new Error('Cannot remove account: the session has no account or user id');
     }
 
-    const account = auth.userAccount;
-    const user = auth.user;
-
-    if (!account?.id || !user?.id) {
-      throw new Error('Cannot remove account: the session has no account or user id');
+    const methods = await reauthenticationMethods(account.id, personId);
+    if (methods.length) {
+      if (!hasReauthenticationProof(proof)) {
+        return { error: REAUTH_MISSING_MESSAGE, action: 'reauthenticate', methods };
+      }
+      const limited = await limitRequest(
+        'reauthenticate',
+        this.request,
+        this.response,
+        account.id
+      );
+      if (limited) return limited;
+      if (!(await verifyReauthentication(this, account.id, personId, proof))) {
+        return { error: REAUTH_MISMATCH_MESSAGE, action: 'reauthenticate', methods };
+      }
     }
 
     await emitAccountWillBeRemovedEvent(account);
@@ -1247,7 +1613,7 @@ export default class AuthBackendProvider extends BackendProvider {
     // person and account: deleting those also removes the links pointing at them, which would
     // leave these nodes unreachable but still holding the email, password hashes and subject.
     await AuthCredential.deleteWhere((credential) =>
-      credential.credentialOf.equals({ id: user.id })
+      credential.credentialOf.equals({ id: personId })
     );
     await IdentityToken.deleteWhere((token) =>
       token.account.equals({ id: account.id })
@@ -1255,7 +1621,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     //remove account and user
     await this.accountShape.delete({ id: account.id });
-    await this.userShape.delete({ id: user.id });
+    await this.userShape.delete({ id: personId });
 
     console.log('Account has been deleted', account.id);
     await this.signout();
@@ -1528,9 +1894,12 @@ declareCallable(AuthBackendProvider, {
   signinDev: 'public',
   sendResetPasswordLink: 'public',
   resetPassword: 'public',
+  verifyEmail: 'public',
   validateToken: 'public',
   signout: 'public',
   linkOAuthIdentity: 'user',
+  resendEmailVerification: 'user',
+  getReauthenticationMethods: 'user',
   removeAccount: 'user',
 });
 

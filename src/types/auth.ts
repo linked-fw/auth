@@ -45,10 +45,48 @@ export type VerifiedOAuthIdentity = {
   emailVerified: boolean;
   givenName?: string;
   familyName?: string;
+  /** When the provider issued the token (`iat`). */
+  issuedAt?: Date;
 };
 
 /** The result of `linkOAuthIdentity`. */
 export type LinkOAuthIdentityResult = { linked: true } | { error: string; action?: string };
+
+/** The result of `verifyEmail`. */
+export type VerifyEmailResult =
+  | { verified: true }
+  | { error: string; action?: string; retryAfter?: number };
+
+/** The result of `resendEmailVerification`. `{verified: true}`: already verified, nothing sent. */
+export type ResendEmailVerificationResult =
+  | { sent: true }
+  | { verified: true }
+  | {
+      error: string;
+      action?: 'no_email' | 'rate_limited' | 'email_failed';
+      retryAfter?: number;
+    };
+
+/** A way to confirm it is the account holder, as `removeAccount` asks for it. */
+export type ReauthenticationMethod = 'password' | 'google' | 'apple';
+
+/**
+ * The proof `removeAccount` takes: the account's password, or a fresh ID token of a Google or
+ * Apple identity linked to the account. `source` is what `signinOAuth` takes as its second
+ * argument.
+ */
+export type RemoveAccountProof =
+  | { password: string }
+  | { provider: 'google' | 'apple'; source: unknown };
+
+/**
+ * The result of `removeAccount`. `action: 'reauthenticate'`: the proof was missing or did not
+ * match; `methods` lists what this account can confirm with.
+ */
+export type RemoveAccountResult =
+  | true
+  | { error: string; action: 'reauthenticate'; methods: ReauthenticationMethod[] }
+  | { error: string; action: 'rate_limited'; retryAfter: number };
 
 /**
  * Create a new account signin with email and password.
@@ -95,6 +133,12 @@ export type AuthSession<UserAccount = UserAccountData, User = UserData> = {
    * from the access token's `sid` claim; absent for tokens issued before sessions were stored.
    */
   sid?: string;
+  /**
+   * Whether the person has proved control of their email (see `personEmailVerified`). Read from
+   * the store when the session is built (sign-in and refresh), so in an access token it can be
+   * stale until the next refresh.
+   */
+  emailVerified?: boolean;
   updateSessionData?: (
     updatedData: Omit<AuthSession, 'updateSessionData'>
   ) => Promise<{

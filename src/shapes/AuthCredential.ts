@@ -53,6 +53,65 @@ export class AuthCredential extends Shape {
     return undefined as any;
   }
 
+  /**
+   * When the person proved control of `email`, by opening a verification or reset link sent to
+   * it, or by signing in with a provider that verified it. A person counts as verified when any
+   * of their credentials has it.
+   */
+  @literalProperty({
+    path: auth.emailVerifiedAt,
+    datatype: xsd.dateTime,
+    maxCount: 1,
+  })
+  get emailVerifiedAt(): Date {
+    return undefined as any;
+  }
+
+  /**
+   * The SHA-256 hash (base64url) of the outstanding email verification token, if there is one.
+   * The raw token only exists in the emailed link. Sending a new link replaces it, and verifying
+   * the email removes it.
+   */
+  @literalProperty({
+    path: auth.emailVerificationToken,
+    maxCount: 1,
+  })
+  get emailVerificationToken(): string {
+    return '';
+  }
+
+  /** When the outstanding email verification token stops working. */
+  @literalProperty({
+    path: auth.emailVerificationTokenExpiresAt,
+    datatype: xsd.dateTime,
+    maxCount: 1,
+  })
+  get emailVerificationTokenExpiresAt(): Date {
+    return undefined as any;
+  }
+
+  /**
+   * Set only for the moment between an atomic reset token consume and its read-back: the consume
+   * writes a fresh random marker in the same update that removes the token, then looks for it.
+   * Only the request whose update matched the token finds its marker. See `consumeCredentialToken`.
+   */
+  @literalProperty({
+    path: auth.passwordResetConsumeMarker,
+    maxCount: 1,
+  })
+  get passwordResetConsumeMarker(): string {
+    return '';
+  }
+
+  /** The same marker for an email verification token consume. */
+  @literalProperty({
+    path: auth.emailVerificationConsumeMarker,
+    maxCount: 1,
+  })
+  get emailVerificationConsumeMarker(): string {
+    return '';
+  }
+
   @literalProperty({
     path: auth.passwordHash,
     maxCount: 1,

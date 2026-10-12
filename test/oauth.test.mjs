@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fakeCredentialTable } from './fakeStore.mjs';
 
 process.env.NODE_ENV = 'test';
 process.env.SITE_ROOT = 'https://app.test';
@@ -29,6 +30,7 @@ const { default: GoogleHelper } = await import(new URL('helpers/google.js', libD
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const { emailToWebID } = await import(new URL('utils/webID.js', libDir));
 const { OAuthIdentityStore } = await import(new URL('utils/oauthIdentities.js', libDir));
+const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
 const { decideEmailMatchedAccount, providerOfIdentityLink } = await import(
   new URL('helpers/oauth-account.js', libDir)
 );
@@ -261,6 +263,64 @@ test('a new identity creates an account and links it', async () => {
   const result = await provider.signinOAuth('google', GOOGLE);
   assert.equal(result, SIGNED_IN);
   assert.deepEqual(loginLabels(), ['google OAuth']);
+});
+
+// ---- the provider's verified email verifies the person's email ----
+
+/** The credentials of a person in an in-memory table installed for `AuthCredential`. */
+function credentialsOf(table, personId) {
+  return [...table.rows.values()].filter((row) => row.credentialOf?.id === personId);
+}
+
+test('a new OAuth user gets a credential whose email is already verified', async () => {
+  const table = fakeCredentialTable();
+  table.install(AuthCredential);
+  verifiedGoogle();
+  provider.userShape = { ...provider.userShape, create: async (data) => ({ id: data.__id }) };
+  provider.accountShape = { ...provider.accountShape, create: async () => ({ id: 'acc-new' }) };
+  await provider.signinOAuth('google', GOOGLE);
+  assert.deepEqual(loginLabels(), ['google OAuth']);
+  // run the create step Auth.login was handed
+  await login.mock.calls[0].arguments[2]();
+  const [credential] = credentialsOf(table, ADA_WEBID);
+  assert.ok(credential, 'a credential was created');
+  assert.equal(credential.email, 'ada@example.test');
+  assert.ok(credential.emailVerifiedAt, 'emailVerifiedAt is set');
+  assert.equal(credential.passwordHash, undefined);
+});
+
+test('a linked sign-in whose verified email maps to the person marks the email verified', async () => {
+  const table = fakeCredentialTable();
+  table.install(AuthCredential);
+  table.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
+  verifiedGoogle('Ada@Example.test');
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
+  existingAccount = ADA_ACCOUNT;
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.ok(credentialsOf(table, ADA_WEBID)[0].emailVerifiedAt);
+});
+
+test('a linked sign-in whose email is another address does not mark the email verified', async () => {
+  const table = fakeCredentialTable();
+  table.install(AuthCredential);
+  table.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
+  verifiedGoogle('someone-else@example.test');
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
+  existingAccount = ADA_ACCOUNT;
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.equal(credentialsOf(table, ADA_WEBID)[0].emailVerifiedAt, undefined);
+  assert.equal(credentialsOf(table, ADA_WEBID).length, 1);
+});
+
+test('a verified email attached to an OAuth-only account marks the email verified', async () => {
+  const table = fakeCredentialTable();
+  table.install(AuthCredential);
+  table.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
+  verifiedGoogle();
+  existingAccount = ADA_ACCOUNT;
+  linkedProviders = ['apple'];
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.ok(credentialsOf(table, ADA_WEBID)[0].emailVerifiedAt);
 });
 
 test('linkOAuthIdentity needs a signed-in account', async () => {

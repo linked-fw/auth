@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { serving } from './serving.mjs';
+import { fakeCredentialTable } from './fakeStore.mjs';
 
 process.env.NODE_ENV = 'test';
 process.env.SITE_ROOT = 'https://app.test';
@@ -55,75 +56,6 @@ class TestProvider extends AuthBackendProvider {
   }
 }
 
-/**
- * An in-memory stand-in for the `AuthCredential` query API the provider uses:
- * `select(...).where(...)/.for(...).one()` (or the query awaited for every match), `create(data)` and `update(data).for(node)`.
- * A `null` in an update unsets the property, as it does for a real store.
- */
-function fakeCredentialTable() {
-  const rows = new Map();
-  // every update, as [credential id, the data written]
-  const updates = [];
-  let nextId = 1;
-  const copy = (row) => (row ? structuredClone(row) : null);
-  const matches = (row, conditions) =>
-    conditions.every(([prop, value]) =>
-      value && typeof value === 'object' ? row[prop]?.id === value.id : row[prop] === value
-    );
-  const query = (conditions = []) => ({
-    where(fn) {
-      const found = [];
-      const proxy = new Proxy(
-        {},
-        { get: (_t, prop) => ({ equals: (value) => (found.push([prop, value]), true) }) }
-      );
-      fn(proxy);
-      return query([...conditions, ...found]);
-    },
-    for(node) {
-      return query([...conditions, ['id', typeof node === 'string' ? node : node.id]]);
-    },
-    async one() {
-      return copy([...rows.values()].find((row) => matches(row, conditions)));
-    },
-    // awaiting the query itself gives every match, like the real query builder
-    then(resolve, reject) {
-      return Promise.resolve(
-        [...rows.values()].filter((row) => matches(row, conditions)).map(copy)
-      ).then(resolve, reject);
-    },
-  });
-  const write = (row, data) => {
-    for (const [key, value] of Object.entries(data)) {
-      if (value === null) delete row[key];
-      else if (value !== undefined) row[key] = value instanceof Date ? value.toISOString() : value;
-    }
-  };
-  return {
-    rows,
-    updates,
-    insert(data) {
-      const row = { id: `https://app.test/credential/${nextId++}` };
-      write(row, data);
-      rows.set(row.id, row);
-      return copy(row);
-    },
-    install() {
-      mock.method(AuthCredential, 'select', () => query());
-      mock.method(AuthCredential, 'create', async (data) => this.insert(data));
-      mock.method(AuthCredential, 'update', (data) => ({
-        for: async (node) => {
-          const id = typeof node === 'string' ? node : node.id;
-          updates.push([id, { ...data }]);
-          const row = rows.get(id);
-          if (row) write(row, data);
-          return copy(row);
-        },
-      }));
-    },
-  };
-}
-
 let credentials;
 let sentEmails;
 let provider;
@@ -133,7 +65,7 @@ beforeEach(() => {
   // every test requests links for the same email; each starts with a fresh limit budget
   resetRateLimits();
   credentials = fakeCredentialTable();
-  credentials.install();
+  credentials.install(AuthCredential);
   sentEmails = [];
   mock.method(LinkedEmail, 'send', async (options) => {
     sentEmails.push(options);
@@ -225,6 +157,27 @@ test('mismatched passwords do not use up the link', async () => {
   const typo = await provider.resetPassword('new-pass-1', 'new-pass-X', token);
   assert.deepEqual(typo, { error: 'Passwords do not match' });
   assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', token), SIGNED_IN);
+});
+
+const SHORT_PASSWORD_RESULT = {
+  error: 'Password must be at least 6 characters',
+  action: 'invalid_password',
+};
+
+test('a short password is refused for a reset link, and does not use up the link', async () => {
+  existingPassword();
+  const token = await requestResetLink();
+  assert.deepEqual(await provider.resetPassword('short', 'short', token), SHORT_PASSWORD_RESULT);
+  assert.equal(await passwordIs(OLD_PASSWORD), true);
+  assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', token), SIGNED_IN);
+});
+
+test('a short password is refused for a signed-in change', async () => {
+  existingPassword();
+  signedIn();
+  const result = await provider.resetPassword('short', 'short', undefined, OLD_PASSWORD);
+  assert.deepEqual(result, SHORT_PASSWORD_RESULT);
+  assert.equal(await passwordIs(OLD_PASSWORD), true);
 });
 
 test('a reset link expires after an hour', async () => {
@@ -395,4 +348,93 @@ test('a failed upgrade does not fail the sign-in', async () => {
   }));
   assert.equal(await provider.signinWithPassword(EMAIL, OLD_PASSWORD), SIGNED_IN);
   assert.equal(storedCredential().passwordHash, COST_4_HASH);
+});
+
+test('the reset email escapes the stored name', async () => {
+  existingPassword();
+  const name = '<a href="https://evil.test">Ada</a>';
+  class HostileNameProvider extends TestProvider {
+    userShape = {
+      select: () => ({ for: () => ({ one: async () => ({ id: PERSON_ID, givenName: name }) }) }),
+    };
+  }
+  provider = serving(new HostileNameProvider(null, fakeLincdServer), request);
+  const token = await requestResetLink();
+  const html = sentEmails.at(-1).htmlbody;
+  assert.ok(!html.includes(name), 'the name went in as markup');
+  assert.ok(html.includes('Hey &lt;a href=&quot;https://evil.test&quot;&gt;Ada&lt;/a&gt;'), html);
+  assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', token), SIGNED_IN);
+});
+
+// --- using a link up atomically ---
+
+test('two concurrent resets with the same link: exactly one succeeds', async () => {
+  existingPassword();
+  const token = await requestResetLink();
+  const results = await Promise.all([
+    provider.resetPassword('new-pass-1', 'new-pass-1', token),
+    provider.resetPassword('new-pass-2', 'new-pass-2', token),
+  ]);
+  const won = results.filter((result) => result === SIGNED_IN);
+  assert.equal(won.length, 1, `expected one success: ${JSON.stringify(results)}`);
+  assert.ok(results.find((result) => result !== SIGNED_IN)?.error, 'the other one failed');
+  const winner = results[0] === SIGNED_IN ? 'new-pass-1' : 'new-pass-2';
+  assert.equal(await passwordIs(winner), true, "the winner's password is set");
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token is gone');
+  assert.equal(storedCredential().passwordResetConsumeMarker, undefined, 'the consume marker is gone');
+});
+
+// --- the answer never tells whether an account exists ---
+
+test('an unknown email gets the same answer, and no email is sent', async () => {
+  mock.method(UserAccount, 'select', () => ({ where: () => ({ one: async () => null }) }));
+  assert.equal(await provider.sendResetPasswordLink('nobody@example.test'), true);
+  assert.equal(sentEmails.length, 0, 'an email was sent');
+  assert.equal(credentials.rows.size, 0, 'a credential was created');
+});
+
+test('an account whose person is missing gets the same answer, and keeps no token', async () => {
+  existingPassword();
+  class NoPersonProvider extends TestProvider {
+    userShape = { select: () => ({ for: () => ({ one: async () => null }) }) };
+  }
+  const noPerson = serving(new NoPersonProvider(null, fakeLincdServer), request);
+  assert.equal(await noPerson.sendResetPasswordLink(EMAIL), true);
+  assert.equal(sentEmails.length, 0, 'an email was sent');
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token was kept');
+});
+
+test('a send that throws (no email provider) answers true, and removes the token', async () => {
+  existingPassword();
+  // what LinkedEmail.send does without a registered provider: throw synchronously
+  mock.method(LinkedEmail, 'send', () => {
+    throw new Error('No email provider set.');
+  });
+  assert.equal(await provider.sendResetPasswordLink(EMAIL), true);
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token was kept');
+  assert.equal(storedCredential().forgotPasswordTokenExpiresAt, undefined, 'the expiry was kept');
+});
+
+test('a send that rejects answers true, and removes the token', async () => {
+  existingPassword();
+  mock.method(LinkedEmail, 'send', async () => {
+    throw new Error('provider down');
+  });
+  assert.equal(await provider.sendResetPasswordLink(EMAIL), true);
+  assert.equal(storedCredential().forgotPasswordToken, undefined, 'the token was kept');
+});
+
+test('with DEV_AUTH and no email provider, the link is logged and keeps working', async (t) => {
+  process.env.DEV_AUTH = 'true';
+  t.after(() => delete process.env.DEV_AUTH);
+  existingPassword();
+  const info = mock.method(console, 'info', () => {});
+  assert.equal(await provider.sendResetPasswordLink(EMAIL), true);
+  assert.equal(LinkedEmail.send.mock.callCount(), 0, 'a send was attempted');
+  const line = info.mock.calls.map((call) => call.arguments.join(' ')).join('\n');
+  const match = line.match(/\[@_linked\/auth\] dev: reset link: \S*reset-password\?token=(\S+)/);
+  assert.ok(match, `no link logged: ${line}`);
+  assert.ok(!line.includes(EMAIL), 'the address was logged');
+  assert.ok(storedCredential().forgotPasswordToken, 'the token was removed');
+  assert.equal(await provider.resetPassword('new-pass-1', 'new-pass-1', match[1]), SIGNED_IN);
 });

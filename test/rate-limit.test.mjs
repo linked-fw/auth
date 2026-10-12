@@ -323,6 +323,53 @@ test('sendResetPasswordLink: three emails an hour per address asked for, then no
   assert.equal(sent.length, 3, 'the refused request sent no email');
 });
 
+test('resendEmailVerification: three emails an hour per account, from any address', async () => {
+  const { RATE_LIMIT_DEFAULTS } = rateLimit;
+  assert.deepEqual(RATE_LIMIT_DEFAULTS.emailVerificationRequest, {
+    ip: { max: 10, windowSeconds: 3600 },
+    account: { max: 3, windowSeconds: 3600 },
+  });
+  const sent = [];
+  mock.method(LinkedEmail, 'send', async (options) => sent.push(options));
+  // a person with one unverified credential, and an account with an email
+  mock.method(AuthCredential, 'select', () => ({
+    where: () => Promise.resolve([{ id: 'c1', passwordHash: 'h' }]),
+  }));
+  mock.method(AuthCredential, 'update', () => ({ for: async () => ({ id: 'c1' }) }));
+  class ResendProvider extends TestProvider {
+    accountShape = { select: () => ({ for: async () => ({ id: 'acc', email: 'ada@example.test' }) }) };
+    userShape = {
+      select: () => ({ for: () => ({ one: async () => ({ id: 'p1', givenName: 'Ada' }) }) }),
+    };
+  }
+  const session = { user: { id: 'p1' }, userAccount: { id: 'acc' } };
+  for (let i = 0; i < 3; i++) {
+    const provider = providerFor(requestFrom(`10.3.0.${i}`, { linkedAuth: session }), ResendProvider);
+    assert.deepEqual(await provider.resendEmailVerification(), { sent: true });
+  }
+  const refused = await providerFor(
+    requestFrom('10.3.0.9', { linkedAuth: session }),
+    ResendProvider
+  ).resendEmailVerification();
+  assert.equal(refused.action, 'rate_limited');
+  assert.equal(sent.length, 3, 'the refused request sent no email');
+});
+
+test('verifyEmail: one address is refused after 10 attempts a minute', async () => {
+  const { RATE_LIMIT_DEFAULTS } = rateLimit;
+  assert.deepEqual(RATE_LIMIT_DEFAULTS.emailVerify, { ip: { max: 10, windowSeconds: 60 } });
+  // no credential holds any token
+  mock.method(AuthCredential, 'select', () => ({ where: () => ({ one: async () => null }) }));
+  for (let i = 0; i < 10; i++) {
+    const result = await providerFor(requestFrom('10.4.0.1')).verifyEmail(`guess-${i}`);
+    assert.equal(result.action, 'resend_verification');
+  }
+  const refused = await providerFor(requestFrom('10.4.0.1')).verifyEmail('guess-x');
+  assert.equal(refused.action, 'rate_limited');
+  const other = await providerFor(requestFrom('10.4.0.2')).verifyEmail('guess-y');
+  assert.equal(other.action, 'resend_verification', 'another address is not limited');
+});
+
 test('a call outside any HTTP request is never limited', async () => {
   configureRateLimits({ signin: { ip: { max: 1, windowSeconds: 60 }, account: { max: 1, windowSeconds: 60 } } });
   const provider = new TestProvider(null, fakeLincdServer);

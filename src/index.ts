@@ -13,3 +13,4 @@ import './components/ForgotPasswordForm.js';
 import './components/ForgotPasswordCallback.js';
 import './components/CreateNewPasswordForm.js';
 import './components/EditPasswordButton.js';
+import './components/VerifyEmailCallback.js';

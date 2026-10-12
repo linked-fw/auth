@@ -3,7 +3,15 @@ import crypto from 'crypto';
 import { Person } from '@_linked/schema/shapes/Person';
 import { AuthCredential } from '../shapes/AuthCredential.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
-import { readTtlFromEnv } from '../utils/token.js';
+import {
+  consumeCredentialToken,
+  hashToken,
+  tokenExpiresAt,
+  TOKEN_KINDS,
+} from './credentialToken.js';
+import { toDate } from '../utils/date.js';
+
+export { DEFAULT_PASSWORD_RESET_TTL } from './credentialToken.js';
 
 /**
  * The bcrypt cost (log2 of the rounds) of every new password hash. Hashes stored with a lower
@@ -12,24 +20,31 @@ import { readTtlFromEnv } from '../utils/token.js';
  */
 export const PASSWORD_HASH_COST = 10;
 
-/** How long a password reset link works, in seconds, unless `AUTH_PASSWORD_RESET_TTL` is set. */
-export const DEFAULT_PASSWORD_RESET_TTL = 60 * 60;
+/** The shortest password accepted on signup, token reset and password change. */
+export const MIN_PASSWORD_LENGTH = 6;
+
+/** What every failed password sign-in answers, so it never tells whether the account exists. */
+export const INVALID_CREDENTIALS_MESSAGE = 'Invalid email / password combination.';
+
+/** The answer to a password that `isAcceptablePassword` refuses. */
+export const INVALID_PASSWORD_RESULT = {
+  error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+  action: 'invalid_password',
+} as const;
+
+/** Whether `password` is a string of at least `MIN_PASSWORD_LENGTH` characters. */
+export function isAcceptablePassword(password: unknown): password is string {
+  return typeof password === 'string' && password.length >= MIN_PASSWORD_LENGTH;
+}
+
+/** A hash of a random password at `PASSWORD_HASH_COST`, made on first use. */
+let dummyHash: Promise<string> | undefined;
 
 /**
  * How long a password reset link works, in seconds (`AUTH_PASSWORD_RESET_TTL`, default 1 hour).
  * Read once at startup; a value that is not a positive whole number throws.
  */
-export const PASSWORD_RESET_TTL = readTtlFromEnv(
-  'AUTH_PASSWORD_RESET_TTL',
-  DEFAULT_PASSWORD_RESET_TTL
-);
-
-/** A stored value as a Date (stores may return dateTime literals as strings). */
-function toDate(value: unknown): Date | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const date = value instanceof Date ? value : new Date(value as string | number);
-  return isNaN(date.getTime()) ? undefined : date;
-}
+export const PASSWORD_RESET_TTL = TOKEN_KINDS.reset.ttl;
 
 /**
  * PasswordHelper
@@ -89,11 +104,22 @@ const PasswordHelper = {
   },
 
   /**
+   * Compare `plainPassword` with a fixed hash that nothing matches, and answer false. A sign-in
+   * that finds no password calls this, so it takes about as long as a wrong password does.
+   */
+  async compareWithDummyHash(plainPassword: unknown): Promise<false> {
+    dummyHash ??= bcrypt.hash(crypto.randomBytes(16).toString('hex'), PASSWORD_HASH_COST);
+    const plain = typeof plainPassword === 'string' ? plainPassword : '';
+    await bcrypt.compare(plain, await dummyHash).catch(() => false);
+    return false;
+  },
+
+  /**
    * The value a password reset token is stored and looked up by: SHA-256, base64url. A plain
    * hash is enough, because the token is 160 random bits, not a password.
    */
   hashResetPasswordToken(token: string): string {
-    return crypto.createHash('sha256').update(token, 'utf8').digest('base64url');
+    return hashToken(token);
   },
 
   /**
@@ -103,7 +129,7 @@ const PasswordHelper = {
   resetPasswordTokenFields(token: string, now: Date = new Date()) {
     return {
       forgotPasswordToken: PasswordHelper.hashResetPasswordToken(token),
-      forgotPasswordTokenExpiresAt: new Date(now.getTime() + PASSWORD_RESET_TTL * 1000),
+      forgotPasswordTokenExpiresAt: tokenExpiresAt('reset', now),
     };
   },
 
@@ -135,7 +161,8 @@ const PasswordHelper = {
 
   /**
    * Validate the reset password token and use it up: the token is removed from its credential
-   * whether or not it is still valid, so it never works again.
+   * whether or not it is still valid, so it never works again. Atomic: of concurrent calls with
+   * the same token, at most one gets the person back (see `consumeCredentialToken`).
    *
    * @param token - The reset password token
    * @returns the person whose credential held the token if it was valid, or undefined
@@ -144,14 +171,7 @@ const PasswordHelper = {
     token: string,
     now: Date = new Date()
   ): Promise<QResult<Person> | undefined> {
-    const credential = await PasswordHelper.findResetPasswordCredential(token);
-    if (!credential) return undefined;
-    await AuthCredential.update(PasswordHelper.clearedResetPasswordTokenFields()).for({
-      id: credential.id,
-    });
-    const expiresAt = toDate(credential.forgotPasswordTokenExpiresAt);
-    if (!expiresAt || expiresAt.getTime() <= now.getTime()) return undefined;
-    return credential.credentialOf;
+    return consumeCredentialToken('reset', token, now);
   },
 
   /** The credential whose outstanding reset token is `token`, if any. */

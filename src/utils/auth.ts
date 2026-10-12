@@ -18,6 +18,7 @@ import type { RefreshTokenExpiry } from './token.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider.js';
 import { setQueryContext } from '@_linked/core/queries/QueryContext';
+import { personEmailVerified } from '../helpers/emailVerification.js';
 
 export class Auth {
   // define the default user and account types
@@ -147,6 +148,7 @@ export class Auth {
     const authentication: AuthSession = {
       userAccount: account,
       user: person,
+      emailVerified: await personEmailVerified(person?.id),
     };
 
     //Give the app its backend provider a chance to extend the authentication data with the default user and account data
@@ -167,8 +169,13 @@ export class Auth {
     return authentication;
   }
 
+  /**
+   * Make `authentication` the session of `request` (when there is one) and of the query context.
+   * Without a request (a call outside an HTTP request) only the query context is set, and
+   * `updateSessionData` works on the returned object.
+   */
   static setAuthentication(
-    request: Request & { linkedAuth: AuthSession },
+    request: (Request & { linkedAuth: AuthSession }) | undefined,
     authentication: AuthSession
   ): AuthSession {
     const updateSessionData = async (
@@ -181,14 +188,16 @@ export class Auth {
         refreshToken?: string;
       } & RefreshTokenExpiry
     > => {
+      const current: AuthSession = request?.linkedAuth ?? linkedAuth;
+
       // create completely new user and userAccount objects to avoid reference issues
       const updatedUser = {
-        ...request.linkedAuth.user,
+        ...current.user,
         ...updatedData.user,
       };
 
       const updatedUserAccount = {
-        ...request.linkedAuth.userAccount,
+        ...current.userAccount,
         ...updatedData.userAccount,
       };
 
@@ -196,7 +205,7 @@ export class Auth {
       // updatedUserAccount.accountOf = updatedUser;
 
       // the session (refresh token family) the current access token belongs to, if any
-      const currentSessionId: string | undefined = request.linkedAuth?.sid;
+      const currentSessionId: string | undefined = current.sid;
 
       // create a new auth session object
       const newAuthSession: AuthSession = {
@@ -204,10 +213,12 @@ export class Auth {
         userAccount: updatedUserAccount,
         updateSessionData, // Keep the reference to this function
         sid: currentSessionId,
+        emailVerified: current.emailVerified,
       };
 
       // Update request.linkedAuth to point to the new session
-      request.linkedAuth = newAuthSession;
+      if (request) request.linkedAuth = newAuthSession;
+      linkedAuth = newAuthSession;
 
       // Set query context for user and userAccount
       setQueryContext('user', updatedUser, Person);
@@ -226,7 +237,7 @@ export class Auth {
           currentSessionId
         );
         // only sent to the auth endpoints (cookie path), so usually absent here
-        refreshToken = (request as any).cookies?.refreshToken;
+        refreshToken = (request as any)?.cookies?.refreshToken;
         if (refreshToken) {
           refreshTokenExpiresAt = await findRefreshTokenExpiry(refreshToken);
         }
@@ -241,11 +252,12 @@ export class Auth {
       // session. The refresh cookie is only (re)set when a new session was started.
       return deliverTokens(
         request,
-        (request as any).res,
+        (request as any)?.res,
         {
           auth: {
-            user: request.linkedAuth.user,
-            userAccount: request.linkedAuth.userAccount,
+            user: newAuthSession.user,
+            userAccount: newAuthSession.userAccount,
+            emailVerified: newAuthSession.emailVerified,
           },
           accessToken,
           refreshToken,
@@ -255,12 +267,12 @@ export class Auth {
       );
     };
 
-    const linkedAuth = {
+    let linkedAuth: AuthSession = {
       ...authentication,
       updateSessionData,
     };
 
-    request.linkedAuth = linkedAuth;
+    if (request) request.linkedAuth = linkedAuth;
 
     // Set query context for user and userAccount
     setQueryContext('user', linkedAuth.user, Person);

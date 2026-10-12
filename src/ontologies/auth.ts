@@ -45,6 +45,14 @@ export var passwordHash = ns('passwordHash');
 export var phoneIdentifier = ns('phoneIdentifier');
 export var forgotPasswordToken = ns('forgotPasswordToken');
 export var forgotPasswordTokenExpiresAt = ns('forgotPasswordTokenExpiresAt');
+/** A random marker an atomic reset token consume writes, to learn whether its update matched. */
+export var passwordResetConsumeMarker = ns('passwordResetConsumeMarker');
+/** When the person proved control of the credential's email (opened a link sent to it). */
+export var emailVerifiedAt = ns('emailVerifiedAt');
+export var emailVerificationToken = ns('emailVerificationToken');
+export var emailVerificationTokenExpiresAt = ns('emailVerificationTokenExpiresAt');
+/** The same marker for an email verification token consume. */
+export var emailVerificationConsumeMarker = ns('emailVerificationConsumeMarker');
 export var telephone = ns('telephone');
 export var hash = ns('hash');
 export var tokenHash = ns('tokenHash');
@@ -77,6 +85,11 @@ export const auth = {
   passwordHash,
   forgotPasswordToken,
   forgotPasswordTokenExpiresAt,
+  passwordResetConsumeMarker,
+  emailVerifiedAt,
+  emailVerificationToken,
+  emailVerificationTokenExpiresAt,
+  emailVerificationConsumeMarker,
   telephone,
   hash,
   tokenHash,

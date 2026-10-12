@@ -9,7 +9,7 @@
 //   AUTH_TEST_FUSEKI_PASSWORD=... npm run test:integration
 //
 // Runs against the BUILT package in lib/ (build first).
-import { test, before, after, afterEach, mock } from 'node:test';
+import { test, before, after, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { serving } from '../serving.mjs';
@@ -43,6 +43,7 @@ await import(new URL('shapes/index.js', libDir));
 const sessions = await import(new URL('utils/sessions.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
+const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
 const { default: bcrypt } = await import('bcrypt');
 
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
@@ -60,6 +61,9 @@ async function sparql(query) {
   assert.equal(res.status, 200, await res.clone().text());
   return (await res.json()).results.bindings;
 }
+
+// every test signs in to the same account; each starts with a fresh limit budget
+beforeEach(() => resetRateLimits());
 
 before(async () => {
   const res = await fetch(`${FUSEKI}/$/datasets`, {
@@ -307,6 +311,36 @@ test('a reset link stores only a hash with an expiry, and works once', async () 
   assert.equal(signin.error, undefined, 'the password from the first use stands');
 });
 
+test('two concurrent resets with one link: exactly one succeeds, and no consume marker is left', async () => {
+  const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
+  const sent = [];
+  const send = mock.method(LinkedEmail, 'send', async (options) => {
+    sent.push(options);
+  });
+  try {
+    assert.equal(await provider().sendResetPasswordLink(email), true);
+  } finally {
+    send.mock.restore();
+  }
+  const token = sent[0].htmlbody.match(/reset-password\?token=([^'"&\s]+)/)[1];
+
+  // both set the same password, so the account ends up the same whichever one wins
+  const results = await Promise.all(
+    [1, 2, 3].map(() => provider().resetPassword(PASSWORD_2, PASSWORD_2, token))
+  );
+  const succeeded = results.filter((result) => !result?.error);
+  assert.equal(succeeded.length, 1, `expected one success: ${JSON.stringify(results.map((r) => r?.error ?? 'ok'))}`);
+
+  const left = await sparql(`
+    PREFIX auth: <https://linked.cm/ont/auth/>
+    SELECT ?s WHERE {
+      { ?s auth:passwordResetConsumeMarker ?m } UNION { GRAPH ?g { ?s auth:passwordResetConsumeMarker ?m } }
+      UNION { ?s auth:forgotPasswordToken ?t } UNION { GRAPH ?g { ?s auth:forgotPasswordToken ?t } }
+    }`);
+  assert.equal(left.length, 0, 'no consume marker and no token left');
+  assert.equal((await provider().signinWithPassword(email, PASSWORD_2)).error, undefined);
+});
+
 test('removeAccount deletes the account\'s refresh token records', async () => {
   const signin = await provider().signinWithPassword(email, PASSWORD_2);
   const accountId = signin.auth.userAccount.id;
@@ -319,7 +353,7 @@ test('removeAccount deletes the account\'s refresh token records', async () => {
   assert.ok((await countFor()) > 0, 'records exist before removal');
 
   const p = await signedInProvider(signin.accessToken);
-  assert.equal(await p.removeAccount(), true);
+  assert.equal(await p.removeAccount({ password: PASSWORD_2 }), true);
   assert.equal(await countFor(), 0, 'no records left for the removed account');
   assert.ok((await refresh(signin)).error, 'refresh fails for a removed account');
 });

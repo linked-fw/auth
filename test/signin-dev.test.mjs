@@ -81,3 +81,16 @@ test('a client-supplied email is not stored when the token has no email claim', 
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(emailWrites, [], `stored ${JSON.stringify(emailWrites)}`);
 });
+
+test('a verified token without a subject is refused, and nothing is written', async () => {
+  const getOrCreateAccount = mock.method(TestProvider.prototype, 'getOrCreateAccount');
+  const token = await jwtUtils.createAccessToken({
+    userAccount: { id: 'https://app.test/account/dev' },
+    email: 'dev@example.test',
+  });
+  const result = await provider.signinDev({ webId: WEBID, accessToken: token, refreshToken: '' });
+  assert.deepEqual(result, { error: 'Invalid token' });
+  assert.deepEqual(emailWrites, []);
+  assert.equal(getOrCreateAccount.mock.callCount(), 0);
+  assert.equal(Auth.onSigninSuccessful.mock.callCount(), 0);
+});

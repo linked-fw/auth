@@ -40,7 +40,7 @@ function ForgotPasswordForm({ ...restProps }: ForgotPasswordFormProps) {
             setHelperText(res.error);
           } else {
             setHelperText(
-              `We\'ve sent you an email to ${email}. Please kindly check it to reset the password.`
+              t(prefix + '.linkSent', "If an account exists for this email, we've sent a link.")
             );
           }
         }

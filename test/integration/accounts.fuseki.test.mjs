@@ -20,6 +20,8 @@ const { default: AuthBackendProvider } = await import(new URL('backend.js', libD
 const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
 const { IdentityToken } = await import(new URL('shapes/IdentityToken.js', libDir));
 const { default: PasswordHelper } = await import(new URL('helpers/password.js', libDir));
+const { verificationTokenFields } = await import(new URL('helpers/emailVerification.js', libDir));
+const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
 
@@ -71,24 +73,33 @@ test('password sign-in uses the credential that has a password when a person has
   assert.ok(credential?.passwordHash, 'getPasswordForUser returns the row with the hash');
 });
 
-test('removeAccount deletes every credential and identity token of the account', async () => {
+test('removeAccount asks for the password, then deletes every credential and identity token', async () => {
   const email = newEmail();
   const created = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_1 });
   assert.equal(created.error, undefined, created.error);
   const personId = created.auth.user.id;
   const accountId = created.auth.userAccount.id;
   await AuthCredential.create({ credentialOf: { id: personId }, email });
+  // a second hash of the same password: which hashed row the proof is checked against must not
+  // decide whether the deletion goes through
   await AuthCredential.create({
     credentialOf: { id: personId },
     email,
-    passwordHash: await PasswordHelper.generateHashedPassword('leftover-Passw0rd!'),
+    passwordHash: await PasswordHelper.generateHashedPassword(PASSWORD_1),
   });
   await IdentityToken.create({ sub: 'apple-sub-1', email, account: { id: accountId } });
   assert.equal(await countSubjectsWith(`${AUTH}credentialOf`, personId), 3);
   assert.equal(await countSubjectsWith(`${AUTH}account`, accountId) > 0, true);
 
   const p = await signedInProvider(created.accessToken);
-  assert.equal(await p.removeAccount(), true);
+  assert.deepEqual(await p.removeAccount(), {
+    error: 'Confirm it is you to delete this account.',
+    action: 'reauthenticate',
+    methods: ['password'],
+  });
+  assert.equal((await p.removeAccount({ password: PASSWORD_2 })).action, 'reauthenticate');
+  assert.equal(await countSubjectsWith(`${AUTH}credentialOf`, personId), 3, 'nothing deleted');
+  assert.equal(await p.removeAccount({ password: PASSWORD_1 }), true);
 
   assert.equal(await countSubjectsWith(`${AUTH}credentialOf`, personId), 0, 'credentials left');
   assert.equal(await countSubjectsWith(`${AUTH}account`, accountId), 0, 'identity tokens or sessions left');
@@ -101,7 +112,103 @@ test('removeAccount deletes every credential and identity token of the account',
   // The same email gives the same WebID: a new account must not inherit an old password.
   const again = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_2 });
   assert.equal(again.error, undefined, again.error);
-  assert.ok((await provider().signinWithPassword(email, 'leftover-Passw0rd!')).error);
   assert.ok((await provider().signinWithPassword(email, PASSWORD_1)).error);
   assert.equal((await provider().signinWithPassword(email, PASSWORD_2)).error, undefined);
+});
+
+test('signup emails a verification link; verifying it shows in the next refresh', async () => {
+  const sent = [];
+  const send = mock.method(LinkedEmail, 'send', async (options) => sent.push(options));
+  try {
+    const email = newEmail();
+    const created = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_1 });
+    assert.equal(created.error, undefined, created.error);
+    assert.equal(created.auth.emailVerified, false);
+    assert.equal(sent.length, 1, 'a verification email was sent');
+    const token = decodeURIComponent(sent[0].htmlbody.match(/verify-email\?token=([^'"&\s]+)/)[1]);
+
+    assert.deepEqual(await provider().verifyEmail(token), { verified: true });
+    assert.equal((await provider().verifyEmail(token)).action, 'resend_verification', 'single-use');
+
+    const refreshed = await provider().validateToken(created.refreshToken);
+    assert.equal(refreshed.error, undefined, refreshed.error);
+    assert.equal(refreshed.auth.emailVerified, true);
+    const rows = await AuthCredential.select((c) => [
+      c.emailVerificationToken,
+      c.emailVerifiedAt,
+    ]).where((c) => c.credentialOf.equals({ id: created.auth.user.id }));
+    assert.equal(rows.length, 1);
+    assert.ok(rows[0].emailVerifiedAt, 'emailVerifiedAt is stored');
+    assert.ok(!rows[0].emailVerificationToken, 'no verification token left');
+  } finally {
+    send.mock.restore();
+  }
+});
+
+/** The credential of a new account, with `fields` written on it. */
+async function accountWithCredentialFields(fields) {
+  const email = newEmail();
+  const created = await provider().createAccount({ firstName: 'Ada', email, password: PASSWORD_1 });
+  assert.equal(created.error, undefined, created.error);
+  const personId = created.auth.user.id;
+  const [credential] = await AuthCredential.select((c) => [c.email]).where((c) =>
+    c.credentialOf.equals({ id: personId })
+  );
+  await AuthCredential.update(fields).for({ id: credential.id });
+  return { email, personId, credentialId: credential.id };
+}
+
+/** The token fields stored on a credential. */
+async function tokenFieldsOf(credentialId) {
+  const row = await AuthCredential.select((c) => [
+    c.forgotPasswordToken,
+    c.forgotPasswordTokenExpiresAt,
+    c.emailVerificationToken,
+    c.emailVerificationTokenExpiresAt,
+    c.emailVerifiedAt,
+  ])
+    .for({ id: credentialId })
+    .one();
+  assert.ok(row, 'the credential is gone');
+  return row;
+}
+
+const HOURS_AGO = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000);
+
+test('an expired reset token is refused and removed', async () => {
+  const send = mock.method(LinkedEmail, 'send', async () => {});
+  try {
+    const { email, credentialId } = await accountWithCredentialFields(
+      PasswordHelper.resetPasswordTokenFields('expired-reset-token', HOURS_AGO(2))
+    );
+    assert.ok((await tokenFieldsOf(credentialId)).forgotPasswordToken, 'the token was written');
+
+    const reset = await provider().resetPassword(PASSWORD_2, PASSWORD_2, 'expired-reset-token');
+    assert.ok(reset.error, 'an expired token reset the password');
+    const row = await tokenFieldsOf(credentialId);
+    assert.ok(!row.forgotPasswordToken, 'the expired token is left');
+    assert.ok(!row.forgotPasswordTokenExpiresAt, 'its expiry is left');
+    assert.equal((await provider().signinWithPassword(email, PASSWORD_1)).error, undefined);
+  } finally {
+    send.mock.restore();
+  }
+});
+
+test('an expired verification token is refused and removed', async () => {
+  const send = mock.method(LinkedEmail, 'send', async () => {});
+  try {
+    const { credentialId } = await accountWithCredentialFields(
+      verificationTokenFields('expired-verify-token', HOURS_AGO(8 * 24))
+    );
+    assert.ok((await tokenFieldsOf(credentialId)).emailVerificationToken, 'the token was written');
+
+    const verified = await provider().verifyEmail('expired-verify-token');
+    assert.equal(verified.action, 'resend_verification', JSON.stringify(verified));
+    const row = await tokenFieldsOf(credentialId);
+    assert.ok(!row.emailVerificationToken, 'the expired token is left');
+    assert.ok(!row.emailVerificationTokenExpiresAt, 'its expiry is left');
+    assert.ok(!row.emailVerifiedAt, 'the email was marked verified');
+  } finally {
+    send.mock.restore();
+  }
 });

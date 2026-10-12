@@ -31,6 +31,11 @@ import type {
   OAuthProvider,
   AuthenticationResponse,
   AuthSession,
+  ReauthenticationMethod,
+  RemoveAccountProof,
+  RemoveAccountResult,
+  ResendEmailVerificationResult,
+  VerifyEmailResult,
 } from '../types/auth.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import type { UserData, UserAccountData, LinkOAuthIdentityResult } from '../types/auth.js';
@@ -126,7 +131,23 @@ export const useAuth = <
   signout: () => Promise<any>;
   validateToken: () => Promise<AuthenticationResponse | boolean>;
   getAccessToken: () => Promise<string>;
-  removeAccount: () => Promise<boolean>;
+  /**
+   * Delete the signed-in account. Accounts with a password or a Google/Apple link need `proof`;
+   * without it (or with a wrong one) the answer is `action: 'reauthenticate'` with the `methods`
+   * this account can confirm with (see `getReauthenticationMethods`).
+   */
+  removeAccount: (proof?: RemoveAccountProof) => Promise<RemoveAccountResult>;
+  /** What `removeAccount` will ask this account to confirm with; `[]`: the session is enough. */
+  getReauthenticationMethods: () => Promise<{ methods: ReauthenticationMethod[] }>;
+  /**
+   * Whether the signed-in person has proved control of their email. From the session, so it
+   * can lag behind until the next refresh; re-check on the server before a sensitive action.
+   */
+  emailVerified: boolean;
+  /** Redeem an emailed verification token. Refreshes the session when signed in. */
+  verifyEmail: (token: string) => Promise<VerifyEmailResult>;
+  /** Send the signed-in person a new verification email. */
+  resendEmailVerification: () => Promise<ResendEmailVerificationResult>;
   validating: boolean;
 } => {
   const authContext = useContext(AuthContext);
@@ -540,8 +561,51 @@ function useProvideAuth(signinRoute: string = '') {
     return getAuthToken(ACCESS_TOKEN);
   };
 
-  const removeAccount = () => {
-    return Server.call(packageName, 'removeAccount');
+  const removeAccount = (proof?: RemoveAccountProof): Promise<RemoveAccountResult> => {
+    return proof === undefined
+      ? Server.call(packageName, 'removeAccount')
+      : Server.call(packageName, 'removeAccount', proof);
+  };
+
+  const getReauthenticationMethods = (): Promise<{ methods: ReauthenticationMethod[] }> => {
+    return Server.call(packageName, 'getReauthenticationMethods').then((response) => ({
+      methods: Array.isArray(response?.methods) ? response.methods : [],
+    }));
+  };
+
+  /**
+   * Redeem a verification token. The link works signed out too; when signed in, the session is
+   * refreshed (through the single-flight refresh, so it never races a scheduled one) and
+   * `emailVerified` turns true without waiting for the next scheduled refresh.
+   */
+  const verifyEmail = async (token: string): Promise<VerifyEmailResult> => {
+    const response: VerifyEmailResult | null = await Server.call(packageName, 'verifyEmail', token);
+    if (!response) {
+      return { error: "Couldn't verify your email. Please try again or contact support." };
+    }
+    if ('verified' in response && response.verified === true && userAccount) {
+      await refreshAccessToken();
+    }
+    return response;
+  };
+
+  /**
+   * Send a new verification link. When the server answers `{verified:true}` (the email was
+   * verified elsewhere, e.g. in another tab), the session is refreshed the same way as in
+   * `verifyEmail`, so `emailVerified` turns true here too.
+   */
+  const resendEmailVerification = async (): Promise<ResendEmailVerificationResult> => {
+    const response: ResendEmailVerificationResult | null = await Server.call(
+      packageName,
+      'resendEmailVerification'
+    );
+    if (!response) {
+      return { error: "Sorry, we couldn't send the email, please try again later" };
+    }
+    if ('verified' in response && response.verified === true && userAccount) {
+      await refreshAccessToken();
+    }
+    return response;
   };
 
   // Return the user object and auth methods
@@ -560,6 +624,10 @@ function useProvideAuth(signinRoute: string = '') {
     validateToken,
     getAccessToken,
     removeAccount,
+    getReauthenticationMethods,
+    emailVerified: auth?.emailVerified === true,
+    verifyEmail,
+    resendEmailVerification,
     validating,
   };
 }
