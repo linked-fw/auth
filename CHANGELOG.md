@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.4.1
+
+### Patch Changes
+
+- [#110](https://github.com/linked-fw/auth/pull/110) [`3249b05`](https://github.com/linked-fw/auth/commit/3249b050603d6ca1d2cdb800b90c77168f2d4a5b) Thanks [@flyon](https://github.com/flyon)! - `RequireAuth` now redirects to the sign-in route when validation ends without a session. Before, on a full page load (for example right after signout) it rendered nothing and stayed on the protected page.
+
 ## 3.4.0
 
 ### Minor Changes
