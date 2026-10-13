@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.5.0
+
+### Minor Changes
+
+- [#112](https://github.com/linked-fw/auth/pull/112) [`a8b4154`](https://github.com/linked-fw/auth/commit/a8b4154b77d1d87ba80cbf9b98a111049aaaaca5) Thanks [@flyon](https://github.com/flyon)! - `ProvideAuth` takes a `renderLoading`, which every `RequireAuth` shows while the session is validated (its own `renderLoading` still wins). Without either, `RequireAuth` now renders nothing instead of the text `...`.
+
 ## 3.4.1
 
 ### Patch Changes
