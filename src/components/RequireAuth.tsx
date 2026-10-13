@@ -16,11 +16,13 @@ export const RequireAuth = ({
   const auth = useAuth();
   const navigate = useNavigate();
 
+  // Also re-run when validation ends: on a full page load `validating` starts true, so a visitor
+  // without a session only becomes "signed out" when it flips to false, with userAccount unchanged.
   useEffect(() => {
     if (!auth.userAccount && !auth.validating) {
       navigate(signinRoute || '/signin');
     }
-  }, [auth.userAccount]);
+  }, [auth.userAccount, auth.validating, navigate, signinRoute]);
 
   // If the user is not logged in and we are still validating, we can show a loading state
   if (!auth.userAccount && auth.validating) {
