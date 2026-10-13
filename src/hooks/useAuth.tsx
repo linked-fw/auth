@@ -59,9 +59,19 @@ export function keepIfUnchanged<T>(previous: T, next: T): T {
 }
 
 const AuthContext = createContext(null);
+// Separate from AuthContext so the auth value is not rebuilt for it
+const AuthLoadingContext = createContext<(() => React.ReactElement) | undefined>(undefined);
+
+/** The loading element `ProvideAuth` was given, for `RequireAuth` to show while validating. */
+export const useAuthRenderLoading = () => useContext(AuthLoadingContext);
 
 interface AuthProviderProps {
   children: React.ReactNode;
+  /**
+   * What `RequireAuth` shows while the session is being validated, unless it is given its own
+   * `renderLoading`. Rendered on the server too (a server render is always still validating).
+   */
+  renderLoading?: () => React.ReactElement;
   userType?: typeof Shape;
   accountType?: typeof UserAccount;
   availableAccountTypes?: (typeof UserAccount)[];
@@ -75,13 +85,18 @@ export function ProvideAuth({
   signinRoute = '',
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   availableAccountTypes = [],
+  renderLoading,
 }: AuthProviderProps) {
   //Note: AvailableAccountTypes prop can be used to ensure that the App bundle that renders the provider
   // will include all the available account types. So that useAuth will work correctly when it uses getShapeOrSubShape to get the user account
   // we don't acutally use the property here, its just so that webpack bundles these account types
   // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const auth = useProvideAuth(signinRoute);
-  return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={auth}>
+      <AuthLoadingContext.Provider value={renderLoading}>{children}</AuthLoadingContext.Provider>
+    </AuthContext.Provider>
+  );
 }
 
 // Hook for child components to get the auth object ...

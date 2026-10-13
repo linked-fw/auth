@@ -1,5 +1,6 @@
 // RequireAuth in jsdom: a visitor without a session is sent to the sign-in route once validation
-// ends, the way a full page load after signout plays out. Renders the BUILT component.
+// ends, the way a full page load after signout plays out; and what it shows while validating.
+// Renders the BUILT component.
 import './cssStub.mjs';
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,6 +24,7 @@ process.env.SITE_ROOT = 'http://127.0.0.1:1';
 const React = (await import('react')).default;
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
+const { renderToString } = await import('react-dom/server');
 const { MemoryRouter, Routes, Route } = await import('react-router-dom');
 const { AppContext } = await import('@_linked/server-utils/components/AppContext');
 const libDir = new URL('../lib/esm/', import.meta.url);
@@ -87,4 +89,49 @@ test('a visitor with no session is redirected to /signin once validation ends', 
 test('the redirect goes to the given signinRoute', async () => {
   await render('/login');
   await waitFor(() => document.body.textContent.includes('signin page'), 'the signin route');
+});
+
+// A server render never finishes validating, so it shows the loading state
+function serverRender({ providerLoading, ownLoading } = {}) {
+  return renderToString(
+    h(
+      AppContext.Provider,
+      { value: {} },
+      h(
+        ProvideAuth,
+        { renderLoading: providerLoading },
+        h(
+          MemoryRouter,
+          { initialEntries: ['/'] },
+          h(
+            Routes,
+            null,
+            h(Route, {
+              path: '/',
+              element: h(RequireAuth, { renderLoading: ownLoading }, h('p', null, 'private page')),
+            })
+          )
+        )
+      )
+    )
+  );
+}
+
+test("while validating it shows ProvideAuth's renderLoading", () => {
+  const html = serverRender({ providerLoading: () => h('p', null, 'app loader') });
+  assert.match(html, /app loader/);
+  assert.doesNotMatch(html, /private page/);
+});
+
+test('its own renderLoading wins over the provider one', () => {
+  const html = serverRender({
+    providerLoading: () => h('p', null, 'app loader'),
+    ownLoading: () => h('p', null, 'own loader'),
+  });
+  assert.match(html, /own loader/);
+  assert.doesNotMatch(html, /app loader/);
+});
+
+test('with no renderLoading anywhere it shows nothing', () => {
+  assert.equal(serverRender(), '');
 });
