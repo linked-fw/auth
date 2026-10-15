@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.6.0
+
+### Minor Changes
+
+- [#119](https://github.com/linked-fw/auth/pull/119) [`9742eea`](https://github.com/linked-fw/auth/commit/9742eeaa2f4073039941841edc5df87c1908cf79) Thanks [@flyon](https://github.com/flyon)! - The email → WebID derivation is configurable: every sign-in method that starts from an email calls `Auth.webIdFor(email)`, which defaults to `emailToWebID`, so existing apps keep their WebIDs. `@_linked/auth/utils/webID` exports the keyed rule webid.email mints WebIDs with: `hmacWebId(email, {secret, issuer})` → `{issuer}/id/{h}#me` (`h` = first 128 bits of HMAC-SHA256 over the trimmed, lowercased email), the factory `hmacWebIdFor({secret, issuer})` to set as `Auth.webIdFor`, and the published `HMAC_WEBID_TEST_VECTOR`.
+
 ## 3.5.1
 
 ### Patch Changes
