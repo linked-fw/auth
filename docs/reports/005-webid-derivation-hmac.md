@@ -14,8 +14,7 @@ function, `Auth.webIdFor`. The default is today's `emailToWebID`, so an app that
 its WebIDs. The keyed rule that webid.email mints WebIDs with is exported for webid.email itself and
 for Create Now's dev sign-in, together with a test vector both of them assert.
 
-Step A0 of [plan 001](../plans/001-webid-signin-track.md); the step's working plan is
-[002](../plans/002-webid-derivation-hmac.md).
+Step A0 of [plan 001](../plans/001-webid-signin-track.md).
 
 ## What changed
 
