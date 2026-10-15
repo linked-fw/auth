@@ -4,7 +4,7 @@ summary: >
   reads solid:oidcIssuer from the profile; for an email it asks the domain's WebFinger (issuer link
   or WebID link) and falls back to a configured default issuer (webid.email), with a skip list of
   consumer domains, a timeout, a response size cap and a cache. Nothing calls it yet; A2 will.
-status: Implementation
+status: Review
 ---
 
 # 003 — Issuer discovery (A1)
@@ -220,3 +220,12 @@ in the same pass:
 - `clearCache()` did not clear the lookups already under way, and now it does.
 
 Validation: `npm test` → `# tests 363`, `# pass 363`, `# fail 0`.
+
+## REVIEW
+
+Wrap-up: the code was read through again for readability. There is no dead code; the comments
+explain the guard ranges, the JSON-LD limits and the cache keys. Report:
+[007](../reports/007-issuer-discovery.md). 006 belongs to A3's open PR, so A1 takes the next free
+number. Changeset `issuer-discovery.md` (minor). No architecture doc changes: the module implements
+arch-08 §Sign-in → Flow as drawn, and no cross-repo contract changed. This plan doc stays in place
+for the master plan's close-out. PR-ready: `npm test` 363/363; Verify run green (42/42).
