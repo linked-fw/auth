@@ -104,6 +104,8 @@ Tasks
 Validation: `npx linked build && node --test test/oidc-native-client.test.mjs` passes; full
 `npm test` passes.
 
+**Done.** `node --test test/oidc-native-client.test.mjs`: 7/7; `npm test`: 506/506.
+
 ### Phase 3 — Documentation, contracts, changeset
 
 Tasks
