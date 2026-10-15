@@ -55,6 +55,7 @@
     "google-auth-library": "^11.0.0",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^4.0.0",
+    "n3": "^2.13.12",
     "react-hook-form": "^7.47.0",
     "ulid": "^3.0.1",
     "uuid": "^14.0.0"
@@ -68,6 +69,7 @@
     "@_linked/fuseki": "^3.2.3",
     "@changesets/changelog-github": "^1.0.0",
     "@changesets/cli": "^3.0.0",
+    "@types/n3": "^1.26.4",
     "express": "^4.22.3",
     "jsdom": "^30.0.0",
     "react-dom": "^19.3.0",
