@@ -128,6 +128,12 @@ Tasks
 Validation
 - `npx linked build && npm test` and `npm run test:integration` (with `AUTH_TEST_FUSEKI_*`) pass.
 
+**Done.** `test/integration/signin-code.fuseki.test.mjs` (4 tests, including 5 concurrent
+sign-ins with one code: exactly one wins). `npm run test:integration` against local Fuseki:
+`# tests 38 # pass 38 # fail 0`; `npm test`: `# tests 344 # pass 344 # fail 0`. Readme: *Sign in
+with an emailed code*, the rate-limit rows, the dev log lines, *Setup sign-in by code*. The form
+shows "You are signed in." after a sign-in, for the link's route where no `onLoggedIn` is given.
+
 ### Dependencies
 
 Phase 2 needs phase 1's server methods; phase 3's integration test needs phase 1. Phases 2 and 3

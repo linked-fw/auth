@@ -36,7 +36,9 @@ export default function SigninWithCodeForm({
 
   const [email, setEmail] = useState(linkEmail || initialEmail || '');
   const [code, setCode] = useState('');
-  const [step, setStep] = useState<'email' | 'code'>(linkEmail && linkCode ? 'code' : 'email');
+  const [step, setStep] = useState<'email' | 'code' | 'signedIn'>(
+    linkEmail && linkCode ? 'code' : 'email'
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [helperText, setHelperText] = useState('');
@@ -53,6 +55,7 @@ export default function SigninWithCodeForm({
         setError(result.error);
         setStep('code');
       } else {
+        setStep('signedIn');
         onLoggedIn?.(result);
       }
     } catch (err) {
@@ -109,6 +112,14 @@ export default function SigninWithCodeForm({
     }
     signin(email, code);
   };
+
+  if (step === 'signedIn') {
+    return (
+      <div className={cl(style.root, className)}>
+        <p className={style.HelperText}>{t(prefix + '.signedIn', 'You are signed in.')}</p>
+      </div>
+    );
+  }
 
   if (step === 'email') {
     return (
