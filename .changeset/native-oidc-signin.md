@@ -1,5 +1,0 @@
----
-'@_linked/auth': minor
----
-
-Solid-OIDC sign-in in native (Capacitor) apps, following RFC 8252. `startNativeOidcSignin({input, redirectUri})` (on `useAuth`, and in `@_linked/auth/utils/nativeOidcSignin`) opens the issuer in the system browser through the function the app registers with `setOidcSigninBrowser`, never a WebView, and returns to an app-claimed link listed in `Auth.signinClient.redirectUris` (Universal Link, App Link or custom scheme). The system browser shares no cookie with the app, so the pending sign-in (PKCE verifier, nonce, DPoP key, hinted email, issuer) is sealed by the server and held on the device in the app's registered token storage. `completeOidcSignin(callbackUrl)` refuses a link for any other sign-in on the device, then finishes the exchange through the new `completeNativeOidcSignin` RPC with the same checks as the web callback, and stores the session's tokens. The readme documents `apple-app-site-association`, `assetlinks.json` and the values the app owner supplies. The web start and callback do not change.
