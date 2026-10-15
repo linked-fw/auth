@@ -302,3 +302,9 @@ test('an issuer with a path is checked against the profile even for a WebID on i
   const { result } = await signIn();
   assert.deepEqual(result, { ok: false, error: 'issuer_refused' });
 });
+
+test('an issuer whose metadata is larger than the response cap is unreachable', async () => {
+  issuer.metadataPadding = 2 * 1024 * 1024;
+  assert.deepEqual(await rp.begin({ issuer: issuer.issuer }), { ok: false, error: 'issuer_unreachable' });
+  assert.match(warnings.join('\n'), /larger than/);
+});

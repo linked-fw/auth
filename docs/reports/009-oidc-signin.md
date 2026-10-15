@@ -50,14 +50,15 @@ closes A1's DNS-rebinding follow-up.
   - `isIssuerIdentifier`, `sameIssuer`, `jwkThumbprint`, `OIDC_SIGNIN_SCOPE`,
     `defaultOidcResultLocation`, `safeReturnTo`, and the types.
 - **`@_linked/auth/utils/guardedFetch`**: `createGuardedFetch({allowLocalhost, resolve?})`,
-  `guardedLookup`, `BlockedAddressError`, `RefusedUrlError`.
+  `guardedLookup`, `BlockedAddressError`, `RefusedUrlError`, `ResponseTooLargeError`,
+  `ResponseTimeoutError`; options `maxResponseBytes` (1 MB) and `responseTimeoutMs` (10 s).
 - **`isBlockedAddress`**, newly exported from `utils/issuerDiscovery`.
 
 ## Files
 
 | File | Responsibility |
 |---|---|
-| `src/utils/guardedFetch.ts` | undici `fetch` with an `Agent` whose `lookup` resolves every address and refuses private ones (loopback only with `allowLocalhost`); URL check first (IP literals skip `lookup`); never follows redirects |
+| `src/utils/guardedFetch.ts` | undici `fetch` with an `Agent` whose `lookup` resolves every address and refuses private ones (loopback only with `allowLocalhost`); URL check first (IP literals skip `lookup`); never follows redirects; every response bounded (body at most 1 MB, the whole response within 10 s) |
 | `src/utils/oidcSignin.ts` | The relying party on openid-client: `begin` (PKCE `S256`, `state`, `nonce`, ES256 DPoP key and `dpop_jkt`, hints), `complete` (grant with a DPoP proof, `enableNonRepudiationChecks` for the JWKS signature, `iss` tied to the pending issuer, `webid`/`auth_time` required, the issuer check), a bounded metadata cache; the configuration and outcome types |
 | `src/helpers/oidcPending.ts` | Pending sign-ins in `req.session`, keyed by `state`: 10 minutes, at most 5, removed on first lookup |
 | `src/backend.ts` | `startOidcSignin`; `handleOidcCallback`, `signInVerifiedWebId`, `hasUnprovenPassword`, `hasAccountForEmail`, `oidcRuntimeFor` (module functions, not dispatchable); the route after the session middleware and the startup check |
@@ -119,6 +120,12 @@ An independent review found:
 My own review found an unbounded issuer-metadata cache (medium), now bounded at 100, and a
 configuration broken after startup throwing from the RPC (low), now reported.
 
+The master plan's independent review then found that the guarded fetch capped neither the body
+size nor the read time, while openid-client buffers discovery, JWKS and token responses
+(medium). Fixed: `maxResponseBytes` (1 MB) and `responseTimeoutMs` (10 s) on every response, with
+tests (a streamed body, a declared length, a dripping body, oversized issuer metadata). It also
+found the session-cookie gap and two lows, recorded below.
+
 A re-review of the fixes found nothing at medium or above. Its low finding was fixed: the
 `/.well-known/` guard now also checks the parsed and lowercased URL, so backslash and uppercase
 spellings are refused before discovery. A backslash attack had already failed at the metadata
@@ -126,15 +133,17 @@ check.
 
 ## Tests
 
-- `test/guarded-fetch.test.mjs`, 11 tests:
+- `test/guarded-fetch.test.mjs`, 15 tests:
   - the address ranges;
   - private, mixed and loopback answers refused in `lookup`, answering in both forms;
   - `ENOTFOUND` and resolver errors;
   - a private name refused before any request;
   - URLs refused before any lookup;
   - a local server reached through the lookup;
-  - redirects not followed.
-- `test/oidc-signin.test.mjs`, 25 tests:
+  - redirects not followed;
+  - a body streamed past the cap, a declared length past it, a body still arriving at the deadline,
+    and a small body read normally.
+- `test/oidc-signin.test.mjs`, 26 tests:
   - the URL parameters;
   - a full exchange (DPoP `jkt` and PKCE checked by the issuer, no profile fetch on webid.email's
     origin shape);
@@ -145,7 +154,7 @@ check.
   - `login_required` and the other authorization errors; another `state`; a replayed code;
   - unusable issuers; `.well-known`, query and fragment issuers;
   - metadata naming another issuer; a path issuer on the WebID's origin;
-  - the metadata cache's TTL and bound; `sameIssuer`.
+  - the metadata cache's TTL and bound; `sameIssuer`; oversized metadata.
 - `test/oidc-callback.test.mjs`, 19 tests (a real express app with a cookie jar):
   - a new email: person, account, verified email, session and redirect;
   - an existing person, and a pre-registered password removed;
@@ -172,6 +181,17 @@ check.
 - Two tabs starting at the same instant can lose one pending record (express-session saves the
   whole session, and the last write wins); the user starts again. An abandoned sign-in's DPoP key
   stays in its session row until the next start in that session prunes it.
+- **The session cookie and store (pre-existing).** The express-session cookie `linked.auth` has
+  no `secure` or `sameSite` attribute, and its store is plaintext SQLite under `data/`. The browser
+  binding of a pending sign-in rides on that cookie. Home: backlog
+  [005](../backlog/005-session-cookie-hardening.md).
+- Two callbacks for one `state` that arrive at the same instant can both take the record before
+  the session is saved, and both reach the token endpoint. Only the issuer's single-use check on
+  the code then holds, which the code flow requires of every issuer.
+- `sameIssuer` ignores one trailing slash, where Solid-OIDC says to compare strings. Profiles
+  commonly list `https://issuer/` while `iss` is `https://issuer`, and other Solid clients accept
+  both. The tolerance cannot make the two strings name different servers, since both parse to the
+  same origin and root path, so it stays.
 - The check that the token's `iss` equals the pending issuer is defence in depth. openid-client's
   own comparison plus the metadata check already imply it, so no test reaches it.
 - Create Now picks this up after the release. Its root `npm install` brings in `openid-client`

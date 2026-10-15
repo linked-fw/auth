@@ -10,7 +10,7 @@
  */
 import dns from 'node:dns';
 import type { LookupAddress, LookupAllOptions, LookupOneOptions } from 'node:dns';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent, Response as UndiciResponse, fetch as undiciFetch } from 'undici';
 import { isBlockedAddress, isFetchableUrl } from './issuerDiscovery.js';
 
 /** Resolves a host name to every address it has, as `dns.promises.lookup` with `all: true`. */
@@ -21,7 +21,99 @@ export interface GuardedFetchOptions {
   allowLocalhost?: boolean;
   /** Replaces the system resolver (tests). */
   resolve?: ResolveHost;
+  /** Largest response body read; a larger one fails the read. Default 1 MB. */
+  maxResponseBytes?: number;
+  /** Deadline for a whole response, from the request to the body's last byte. Default 10 s. */
+  responseTimeoutMs?: number;
 }
+
+/** The error a body read fails with when the body is larger than `maxResponseBytes`. */
+export class ResponseTooLargeError extends Error {
+  readonly code = 'ERR_RESPONSE_TOO_LARGE';
+  constructor(href: string, maxBytes: number) {
+    super(`The response from ${href} is larger than ${maxBytes} bytes`);
+    this.name = 'ResponseTooLargeError';
+  }
+}
+
+/** The error a body read fails with when the response takes longer than `responseTimeoutMs`. */
+export class ResponseTimeoutError extends Error {
+  readonly code = 'ERR_RESPONSE_TIMEOUT';
+  constructor(href: string, timeoutMs: number) {
+    super(`The response from ${href} took longer than ${timeoutMs} ms`);
+    this.name = 'ResponseTimeoutError';
+  }
+}
+
+// statuses whose response may not have a body
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
+/**
+ * `response` with its body capped at `maxBytes` and finished by `deadline` (ms since the epoch):
+ * a body that grows past the cap, or is still arriving at the deadline, errors its reader and
+ * cancels the connection. Callers that buffer the whole body (openid-client's `response.json()`)
+ * then fail instead of reading without bound.
+ */
+const limitResponse = (
+  response: UndiciResponse,
+  href: string,
+  maxBytes: number,
+  deadline: number,
+  timeoutMs: number
+): UndiciResponse => {
+  const source = response.body;
+  if (!source || NULL_BODY_STATUSES.has(response.status)) return response;
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    void source.cancel().catch(() => {});
+    throw new ResponseTooLargeError(href, maxBytes);
+  }
+  const reader = source.getReader();
+  let received = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limited = new ReadableStream<Uint8Array>({
+    start(controller) {
+      timer = setTimeout(() => {
+        controller.error(new ResponseTimeoutError(href, timeoutMs));
+        void reader.cancel().catch(() => {});
+      }, Math.max(0, deadline - Date.now()));
+      timer.unref?.();
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          clearTimeout(timer);
+          controller.close();
+          return;
+        }
+        received += value.byteLength;
+        if (received > maxBytes) {
+          clearTimeout(timer);
+          controller.error(new ResponseTooLargeError(href, maxBytes));
+          void reader.cancel().catch(() => {});
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        clearTimeout(timer);
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      clearTimeout(timer);
+      return reader.cancel(reason);
+    },
+  });
+  const wrapped = new UndiciResponse(limited as ConstructorParameters<typeof UndiciResponse>[0], {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+  // a constructed response has no URL; keep the one it was fetched from
+  Object.defineProperty(wrapped, 'url', { value: response.url });
+  return wrapped;
+};
 
 /** The error a refused connection fails with; `fetch` rejects with it as its `cause`. */
 export class BlockedAddressError extends Error {
@@ -89,10 +181,13 @@ const hrefOf = (input: FetchInput): string =>
  * only through `guardedLookup`. The URL check covers IP literals, which skip `lookup`; the lookup
  * covers host names. It never follows a redirect (a hop to an IP literal would skip both checks):
  * `redirect: 'follow'` is turned into `'manual'`, and callers that follow redirects fetch each hop
- * themselves, as issuer discovery does.
+ * themselves, as issuer discovery does. Every response is bounded: its body may not exceed
+ * `maxResponseBytes`, and the whole response must arrive within `responseTimeoutMs`.
  */
 export const createGuardedFetch = (options: GuardedFetchOptions = {}): typeof fetch => {
   const allowLocalhost = options.allowLocalhost ?? false;
+  const maxBytes = options.maxResponseBytes ?? 1024 * 1024;
+  const timeoutMs = options.responseTimeoutMs ?? 10_000;
   const dispatcher = new Agent({
     connect: { lookup: guardedLookup(allowLocalhost, options.resolve) },
   });
@@ -102,7 +197,13 @@ export const createGuardedFetch = (options: GuardedFetchOptions = {}): typeof fe
       throw new RefusedUrlError(href);
     }
     const redirect = init?.redirect === 'error' ? 'error' : 'manual';
-    return undiciFetch(input, { ...init, redirect, dispatcher });
+    const deadline = Date.now() + timeoutMs;
+    // the deadline covers the headers as well; the caller's own signal still applies
+    const signal = init?.signal
+      ? AbortSignal.any([init.signal as AbortSignal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs);
+    const response = await undiciFetch(input, { ...init, redirect, dispatcher, signal });
+    return limitResponse(response, href, maxBytes, deadline, timeoutMs);
   };
   // undici's fetch is the implementation behind Node's; only its type declarations differ.
   return guarded as unknown as typeof fetch;

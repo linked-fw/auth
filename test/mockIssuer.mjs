@@ -83,6 +83,8 @@ export async function startMockIssuer() {
     },
     /** When set, the metadata document names this issuer instead of its own. */
     metadataIssuer: undefined,
+    /** Bytes of filler added to the metadata document. */
+    metadataPadding: 0,
     profileOrigin: '',
     authorizeRequests: [],
     tokenRequests: [],
@@ -103,6 +105,7 @@ export async function startMockIssuer() {
       mock.discoveryRequests = 0;
       mock.issuerPath = '';
       mock.metadataIssuer = undefined;
+      mock.metadataPadding = 0;
       mock.profiles = new Map();
       mock.authorizeError = undefined;
       mock.claims = (defaults) => defaults;
@@ -141,6 +144,7 @@ export async function startMockIssuer() {
         scopes_supported: ['openid', 'webid', 'email'],
         claims_supported: ['sub', 'webid', 'email', 'email_verified', 'auth_time'],
         authorization_response_iss_parameter_supported: true,
+        ...(mock.metadataPadding ? { filler: 'x'.repeat(mock.metadataPadding) } : {}),
       });
     }
     if (url.pathname === '/jwks') return json(200, { keys: [publicJwk] });

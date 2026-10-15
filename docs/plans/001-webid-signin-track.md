@@ -124,12 +124,16 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   fetch only when the issuer is the root of `webid`'s origin (`https://webid.email` for
   `https://webid.email/id/…`); an issuer with a path is always checked (A2 review: on a shared
   origin a path may belong to one user). An issuer identifier has no query, fragment or
-  `/.well-known/`, and its metadata must name exactly it. `login_required` and a refused issuer
-  check are returned to the app, not thrown.
+  `/.well-known/`, and its metadata must name exactly it. The origin-root skip also skips
+  confirming that the WebID dereferences at all: a webid.email WebID is trusted from the issuer's
+  word alone. `login_required` and a refused issuer check are returned to the app, not thrown.
 - The token's `email` is trusted (stored on the account, marked verified) only when it **proves
   the WebID**: `email_verified` is true and `Auth.webIdFor(email) === webid`. Any issuer can claim
   any email for its own WebIDs, so an app that resolves anything by email (CN's invitations, C2b)
-  uses the email only when the callback's outcome says `emailProven`.
+  uses the email only when the callback's outcome says `emailProven`. In practice only
+  webid.email-derived WebIDs carry a proven email (with CN's HMAC derivation), so email-based
+  invitations will not match users of third-party issuers: a product limitation, which the invite
+  UI's "grant a WebID directly" covers.
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
   a shared artifact; C1 is the first test across the two real processes.

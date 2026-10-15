@@ -8,7 +8,14 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 const libDir = new URL('../lib/esm/', import.meta.url);
-const { createGuardedFetch, guardedLookup, BlockedAddressError, RefusedUrlError } = await import(
+const {
+  createGuardedFetch,
+  guardedLookup,
+  BlockedAddressError,
+  RefusedUrlError,
+  ResponseTooLargeError,
+  ResponseTimeoutError,
+} = await import(
   new URL('utils/guardedFetch.js', libDir)
 );
 const { isBlockedAddress } = await import(new URL('utils/issuerDiscovery.js', libDir));
@@ -20,6 +27,34 @@ let requests = 0;
 before(async () => {
   server = http.createServer((req, res) => {
     requests++;
+    if (req.url === '/big') {
+      // 64 KB chunks without a content-length, until the client stops reading
+      res.writeHead(200, { 'content-type': 'application/json' });
+      const chunk = Buffer.alloc(64 * 1024, 'a');
+      const write = () => {
+        while (res.write(chunk)) {}
+        res.once('drain', write);
+      };
+      res.on('close', () => res.removeAllListeners('drain'));
+      write();
+      return;
+    }
+    if (req.url === '/declared') {
+      res.writeHead(200, { 'content-length': String(10 * 1024 * 1024) });
+      res.write('a');
+      return;
+    }
+    if (req.url === '/slow') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('{"a":');
+      const drip = setInterval(() => res.write(' '), 50);
+      res.on('close', () => clearInterval(drip));
+      return;
+    }
+    if (req.url === '/small') {
+      res.end('{"ok":true}');
+      return;
+    }
     if (req.url === '/redirect') {
       res.writeHead(302, { location: 'http://127.0.0.1:1/' });
       res.end();
@@ -163,4 +198,51 @@ test('createGuardedFetch: redirects are never followed', async () => {
   const response = await guarded(`http://localhost:${port}/redirect`, { redirect: 'follow' });
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), 'http://127.0.0.1:1/');
+});
+
+const localFetch = (options = {}) =>
+  createGuardedFetch({ allowLocalhost: true, resolve: fakeResolver(['127.0.0.1']).resolve, ...options });
+
+/** The error a body read failed with, following `cause`. */
+async function readError(promise) {
+  try {
+    await promise;
+  } catch (error) {
+    const chain = [];
+    for (let e = error; e; e = e.cause) chain.push(e);
+    return chain;
+  }
+  assert.fail('the read did not fail');
+}
+
+test('createGuardedFetch: a body streamed past the cap fails the read', async () => {
+  const guarded = localFetch({ maxResponseBytes: 256 * 1024 });
+  const response = await guarded(`http://localhost:${port}/big`);
+  const chain = await readError(response.json());
+  assert.ok(chain.some((e) => e instanceof ResponseTooLargeError), chain.map(String).join(' <- '));
+});
+
+test('createGuardedFetch: a declared length past the cap fails before the body is read', async () => {
+  const guarded = localFetch({ maxResponseBytes: 1024 });
+  const chain = await readError(guarded(`http://localhost:${port}/declared`));
+  assert.ok(chain.some((e) => e instanceof ResponseTooLargeError));
+});
+
+test('createGuardedFetch: a body still arriving at the deadline fails the read', async () => {
+  const guarded = localFetch({ responseTimeoutMs: 300 });
+  const started = Date.now();
+  const response = await guarded(`http://localhost:${port}/slow`);
+  const chain = await readError(response.text());
+  assert.ok(
+    chain.some((e) => e instanceof ResponseTimeoutError || e?.name === 'TimeoutError' || e?.name === 'AbortError'),
+    chain.map(String).join(' <- ')
+  );
+  assert.ok(Date.now() - started < 2000);
+});
+
+test('createGuardedFetch: a small body within the limits reads normally, with its url', async () => {
+  const guarded = localFetch({ maxResponseBytes: 1024, responseTimeoutMs: 2000 });
+  const response = await guarded(`http://localhost:${port}/small`);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(response.url, `http://localhost:${port}/small`);
 });

@@ -710,7 +710,8 @@ The callback's error codes:
 Every request to an issuer, a profile or a WebFinger endpoint goes through `createGuardedFetch`.
 It allows only `https:` (`http:` and loopback with `allowLocalhost`). Host names are resolved and
 refused when any address is private; the connection goes to the addresses that were checked; and
-redirects are not followed. At startup the server stops (`FatalConfigError`) without a `client_id`
+redirects are not followed. Every response body is capped (`maxResponseBytes`, 1 MB) and the whole
+response must arrive in time (`responseTimeoutMs`, 10 s). At startup the server stops (`FatalConfigError`) without a `client_id`
 (neither `Auth.signinClient` nor `clientId`) or when `SITE_ROOT` is not `https:` (`http:` only on
 localhost).
 
