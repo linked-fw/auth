@@ -23,7 +23,7 @@ decisions 1–7, 9 and 10.
 its Rules apply (worktrees, a changeset per PR, PRs ending in an Outcome section, never "Claude" in
 commits or PRs), and its §Contracts is the cross-repo source of the [Contracts](#contracts) below.
 Each step agent works in its own plan doc (numbers assigned by 065: A0 → `002`, A1 → `003`,
-A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`). The issuer side is webid.email
+A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`, A6 → `008`). The issuer side is webid.email
 ([its plan](https://github.com/Semantu/webid-email/blob/main/docs/plans/001-webid-email-service.md)).
 
 **The steps.** A0 makes the email → WebID derivation configurable and exports the HMAC rule
@@ -31,7 +31,8 @@ A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`). The issuer side is webi
 WebFinger, fallback). A2 is the Solid-OIDC exchange itself, on `openid-client`. A3 serves the
 app's Client ID Document and defines its theme extension. A5 adds a passwordless sign-in by
 emailed code, which webid.email's pages use. A4 makes the exchange work in native (Capacitor)
-builds. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
+builds. A6 prefixes auth's cookie names so two Linked apps on one host (CN and a local
+webid.email) keep separate sessions. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
 
 **A parallel track.** Every existing method — password, Google/Apple/Facebook OAuth, temporary,
 dev sign-in (`signinDev`) — keeps its behaviour, exposure, cookies and sessions. All methods end in
@@ -85,6 +86,15 @@ Set by the consumers, never read by this package directly; they feed `hmacWebIdF
 | CN | `DEV_WEBID_ISSUER` | `http://localhost:4050` |
 | webid.email | `WEBID_SECRET` | the HMAC secret; the same name in production and locally, where it holds the dev value |
 | webid.email | issuer URL | `SITE_ROOT` (`http://localhost:4050` locally, `https://webid.email` in production); no separate variable |
+
+One variable this package does read, set by both apps when they share a host (A6):
+
+| Where | Variable | Values |
+|---|---|---|
+| CN | `AUTH_COOKIE_PREFIX` | `cn_` in local development (CN on `localhost:4040` next to webid.email on `:4050`); also in CN's browser bundle (Vite `define`) |
+| webid.email | `AUTH_COOKIE_PREFIX` | `wie_` in local development; its issuer reads its own hint cookie, `wie_linkedAuthSession` |
+
+Empty (the default) keeps today's cookie names; production apps on their own hosts need none.
 
 CN's `WEBID_MODE` (`bypass` · `local` · `production`; `DEV_AUTH=true` maps to `bypass` and is
 deprecated) is CN's own and not read here. Note that this package's dev-only behaviour
@@ -485,6 +495,40 @@ sign in from the log line in dev, the readme documents them, and the release car
 
 ---
 
+## A6 — Cookie-name prefix
+
+**Depends on:** nothing. **PR:** [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md). **Size:** small, 2 phases.
+Adds to [contract 2](#2-environment-variables-this-repo-must-know-cn-c0c2a-webidemail-w2).
+
+**Problem.** Two Linked apps on one host (CN on `localhost:4040`, webid.email on
+`localhost:4050`) share auth's cookies, whose names are fixed, because browsers don't separate
+cookies by port: signing out of one signs out the other, and webid.email's issuer session dies
+with CN's sign-out.
+
+**Scope.** A configurable prefix, `AUTH_COOKIE_PREFIX` (env, read once) or `Auth.cookiePrefix` (a
+static), default empty so existing apps see no change, applied to every cookie auth sets and
+reads, server and client side: `accessToken`, `refreshToken` (and its legacy `/` copy),
+`linkedAuthSession` (the hint webid.email's issuer reads), and express-session's `linked.auth`
+(A2's pending OIDC sign-ins). The client learns it the way it learns the token lifetimes, from
+`process.env` inlined into the bundle. Readme: when to set it. Contract 2: CN `cn_`, webid.email
+`wie_` locally.
+
+**Verify**
+- Unit tests: every cookie name honours the prefix; an empty prefix gives today's names (existing
+  tests pass unchanged).
+- Integration: two prefixes in one cookie jar; signing out of one leaves the other signed in.
+- `npm test` and `npm run test:integration` pass.
+
+**Consumers** (outside this repo; routed by master plan 065)
+- webid.email: set `AUTH_COOKIE_PREFIX=wie_` locally, and read the hint in
+  `src/oidc/provider.ts` with `sessionHintCookieName()` instead of the base `SESSION_HINT_COOKIE`
+  (which stays `linkedAuthSession` whatever the prefix).
+- CN: set `AUTH_COOKIE_PREFIX=cn_` locally, and inline it into the client bundle through
+  `createViteConfig({define})`.
+- 065 §Contracts 2 gets the two `AUTH_COOKIE_PREFIX` rows above.
+
+---
+
 ## A4 — Native apps (Capacitor)
 
 **Depends on:** A2. Needed for Peace Game.
@@ -526,3 +570,4 @@ sign in from the log line in dev, the readme documents them, and the release car
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [x] A4 — [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md)
+- [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)

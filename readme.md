@@ -27,6 +27,15 @@ Default lifetimes: the access token lasts **15 minutes** (1 hour in development)
 - Signing out (and a failed refresh) clears all three.
 - `Secure` is set when the request is https (`req.secure`) or `SITE_ROOT` is https. **Behind a TLS-terminating proxy, set `app.set('trust proxy', …)`** so `req.secure` (and `req.ip`) reflect the client connection.
 
+### Two Linked apps on one host: a cookie prefix
+
+Browsers do not separate cookies by port, so two Linked apps on one host (for example an app on `localhost:4040` developed against a local issuer on `localhost:4050`) share `accessToken`, `refreshToken`, `linkedAuthSession` and the session cookie `linked.auth`: signing out of one signs out the other. Give each app its own prefix:
+
+- `AUTH_COOKIE_PREFIX=cn_` in the server environment (read once), or `Auth.cookiePrefix = 'cn_'` (from `@_linked/auth/utils/auth`) in the backend setup, before `setupBeforeControllers` runs; the static wins. Letters, digits, `_`, `.` and `-` only.
+- **The browser bundle needs it too**: the client reads `process.env.AUTH_COOKIE_PREFIX` to find the `linkedAuthSession` hint, like the token lifetimes. Inline it into the client bundle with the Linked CLI's `createViteConfig({define: {'process.env.AUTH_COOKIE_PREFIX': JSON.stringify(process.env.AUTH_COOKIE_PREFIX ?? '')}})`, which lands on the client environment only (not a top-level Vite `define`, which the server would inherit). Without it, a page load that was not server-rendered as signed in skips the refresh and shows the user signed out.
+
+Every cookie then carries the prefix (`cn_accessToken`, `cn_refreshToken`, `cn_linkedAuthSession`, `cn_linked.auth`), and an issuer that reads the hint cookie uses its own prefixed name. The default is empty: an app that sets nothing keeps today's names. Changing the prefix of a running app signs its users out once (the old cookies are no longer read). `ACCESS_COOKIE`, `REFRESH_COOKIE` and `SESSION_HINT_COOKIE` (`@_linked/auth/utils/cookies`) are the base names; `accessCookieName()`, `refreshCookieName()` and `sessionHintCookieName()` give the names in use.
+
 The client refreshes ~60 s before the access token's `exp`, again when the tab becomes visible or focused with a stale token, and once after a `Server.call` gets a 401 (then retries that call once). Concurrent refreshes share one request.
 
 ### Native apps
@@ -144,6 +153,7 @@ import { PaidAccountTier1 } from 'lincd-dating/lib/shapes/PaidAccountTier1';
 | `AUTH_EMAIL_VERIFICATION_TTL` | no | how long an email verification link works, in seconds (default 7 days). A link works once, and a newer link replaces it |
 | `AUTH_SESSION_CLEANUP` | no | `false` stops the daily background cleanup of old `RefreshToken` records |
 | `AUTH_SESSION_CLEANUP_AFTER` | no | how long revoked/expired records are kept before cleanup deletes them (default 30 days) |
+| `AUTH_COOKIE_PREFIX` | no | prefix of every auth cookie name (default empty); set it when two Linked apps share a host, see *Two Linked apps on one host* above |
 | `AUTH_COOKIE_SECURE` | no | `true`/`false` overrides the https detection |
 | `AUTH_COOKIE_SAMESITE` | no | `lax`/`strict`/`none` for both token cookies (`none` forces Secure; for a frontend on another site) |
 | `AUTH_COOKIE_DOMAIN` | no | cookie domain (default: the host) |

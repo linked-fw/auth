@@ -41,7 +41,14 @@ import {
   startSessionCleanup,
   stopSessionCleanup,
 } from './utils/sessions.js';
-import { clearAuthCookies, deliverTokens, wantsTokensInBody } from './utils/cookies.js';
+import {
+  accessCookieName,
+  clearAuthCookies,
+  deliverTokens,
+  refreshCookieName,
+  wantsTokensInBody,
+} from './utils/cookies.js';
+import { authCookieName } from './utils/cookieNames.js';
 import { assertAuthSecrets, FatalConfigError, getJwtSecret } from './utils/secrets.js';
 import {
   buildClientIdDocument,
@@ -128,6 +135,9 @@ const VERIFIED_OAUTH_PROVIDERS: readonly string[] = ['google', 'apple'];
  * `req.session` threw while sending its headers and never finished.
  */
 export const SESSION_COOKIE_NAME = 'linked.auth';
+
+/** The express-session cookie's name under the cookie prefix (utils/cookieNames.ts). */
+export const sessionCookieName = () => authCookieName(SESSION_COOKIE_NAME);
 
 declare var process;
 
@@ -1063,7 +1073,7 @@ export default class AuthBackendProvider extends BackendProvider {
       '/',
       session({
         secret: sessionSecret,
-        name: SESSION_COOKIE_NAME,
+        name: sessionCookieName(),
         //TODO: this broke sessions in production, need to check what else we need to do to make secure sessions work
         // cookie: {secure: process.env.NODE_ENV === 'production'},
         resave: true,
@@ -2633,7 +2643,7 @@ export default class AuthBackendProvider extends BackendProvider {
           : undefined;
         // Re-set the access cookie when the browser does not hold this token as an httpOnly
         // cookie yet (it came from the header, or from a cookie written by an older client).
-        const cookieIsCurrent = (request as any)?.cookies?.accessToken === token;
+        const cookieIsCurrent = (request as any)?.cookies?.[accessCookieName()] === token;
         return deliverTokens(
           request,
           cookieIsCurrent ? false : response,
@@ -2770,7 +2780,7 @@ export default class AuthBackendProvider extends BackendProvider {
     if (header && header.split(' ')[0] === 'Bearer' && header.split(' ')[1]) {
       tokens.push(header.split(' ')[1]);
     }
-    const cookie = (req as any)?.cookies?.accessToken;
+    const cookie = (req as any)?.cookies?.[accessCookieName()];
     if (cookie && !tokens.includes(cookie)) {
       tokens.push(cookie);
     }
@@ -2779,7 +2789,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
   // get refresh token from request (the httpOnly cookie)
   protected getRefreshTokenFromRequest(req: Request) {
-    return (req as any)?.cookies && (req as any).cookies.refreshToken;
+    return (req as any)?.cookies && (req as any).cookies[refreshCookieName()];
   }
 }
 

@@ -22,6 +22,9 @@
  * `app.set('trust proxy', …)` so `req.secure` and `req.ip` are right; SITE_ROOT=https keeps the
  * cookies Secure even without it (and logs a warning once).
  *
+ * Every name carries the prefix from `AUTH_COOKIE_PREFIX` / `Auth.cookiePrefix` (see
+ * utils/cookieNames.ts; empty by default), so two Linked apps on one host keep separate sessions.
+ *
  * Overrides: `AUTH_COOKIE_SECURE=true|false`, `AUTH_COOKIE_SAMESITE=lax|strict|none` (both
  * cookies; `none` forces Secure — for a frontend on another site), `AUTH_COOKIE_DOMAIN`,
  * `AUTH_REFRESH_COOKIE_PATH` (when the app is served under a path prefix).
@@ -33,10 +36,19 @@ import {
   TOKEN_TRANSPORT_HEADER,
   jwtExpiryMs,
 } from './token.js';
+import { authCookieName } from './cookieNames.js';
 
+/** Base names, without the prefix; the cookies are named by the functions below. */
 export const ACCESS_COOKIE = ACCESS_TOKEN;
 export const REFRESH_COOKIE = REFRESH_TOKEN;
 export const SESSION_HINT_COOKIE = 'linkedAuthSession';
+
+/** The access token cookie's name under the current prefix. */
+export const accessCookieName = () => authCookieName(ACCESS_COOKIE);
+/** The refresh token cookie's name under the current prefix. */
+export const refreshCookieName = () => authCookieName(REFRESH_COOKIE);
+/** The session hint cookie's name under the current prefix. */
+export const sessionHintCookieName = () => authCookieName(SESSION_HINT_COOKIE);
 export const DEFAULT_REFRESH_COOKIE_PATH = '/call/@_linked/auth';
 
 type SameSite = 'lax' | 'strict' | 'none';
@@ -161,14 +173,14 @@ export function setAuthCookies(
     const expMs = jwtExpiryMs(accessToken);
     const maxAge = expMs !== undefined ? expMs - now : undefined;
     if (maxAge === undefined || maxAge > 0) {
-      response.cookie(ACCESS_COOKIE, accessToken, accessCookieOptions(req, maxAge));
+      response.cookie(accessCookieName(), accessToken, accessCookieOptions(req, maxAge));
     }
   }
   if (refreshToken) {
     const maxAge = refreshTokenExpiresAt ? refreshTokenExpiresAt.getTime() - now : undefined;
     if (maxAge === undefined || maxAge > 0) {
-      response.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions(req, maxAge));
-      response.cookie(SESSION_HINT_COOKIE, '1', sessionHintCookieOptions(req, maxAge));
+      response.cookie(refreshCookieName(), refreshToken, refreshCookieOptions(req, maxAge));
+      response.cookie(sessionHintCookieName(), '1', sessionHintCookieOptions(req, maxAge));
       clearLegacyRefreshCookie(req, response);
     }
   }
@@ -188,9 +200,10 @@ export function hasLegacyRefreshCookie(req: any): boolean {
   const raw: string = req?.headers?.cookie || '';
   if (!raw) return false;
   const names = raw.split(';').map((part) => part.trim().split('=')[0]);
-  const refreshCount = names.filter((name) => name === REFRESH_COOKIE).length;
+  const refreshName = refreshCookieName();
+  const refreshCount = names.filter((name) => name === refreshName).length;
   if (refreshCount >= 2) return true;
-  return refreshCount === 1 && !names.includes(SESSION_HINT_COOKIE);
+  return refreshCount === 1 && !names.includes(sessionHintCookieName());
 }
 
 function clearLegacyRefreshCookie(req: any, response: any) {
@@ -198,7 +211,7 @@ function clearLegacyRefreshCookie(req: any, response: any) {
   // only when the browser actually sent one: a cookie on `/` from an earlier release
   if (!hasLegacyRefreshCookie(req)) return;
   const { maxAge, ...options } = refreshCookieOptions(req);
-  response.clearCookie(REFRESH_COOKIE, { ...options, path: '/' });
+  response.clearCookie(refreshCookieName(), { ...options, path: '/' });
 }
 
 /** Clear every auth cookie (sign-out, failed refresh, removed account). */
@@ -206,11 +219,11 @@ export function clearAuthCookies(req: any, res?: any): boolean {
   const response = writableResponse(req, res);
   if (!response) return false;
   const strip = ({ maxAge, ...options }: AuthCookieOptions) => options;
-  response.clearCookie(ACCESS_COOKIE, strip(accessCookieOptions(req)));
-  response.clearCookie(REFRESH_COOKIE, strip(refreshCookieOptions(req)));
-  response.clearCookie(SESSION_HINT_COOKIE, strip(sessionHintCookieOptions(req)));
+  response.clearCookie(accessCookieName(), strip(accessCookieOptions(req)));
+  response.clearCookie(refreshCookieName(), strip(refreshCookieOptions(req)));
+  response.clearCookie(sessionHintCookieName(), strip(sessionHintCookieOptions(req)));
   if (refreshCookiePath() !== '/') {
-    response.clearCookie(REFRESH_COOKIE, { ...strip(refreshCookieOptions(req)), path: '/' });
+    response.clearCookie(refreshCookieName(), { ...strip(refreshCookieOptions(req)), path: '/' });
   }
   return true;
 }

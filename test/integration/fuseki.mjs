@@ -72,3 +72,10 @@ export async function countSubjectsWith(predicate, object) {
 }
 
 export const AUTH = 'https://linked.cm/ont/auth/';
+
+/** Where the throwaway dataset lives, for a test that runs an app in another process. */
+export const testDataset = {
+  endpoint: `${FUSEKI}/${DATASET}`,
+  username: USER,
+  password: PASSWORD,
+};

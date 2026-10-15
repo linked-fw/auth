@@ -20,6 +20,7 @@ import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider.js'
 import { setQueryContext } from '@_linked/core/queries/QueryContext';
 import { personEmailVerified } from '../helpers/emailVerification.js';
 import { emailToWebID } from './webID.js';
+import { getCookiePrefix, setCookiePrefix } from './cookieNames.js';
 import type { SigninClientConfig } from './clientIdDocument.js';
 import type { OidcSigninConfig } from './oidcSignin.js';
 
@@ -55,6 +56,21 @@ export class Auth {
    * runs, e.g. `Auth.oidcSignin = {}` next to `Auth.signinClient`.
    */
   static oidcSignin?: OidcSigninConfig;
+
+  /**
+   * The prefix of every cookie this package sets and reads (`accessToken`, `refreshToken`,
+   * `linkedAuthSession`, the session cookie `linked.auth`). Empty by default; the environment's
+   * `AUTH_COOKIE_PREFIX` sets it too, and a value set here wins. Needed when two Linked apps run
+   * on one host (browsers share cookies across ports), e.g. `Auth.cookiePrefix = 'cn_'`. Set it
+   * once in the backend setup, before `setupBeforeControllers` runs. The browser bundle reads
+   * `process.env.AUTH_COOKIE_PREFIX` (see utils/cookieNames.ts).
+   */
+  static get cookiePrefix(): string {
+    return getCookiePrefix();
+  }
+  static set cookiePrefix(prefix: string) {
+    setCookiePrefix(prefix);
+  }
 
   /**
    * Login method
