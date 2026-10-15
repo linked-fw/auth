@@ -110,4 +110,22 @@ Validation: Verify output recorded below; full gate green.
 
 - [x] Phase 1 — `npx linked build && node --test test/client-id-document.test.mjs`: 17 pass, 0 fail
 - [x] Phase 2 — `npx linked build && npm test`: 341 tests, 341 pass, 0 fail (321 before + 20 new). The exposure guard flagged a provider method, so the document is built by a module function and `setupBeforeControllers` only registers the route
-- [ ] Phase 3
+- [x] Phase 3 — readme section *Client ID Document*, changeset (minor). Verify below.
+
+## Verify
+
+App on the built package, `SITE_ROOT=http://localhost:4077/` (trailing slash), a theme with
+`colors.panel: 'url(https://evil.example/x.png)'`:
+
+```
+$ curl -si http://localhost:4077/.well-known/linked-client.jsonld
+HTTP/1.1 200 OK
+Content-Type: application/ld+json; charset=utf-8
+Cache-Control: public, max-age=600
+
+{"@context":["https://www.w3.org/ns/solid/oidc-context.jsonld"],"client_id":"http://localhost:4077/.well-known/linked-client.jsonld","client_name":"Create.Now","redirect_uris":["http://localhost:4077/auth/oidc/callback"],"client_uri":"http://localhost:4077","logo_uri":"http://localhost:4077/logo.svg","grant_types":["authorization_code"],"response_types":["code"],"scope":"openid webid email","token_endpoint_auth_method":"none","https://linked.cm/ns/signin#theme":{"layout":"two-column","font":"Inter","colors":{"primary":"#1a73e8"},"panelArt":"http://localhost:4077/art.svg"}}
+```
+
+Server log: `[auth] Client ID Document: dropped theme value colors.panel = "url(https://evil.example/x.png)": not a plain CSS colour`
+
+webid.email's W3 test-client check is deferred until W3 exists.
