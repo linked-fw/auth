@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.8.0
+
+### Minor Changes
+
+- [#121](https://github.com/linked-fw/auth/pull/121) [`8411c00`](https://github.com/linked-fw/auth/commit/8411c00d74d50731e1e180f9f59c635b8aee8c8c) Thanks [@flyon](https://github.com/flyon)! - Serve the app's Solid-OIDC Client ID Document at `{SITE_ROOT}/.well-known/linked-client.jsonld` when `Auth.signinClient` is set (nothing is served otherwise). `@_linked/auth/utils/clientIdDocument` defines the sign-in theme extension (`https://linked.cm/ns/signin#theme`): the `SigninTheme` type, `SIGNIN_THEME_JSON_SCHEMA`, the font allow-list `SIGNIN_THEME_FONTS`, `validateClientTheme(doc)` (drops invalid values and reports them) and `buildClientIdDocument(config, siteRoot)`. Invalid configured theme values are logged and left out; an `http:` SITE_ROOT other than localhost stops startup.
+
 ## 3.7.0
 
 ### Minor Changes
