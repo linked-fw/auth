@@ -19,6 +19,7 @@ import { Server } from '@_linked/server-utils/utils/Server';
 import { LincdServerProxy } from '@_linked/server-utils/utils/LincdServerProxy';
 import type { AuthHandler } from '@_linked/server-utils/utils/LincdServerProxy';
 import { decodeJwtPayload } from './token.js';
+import { authCookieName } from './cookieNames.js';
 
 /** Refresh this long before the access token expires. */
 export const REFRESH_LEAD_MS = 60 * 1000;
@@ -42,7 +43,10 @@ export function refreshLeadFor(lifetimeMs: number | undefined): number {
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 /** The path prefix of this package's RPC endpoints — never intercepted. */
 const AUTH_CALL_PATH = '/call/@_linked/auth/';
-/** The cookie the server sets (readable, no secret) while a refresh cookie exists. */
+/**
+ * The cookie the server sets (readable, no secret) while a refresh cookie exists. The base name:
+ * the cookie carries the prefix from utils/cookieNames.ts.
+ */
 export const SESSION_HINT_COOKIE = 'linkedAuthSession';
 
 /** Performs a refresh; resolves true when a new access token was obtained. */
@@ -219,7 +223,10 @@ export function installVisibilityRefresh(): () => void {
 export function hasSessionHint(): boolean {
   if (typeof document === 'undefined' || typeof document.cookie !== 'string') return false;
   // the hint the server sets, or cookies written from JS by releases before server-set cookies
-  return /(?:^|;\s*)(linkedAuthSession|refreshToken|accessToken)=/.test(document.cookie);
+  const names = [SESSION_HINT_COOKIE, 'refreshToken', 'accessToken'].map(authCookieName);
+  return document.cookie
+    .split(';')
+    .some((part) => names.includes(part.trim().split('=')[0]));
 }
 
 // ---------------------------------------------------------------------------------------------
