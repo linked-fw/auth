@@ -87,3 +87,4 @@ and stay unprefixed.
 | Phase | Result |
 |---|---|
 | 1 | Done. `npx linked build && npm test`: 517/517 (507 existing unchanged + 10 in `test/cookie-prefix.test.mjs`) |
+| 2 | Done. `npm test` 517/517; `npm run test:integration` 42/42 (41 + the two-app test). A control run of the two-app test with both prefixes empty fails, as it should |
