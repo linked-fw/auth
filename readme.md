@@ -204,13 +204,17 @@ The server verifies the provider's token and finds the account from what the pro
 for, never from what the client sent:
 
 1. An identity already linked to an account (provider + subject) signs in to that account.
-2. Otherwise an account with the same email is reached only when the provider verifies the email
-   (Google, Apple), the account has **no password**, and it is not linked to a provider without
-   verified emails or to a different identity at the same provider. Anything else answers
+2. Otherwise the verified email is resolved through the current email-derived WebID,
+   `UserAccount.email`, and `AuthCredential.email`. The latter two keep accounts created with an
+   older, application-specific Person WebID reachable after upgrading Auth. If those identifiers
+   point to several people or accounts, sign-in fails closed with `action: 'account_conflict'`.
+3. One unambiguous account is reached only when the provider verifies the email (Google, Apple),
+   the account has **no password**, and it is not linked to a provider without verified emails or
+   to a different identity at the same provider. Anything else answers
    `{error, action: 'sign_in_to_link'}`. A password account can be created before its email is
    verified (see *Email verification*), so it may have been registered by someone else in
    advance; attaching to it by email would hand them the user's sign-in.
-3. Otherwise a new account is created, without a password.
+4. Otherwise a new account is created, without a password.
 
 Each sign-in that reaches an account stores a link (`IdentityToken` with `sub` and
 `identityProvider`). The provider's token itself is never stored. Links written before 3.0.7
