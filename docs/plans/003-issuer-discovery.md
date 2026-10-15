@@ -138,4 +138,6 @@ other `utils/` files, not this module; `package.json` and the readme may conflic
   `# pass 352`, `# fail 0`. Found while testing: the JSON-LD reader URL-normalised absolute
   issuers (`https://i.test` → `https://i.test/`); fixed, absolute IRIs are kept as written since an
   issuer must match a token's `iss` exactly (Turtle already did).
-- [ ] Phase 3
+- [x] Phase 3 — readme "Issuer discovery" (under How to use on Backend; every exported name and
+  option in it checked against `lib/esm/utils/issuerDiscovery.d.ts`), changeset `issuer-discovery.md`
+  (minor). Code unchanged since the phase-2 run, so `npm test` stands at 352/352.
