@@ -543,14 +543,17 @@ Auth.signinClient = {
 - The `client_id` is the document's own URL; `redirect_uris` starts with
   `{SITE_ROOT}/auth/oidc/callback`. The document also declares a public client
   (`token_endpoint_auth_method: none`, the code flow, scope `openid webid email`).
-- `SITE_ROOT` loses one trailing slash. It, and every configured URL, must be `https:`; `http:` is
-  allowed only on `localhost`. Anything else stops the server at startup.
+- `SITE_ROOT` loses one trailing slash and may not have a query or fragment. It and the configured
+  `logoUri`, `clientUri`, `policyUri` and `tosUri` must be `https:`; `http:` is allowed only on
+  `localhost`. Extra `redirectUris` may also use an app's own scheme, but never `javascript:`,
+  `data:`, `file:`, `blob:` or `vbscript:`. Anything else stops the server at startup.
 - The theme sits under the key `https://linked.cm/ns/signin#theme`, which other issuers ignore.
   Every field is optional. Colours are plain CSS colours: hex, `rgb()`/`hsl()` with numbers, or a
   lowercase named colour; never `url(` or `var(`. Fonts come from `SIGNIN_THEME_FONTS`: `system-ui`,
   Inter, Roboto, Open Sans, Lato, Montserrat, Source Sans 3, Nunito, Poppins, Work Sans,
-  Merriweather, Lora, Playfair Display. Logo and panel art URLs follow the `https:` rule. The issuer
-  enforces the art's size limits.
+  Merriweather, Lora, Playfair Display. Logo and panel art URLs follow the `https:` rule, may not
+  contain whitespace, quotes, angle brackets, parentheses, backticks or backslashes, and are kept
+  in their normalised form. The issuer enforces the art's size limits.
 - At startup an invalid theme value is logged (`[auth] Client ID Document: dropped theme value …`)
   and left out of the document; the rest is served.
 - It is served as `application/ld+json` with `Cache-Control: public, max-age=600`.

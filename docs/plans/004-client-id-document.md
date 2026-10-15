@@ -129,3 +129,68 @@ Cache-Control: public, max-age=600
 Server log: `[auth] Client ID Document: dropped theme value colors.panel = "url(https://evil.example/x.png)": not a plain CSS colour`
 
 webid.email's W3 test-client check is deferred until W3 exists.
+
+## Review
+
+Review of the three phases against the step's scope and contract 3 (20/20 tests passing; the
+schema also compiled with ajv 8 in 2020-12 mode).
+
+- **High — the JSON Schema does not compile.** `$id: 'https://linked.cm/ns/signin#theme'` has a
+  fragment, which draft 2020-12 forbids; ajv throws `data/$id must match pattern "^[^#]*#?$"`.
+- **Medium — theme URLs pass through raw.** `panelArt` and `brand.logoUri` keep the input string,
+  so `https://a.com/x.png") ; } body{x:y" onerror="alert(1)` passes unchanged; `new URL` tolerates
+  quotes, parentheses and whitespace that would reach the issuer's page.
+- **Medium — extra `redirectUris` accept `javascript:` and `data:`** (also `file:`, `blob:`).
+- Low — `SITE_ROOT` with a query or fragment is accepted and produces a broken `client_id`.
+- Low — a `clientName` of only spaces is accepted.
+- Low — schema and validator disagree at the edges: the `webUrl` pattern rejects a bare
+  `http://localhost` and accepts `http://localhost:@evil.com/`; a blank brand name passes
+  `minLength: 1`.
+- Low — the readme says every configured URL must be `https:`; `redirectUris` may use a custom
+  scheme.
+- Low — `SITE_ROOT` with a path prefix gives a `client_id` under that prefix while the route is
+  registered at the root path; the package's other links concatenate `SITE_ROOT` the same way.
+  Not changed here (follow-up).
+- Missing tests: compiling the schema, URLs with quotes or whitespace, `javascript:`/`data:`
+  redirect URIs, a query or hash in `SITE_ROOT`, a bad configured URL through the provider.
+
+## Iteration 1 — Ideation
+
+### Gap 1 of 3: the schema's `$id`
+Use `https://linked.cm/ns/signin/theme` (no fragment). The extension key in the document stays
+`https://linked.cm/ns/signin#theme`; the schema id is only an identifier and is not served. The
+test asserts the 2020-12 `$id` rule and that every `$ref` resolves (auth has no ajv dependency, and
+adding one is out of scope); ajv compiles it in the Outcome check.
+
+### Gap 2 of 3: raw theme URLs
+Keep the parsed `url.href` instead of the input: the URL parser percent-encodes quotes, spaces and
+the like, so what reaches the issuer is a normalised URL. Additionally drop any input containing
+whitespace, quotes, `<`, `>`, `(`, `)` or a backslash, so an odd value is reported, not silently
+rewritten. Simplest rule that leaves only safe URLs.
+
+### Gap 3 of 3: dangerous redirect schemes
+Refuse `javascript:`, `data:`, `file:`, `blob:` and `vbscript:` in extra `redirectUris` at startup,
+as remote `http:` is.
+
+The cheap lows go in the same pass: refuse a query or fragment in `SITE_ROOT`, trim and require a
+non-blank `clientName`, align the schema's `webUrl` pattern and brand-name pattern, fix the readme
+line. The path-prefix low stays a follow-up.
+
+## Iteration 1 — Plan
+
+`src/utils/clientIdDocument.ts`: new `$id`; `isAllowedWebUrl` refuses unsafe characters and
+callers keep `new URL(value).href`; `webUrl` pattern
+`^(https://|http://localhost(:[0-9]+)?(/|$))[^\s"'<>()\\]*$`; brand-name schema `pattern: '\S'`;
+`buildClientIdDocument` refuses a query/hash in `SITE_ROOT`, blank `clientName` and the dangerous
+schemes. Tests for each. Readme wording.
+
+## Iteration 1 — Phases
+
+### Phase 4: review fixes
+Tasks: the plan above. Validation: `npx linked build && npm test` all pass; ajv compiles the schema
+(scratch install).
+
+Done. `npx linked build && npm test`: 347 tests, 347 pass, 0 fail (321 before + 26 new). ajv 8
+(2020-12, ajv-formats, scratch install) compiles the schema: `compiled: https://linked.cm/ns/signin/theme`,
+a valid theme → `true`, an invalid one → `false` with errors at `css`, `/colors/primary`, `/font`,
+`/panelArt`. The path-prefix `SITE_ROOT` low remains a follow-up.

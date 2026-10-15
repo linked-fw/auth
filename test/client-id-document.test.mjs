@@ -30,6 +30,7 @@ const {
   buildClientIdDocument,
   validateClientTheme,
   isThemeColor,
+  isAllowedWebUrl,
 } = await import(new URL('utils/clientIdDocument.js', libDir));
 
 const validTheme = {
@@ -228,7 +229,7 @@ test('a brand name is trimmed and limited in length', () => {
 
 test('the JSON Schema describes the same fields and lists as the validator', () => {
   const schema = SIGNIN_THEME_JSON_SCHEMA;
-  assert.equal(schema.$id, SIGNIN_THEME_KEY);
+  assert.equal(schema.$id, 'https://linked.cm/ns/signin/theme');
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(Object.keys(schema.properties).sort(), Object.keys(validTheme).sort());
   assert.deepEqual(schema.properties.layout.enum, [...SIGNIN_THEME_LAYOUTS]);
@@ -251,6 +252,71 @@ test('the font allow-list includes the platform font and has no duplicates', () 
   assert.ok(SIGNIN_THEME_FONTS.includes('system-ui'));
   assert.equal(new Set(SIGNIN_THEME_FONTS).size, SIGNIN_THEME_FONTS.length);
   assert.ok(Object.isFrozen(SIGNIN_THEME_FONTS));
+});
+
+test('review: theme URLs with characters that could break out of the page are dropped', () => {
+  const tricky = [
+    'https://a.com/x.png") ; } body{x:y" onerror="alert(1)',
+    ' \thttps://a.com/x\n.png',
+    "https://a.com/x'.png",
+    'https://a.com/<x>.png',
+    'https://a.com/x\\.png',
+    'https://a.com/x`.png',
+    'http://localhost:@evil.com/x.png',
+  ];
+  for (const value of tricky) {
+    const { theme, problems } = validateClientTheme(themeOf({ panelArt: value, brand: { logoUri: value } }));
+    assert.equal(theme, undefined, value);
+    assert.deepEqual(problems.map((p) => p.path).sort(), ['brand.logoUri', 'panelArt'], value);
+  }
+});
+
+test('review: kept theme URLs are normalised', () => {
+  const { theme } = validateClientTheme(themeOf({ panelArt: 'HTTPS://CDN.Example/a%20b.svg', brand: { logoUri: 'http://localhost:4040' } }));
+  assert.deepEqual(theme, { panelArt: 'https://cdn.example/a%20b.svg', brand: { logoUri: 'http://localhost:4040/' } });
+});
+
+test('review: redirect URIs with a scheme that runs code or reads local data are refused', () => {
+  for (const uri of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'blob:https://a/b', 'VBScript:x']) {
+    assert.throws(
+      () => buildClientIdDocument({ clientName: 'App', redirectUris: [uri] }, 'https://app.example'),
+      /redirect URI/,
+      uri
+    );
+  }
+});
+
+test('review: SITE_ROOT with a query or fragment is refused; a blank client name too', () => {
+  for (const root of ['https://a.example/?x=1', 'https://a.example/#f', 'https://a.example/app?x=1#f']) {
+    assert.throws(() => buildClientIdDocument({ clientName: 'App' }, root), /SITE_ROOT/, root);
+  }
+  assert.throws(() => buildClientIdDocument({ clientName: '   ' }, 'https://a.example'), /clientName/);
+  assert.equal(buildClientIdDocument({ clientName: ' App ' }, 'https://a.example').document.client_name, 'App');
+});
+
+test('review: the JSON Schema follows draft 2020-12 and agrees with the validator at the edges', () => {
+  const schema = SIGNIN_THEME_JSON_SCHEMA;
+  // 2020-12: $id is an absolute URI with no fragment (or an empty one)
+  assert.match(schema.$id, /^[^#]*#?$/);
+  assert.doesNotThrow(() => new URL(schema.$id));
+  // every $ref points at a $defs entry that exists
+  const refs = JSON.stringify(schema).match(/"\$ref":"[^"]+"/g) ?? [];
+  assert.ok(refs.length > 0);
+  for (const ref of refs) {
+    const name = ref.match(/#\/\$defs\/([^"]+)/)?.[1];
+    assert.ok(name && schema.$defs[name], ref);
+  }
+  const url = new RegExp(schema.$defs.webUrl.pattern);
+  for (const value of ['http://localhost', 'http://localhost:4040', 'https://a.example/x.svg']) {
+    assert.ok(url.test(value), value);
+    assert.ok(isAllowedWebUrl(value), value);
+  }
+  for (const value of ['http://localhost:@evil.com/', 'https://a.com/x".png', 'http://localhostevil.com/']) {
+    assert.ok(!url.test(value), value);
+    assert.ok(!isAllowedWebUrl(value), value);
+  }
+  const name = new RegExp(schema.properties.brand.properties.name.pattern);
+  assert.ok(!name.test('   ') && name.test(' Acme '));
 });
 
 // --- Serving -------------------------------------------------------------------------------
@@ -325,6 +391,14 @@ test('a SITE_ROOT the issuer would reject stops startup with a fatal error', asy
   await assert.rejects(
     startApp({ signinClient: { clientName: 'App' }, siteRoot: 'http://app.example' }),
     (err) => err.name === 'FatalConfigError' && err.fatal === true && /SITE_ROOT/.test(err.message)
+  );
+  Auth.signinClient = undefined;
+});
+
+test('a configured URL the issuer would reject stops startup with a fatal error', async () => {
+  await assert.rejects(
+    startApp({ signinClient: { clientName: 'App', logoUri: 'http://app.example/logo.png' }, siteRoot: 'https://app.example' }),
+    (err) => err.name === 'FatalConfigError' && /logoUri/.test(err.message)
   );
   Auth.signinClient = undefined;
 });

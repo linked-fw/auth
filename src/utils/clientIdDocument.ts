@@ -159,9 +159,16 @@ export const isThemeColor = (value: unknown): value is string =>
 
 const isLocalhost = (url: URL) => url.hostname === 'localhost';
 
-/** `https:`, or `http:` on localhost: what an issuer accepts for the document's own URLs. */
+// Characters a URL parser would quietly encode or strip, and that could break out of an attribute
+// or a CSS value on the page the URL ends up in. A URL containing one is refused, not rewritten.
+const UNSAFE_URL_CHARACTERS = /[\s"'<>()\\`]/;
+
+/**
+ * `https:`, or `http:` on localhost: what an issuer accepts for the document's own URLs. Also
+ * refuses whitespace, quotes, angle brackets, parentheses, backticks and backslashes anywhere in it.
+ */
 export const isAllowedWebUrl = (value: unknown): value is string => {
-  if (typeof value !== 'string') return false;
+  if (typeof value !== 'string' || UNSAFE_URL_CHARACTERS.test(value)) return false;
   let url: URL;
   try {
     url = new URL(value);
@@ -179,7 +186,7 @@ export const isAllowedWebUrl = (value: unknown): value is string => {
  */
 export const SIGNIN_THEME_JSON_SCHEMA = Object.freeze({
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: SIGNIN_THEME_KEY,
+  $id: 'https://linked.cm/ns/signin/theme',
   title: 'Sign-in theme',
   type: 'object',
   additionalProperties: false,
@@ -198,7 +205,7 @@ export const SIGNIN_THEME_JSON_SCHEMA = Object.freeze({
       type: 'object',
       additionalProperties: false,
       properties: {
-        name: { type: 'string', minLength: 1, maxLength: BRAND_NAME_MAX_LENGTH },
+        name: { type: 'string', pattern: '\\S', maxLength: BRAND_NAME_MAX_LENGTH },
         logoUri: { $ref: '#/$defs/webUrl' },
       },
     },
@@ -211,7 +218,11 @@ export const SIGNIN_THEME_JSON_SCHEMA = Object.freeze({
         { enum: [...NAMED_COLORS] },
       ],
     },
-    webUrl: { type: 'string', format: 'uri', pattern: '^(https://|http://localhost[:/])' },
+    webUrl: {
+      type: 'string',
+      format: 'uri',
+      pattern: '^(https://|http://localhost(:[0-9]+)?(/|$))[^\\s"\'<>()\\\\`]*$',
+    },
   },
 });
 
@@ -301,7 +312,7 @@ export const validateClientTheme = (
         }
       }
       if ('logoUri' in raw.brand) {
-        if (isAllowedWebUrl(logoUri)) brand.logoUri = logoUri;
+        if (isAllowedWebUrl(logoUri)) brand.logoUri = new URL(logoUri).href;
         else drop('brand.logoUri', logoUri, 'must be an https: URL (http: only on localhost)');
       }
       if (Object.keys(brand).length) theme.brand = brand;
@@ -309,12 +320,15 @@ export const validateClientTheme = (
   }
 
   if ('panelArt' in raw) {
-    if (isAllowedWebUrl(raw.panelArt)) theme.panelArt = raw.panelArt;
+    if (isAllowedWebUrl(raw.panelArt)) theme.panelArt = new URL(raw.panelArt).href;
     else drop('panelArt', raw.panelArt, 'must be an https: URL (http: only on localhost)');
   }
 
   return { theme: Object.keys(theme).length ? theme : undefined, problems };
 };
+
+// Schemes an app-claimed redirect link can never use: they run code or read local data.
+const UNSAFE_REDIRECT_SCHEMES = ['javascript:', 'data:', 'file:', 'blob:', 'vbscript:'];
 
 /**
  * Builds the app's Client ID Document from its configuration and `SITE_ROOT`.
@@ -329,12 +343,13 @@ export const buildClientIdDocument = (
   siteRoot: string
 ): { document: ClientIdDocument; problems: ThemeProblem[] } => {
   const root = typeof siteRoot === 'string' ? siteRoot.replace(/\/$/, '') : '';
-  if (!isAllowedWebUrl(root)) {
+  if (!isAllowedWebUrl(root) || new URL(root).search || new URL(root).hash) {
     throw new Error(
-      `Client ID Document: SITE_ROOT must be an https: URL (http: only on localhost), got ${JSON.stringify(siteRoot)}`
+      `Client ID Document: SITE_ROOT must be an https: URL (http: only on localhost) without a query or fragment, got ${JSON.stringify(siteRoot)}`
     );
   }
-  if (!config?.clientName || typeof config.clientName !== 'string') {
+  const clientName = typeof config?.clientName === 'string' ? config.clientName.trim() : '';
+  if (!clientName) {
     throw new Error('Client ID Document: clientName must be a non-empty string');
   }
   for (const field of ['logoUri', 'clientUri', 'policyUri', 'tosUri'] as const) {
@@ -352,9 +367,14 @@ export const buildClientIdDocument = (
     } catch {
       url = undefined;
     }
-    if (!url || (url.protocol === 'http:' && !isLocalhost(url))) {
+    if (
+      !url ||
+      UNSAFE_URL_CHARACTERS.test(uri) ||
+      UNSAFE_REDIRECT_SCHEMES.includes(url.protocol) ||
+      (url.protocol === 'http:' && !isLocalhost(url))
+    ) {
       throw new Error(
-        `Client ID Document: redirect URI ${JSON.stringify(uri)} must be a URL, and http: only on localhost`
+        `Client ID Document: redirect URI ${JSON.stringify(uri)} must be a URL, http: only on localhost, and not ${UNSAFE_REDIRECT_SCHEMES.join(' ')}`
       );
     }
   }
@@ -362,7 +382,7 @@ export const buildClientIdDocument = (
   const document: ClientIdDocument = {
     '@context': [SOLID_OIDC_CONTEXT],
     client_id: `${root}${CLIENT_ID_DOCUMENT_PATH}`,
-    client_name: config.clientName,
+    client_name: clientName,
     redirect_uris: [`${root}${OIDC_CALLBACK_PATH}`, ...(config.redirectUris ?? [])],
     client_uri: config.clientUri ?? root,
     ...(config.logoUri ? { logo_uri: config.logoUri } : {}),
