@@ -19,6 +19,7 @@ import { QResult } from '@_linked/core/queries/SelectQuery';
 import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider.js';
 import { setQueryContext } from '@_linked/core/queries/QueryContext';
 import { personEmailVerified } from '../helpers/emailVerification.js';
+import { emailToWebID } from './webID.js';
 
 export class Auth {
   // define the default user and account types
@@ -27,6 +28,14 @@ export class Auth {
   // `AuthProviderProps.userType` already used `typeof Shape`.
   static userType: typeof Shape = SchemaPerson;
   static accountType: typeof UserAccount = UserAccount;
+
+  /**
+   * Turns a verified email into the user's WebID (the Person's IRI). Every sign-in method that
+   * starts from an email goes through it. The default is `emailToWebID`, so an app that sets
+   * nothing keeps its WebIDs. An app with another derivation sets it once in its backend setup,
+   * before requests are served, e.g. `Auth.webIdFor = hmacWebIdFor({secret, issuer})`.
+   */
+  static webIdFor: (email: string) => string = emailToWebID;
 
   /**
    * Login method

@@ -5,8 +5,8 @@ const WEBID_PREFIX = 'https://webid.email/id';
 /**
  * Public namespace UUID for the webid.email WebID scheme.
  * Used as the UUID v5 namespace when deriving a WebID from an email address.
- * This value is fixed and published — both CN and the webid.email service use it.
- * Do NOT change this value; doing so would invalidate all existing WebID URIs.
+ * This value is fixed and published. Do NOT change it; doing so would invalidate every WebID
+ * `emailToWebID` has derived.
  */
 export const WEBID_EMAIL_NAMESPACE = 'f498d4c9-555c-4ebb-9b4b-b6e16910f84c';
 
@@ -16,9 +16,8 @@ export const WEBID_EMAIL_NAMESPACE = 'f498d4c9-555c-4ebb-9b4b-b6e16910f84c';
  * Algorithm: UUID v5 (SHA-1, RFC 4122) using WEBID_EMAIL_NAMESPACE as the namespace
  * and the normalized (trimmed, lowercased) email as the name.
  *
- * The algorithm is public. Knowing the WebID does not reveal the email address.
- * Both CN (dev mode) and the webid.email service (production) use the same algorithm,
- * so WebIDs are identical across environments.
+ * The default of `Auth.webIdFor`. The algorithm is public, so anyone can compute the WebID of a
+ * guessed email; webid.email mints its WebIDs with the keyed `hmacWebId` instead.
  *
  * e.g. alice@example.com -> https://webid.email/id/550e8400-e29b-41d4-a716-...
  */
@@ -40,6 +39,81 @@ export const emailToWebID = (email: string): string => {
 
   return `${WEBID_PREFIX}/${uuidv5(normalizedEmail, WEBID_EMAIL_NAMESPACE)}`;
 };
+
+export interface HmacWebIdOptions {
+  /** The HMAC key. Permanent: changing it changes every WebID derived with it. */
+  secret: string;
+  /** Base URL of the issuer that serves the WebIDs, without a trailing slash. */
+  issuer: string;
+}
+
+const checkHmacWebIdOptions = ({ secret, issuer }: HmacWebIdOptions) => {
+  if (!secret || typeof secret !== 'string') {
+    throw new Error('hmacWebId: secret must be a non-empty string');
+  }
+  if (!issuer || typeof issuer !== 'string') {
+    throw new Error('hmacWebId: issuer must be a non-empty string');
+  }
+  if (issuer.endsWith('/')) {
+    throw new Error(`hmacWebId: issuer must not end with a slash: ${issuer}`);
+  }
+};
+
+const hmacWebIdUnchecked = (email: string, { secret, issuer }: HmacWebIdOptions): string => {
+  if (!email || typeof email !== 'string' || !email.trim()) {
+    throw new Error('Email must be a non-empty string');
+  }
+  // Loaded at call time, not imported: browser code imports this module for emailToWebID, and a
+  // static node:crypto import would end up in its bundle. HMAC derivation is server-only.
+  const crypto = globalThis.process?.getBuiltinModule?.('node:crypto');
+  if (!crypto) {
+    throw new Error('hmacWebId runs only on the server (Node 22.3 or later)');
+  }
+  const h = crypto
+    .createHmac('sha256', secret)
+    .update(email.trim().toLowerCase())
+    .digest('hex')
+    .slice(0, 32);
+  return `${issuer}/id/${h}#me`;
+};
+
+/**
+ * Derives a WebID from an email with a keyed hash, the rule webid.email mints WebIDs with
+ * (arch-08 §WebID derivation):
+ *
+ *   name  : trim(lowercase(email))
+ *   h     : first 128 bits of HMAC-SHA256(secret, name), as 32 lowercase hex characters
+ *   webID : {issuer}/id/{h}#me
+ *
+ * Without the secret nobody can turn an email into a WebID or match a WebID to a guessed email.
+ * Server-only. Throws on an empty email, an empty secret or issuer, or an issuer ending in `/`.
+ */
+export const hmacWebId = (email: string, options: HmacWebIdOptions): string => {
+  checkHmacWebIdOptions(options);
+  return hmacWebIdUnchecked(email, options);
+};
+
+/**
+ * `hmacWebId` with its options bound, for `Auth.webIdFor`. The options are checked here, so a
+ * misconfigured app fails when it sets the derivation rather than at the first sign-in.
+ */
+export const hmacWebIdFor = (options: HmacWebIdOptions): ((email: string) => string) => {
+  checkHmacWebIdOptions(options);
+  const { secret, issuer } = options;
+  return (email: string) => hmacWebIdUnchecked(email, { secret, issuer });
+};
+
+/**
+ * The published test vector for `hmacWebId`, with the local dev secret and the local webid.email
+ * issuer. Every implementation of the rule (webid.email, Create Now's dev sign-in) asserts it.
+ * The email has mixed case and surrounding spaces, so the vector covers normalisation too.
+ */
+export const HMAC_WEBID_TEST_VECTOR = Object.freeze({
+  email: '  Alice@Example.COM ',
+  secret: 'local-dev-webid-secret',
+  issuer: 'http://localhost:4050',
+  webId: 'http://localhost:4050/id/0e6ff1840253dc6191f36612a250decd#me',
+});
 
 /**
  * @deprecated WebIDs are now opaque UUID v5 values — reversing a WebID to an email
