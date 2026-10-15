@@ -19,6 +19,7 @@ import * as client from 'openid-client';
 import { createHash, webcrypto } from 'node:crypto';
 import { createGuardedFetch } from './guardedFetch.js';
 import { fetchOidcIssuers, isFetchableUrl } from './issuerDiscovery.js';
+import type { IssuerDiscoveryOptions } from './issuerDiscovery.js';
 
 const { subtle } = webcrypto;
 
@@ -350,4 +351,105 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
   };
 
   return { begin, complete, clearCache: () => configurations.clear() };
+};
+
+// ---------------------------------------------------------------------------------------------
+// The app's configuration (`Auth.oidcSignin`) and what its callback reports
+// ---------------------------------------------------------------------------------------------
+
+/** Why a sign-in through the callback did not end in a session. */
+export type OidcCallbackError =
+  | OidcSigninError
+  /** No pending sign-in for this `state` in this browser's session (expired, used, or forged). */
+  | 'invalid_state'
+  /** The hinted and returned emails differ and `onEmailMismatch` refused. */
+  | 'email_mismatch'
+  | 'rate_limited';
+
+/** The user typed (and hinted) one email and the issuer signed them in with another. */
+export interface OidcEmailMismatch {
+  /** The email sent as `login_hint`, normalised. */
+  hinted: string;
+  /** The ID token's `email`, normalised. */
+  returned: string;
+  webId: string;
+  issuer: string;
+  /**
+   * Whether this app has an account for `email`: an account with that email, or a person at the
+   * WebID `Auth.webIdFor` derives from it. It runs inside the callback and is not callable.
+   */
+  hasAccount(email: string): Promise<boolean>;
+}
+
+/** How a callback ended, for `onResult`. */
+export type OidcSigninOutcome =
+  | {
+      ok: true;
+      webId: string;
+      issuer: string;
+      email?: string;
+      isNewAccount: boolean;
+      /** The path the start asked to return to. */
+      returnTo?: string;
+      /** Set when the user signed in with another email than the one hinted. */
+      mismatch?: { hinted: string; returned: string };
+    }
+  | {
+      ok: false;
+      error: OidcCallbackError;
+      returnTo?: string;
+      mismatch?: { hinted: string; returned: string };
+    };
+
+/**
+ * An app's opt-in to signing in through Solid-OIDC issuers (`Auth.oidcSignin`). Every field is
+ * optional; `{}` turns it on with the defaults.
+ */
+export interface OidcSigninConfig {
+  /**
+   * The app's `client_id`. Default: the URL of the Client ID Document the app serves
+   * (`{SITE_ROOT}/.well-known/linked-client.jsonld`, needs `Auth.signinClient`).
+   */
+  clientId?: string;
+  /** Issuer for emails whose domain names none. Default webid.email. */
+  defaultIssuer?: string;
+  /** Allow `http://` and loopback issuers and WebIDs (a local issuer in development). Default `false`. */
+  allowLocalhost?: boolean;
+  /** Refuse issuers that send no `email` claim. Default `false`. */
+  requireEmail?: boolean;
+  /** Deadline for each request to an issuer or a profile, in ms. Default 5000. */
+  timeoutMs?: number;
+  /** Issuer discovery's cache and skip-list options (see `createIssuerDiscovery`). */
+  discovery?: Pick<
+    IssuerDiscoveryOptions,
+    'skipDomains' | 'cacheTtlMs' | 'negativeCacheTtlMs' | 'cacheMaxEntries'
+  >;
+  /**
+   * Decides what happens when the hinted and the returned emails differ. `'signin'` (the default:
+   * the returned email wins) signs in to the returned email's WebID; `'refuse'` ends the sign-in
+   * with `email_mismatch`. Either way the outcome reports the mismatch.
+   */
+  onEmailMismatch?: (mismatch: OidcEmailMismatch) => 'signin' | 'refuse' | Promise<'signin' | 'refuse'>;
+  /**
+   * Where the browser goes after the callback. Default: the start's `returnTo` (or `/`) on success,
+   * `/signin?oidc_error=<error>` otherwise. Return `undefined` to keep the default.
+   */
+  onResult?: (outcome: OidcSigninOutcome) => string | undefined | Promise<string | undefined>;
+}
+
+/** The default location after the callback. No email goes into a URL. */
+export const defaultOidcResultLocation = (outcome: OidcSigninOutcome): string =>
+  outcome.ok === false
+    ? `/signin?oidc_error=${encodeURIComponent(outcome.error)}`
+    : (outcome.returnTo ?? '/');
+
+/**
+ * `value` when it is a path on this site (`/…`, not `//…` or `/\…`, no control characters), else
+ * `undefined`: the start's `returnTo` never sends the browser to another site.
+ */
+export const safeReturnTo = (value: unknown): string | undefined => {
+  if (typeof value !== 'string' || value.length > 2048) return undefined;
+  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return undefined;
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return undefined;
+  return value;
 };

@@ -48,7 +48,9 @@ export type RateLimitRuleName =
   | 'emailVerify'
   | 'signinCodeRequest'
   | 'signinCode'
-  | 'reauthenticate';
+  | 'reauthenticate'
+  | 'oidcSignin'
+  | 'oidcCallback';
 
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;
@@ -104,6 +106,10 @@ export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitRuleName, RateLimitRu
     ip: { max: 10, windowSeconds: MINUTE },
     account: { max: 5, windowSeconds: 15 * MINUTE },
   },
+  /** `startOidcSignin`: each one may fetch a WebFinger answer, a profile and an issuer's metadata. */
+  oidcSignin: { ip: { max: 20, windowSeconds: MINUTE } },
+  /** The Solid-OIDC callback: each one may call an issuer's token endpoint and fetch a profile. */
+  oidcCallback: { ip: { max: 20, windowSeconds: MINUTE } },
 };
 
 /**

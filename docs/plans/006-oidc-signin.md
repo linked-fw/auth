@@ -150,3 +150,14 @@ Dependencies: 1 → 2 → 3 → 4, sequential (each builds on the previous modul
   another origin; checks PKCE, the DPoP proof and `dpop_jkt`). Validation:
   `node --test test/oidc-signin.test.mjs` → 21/21; each `invalid_token` case asserts its reason
   (nonce, aud, iss, exp, signature) from the log line.
+- **Phase 3 done.** `Auth.oidcSignin` (`OidcSigninConfig`, outcome and mismatch types in
+  `utils/oidcSignin.ts`); `helpers/oidcPending.ts` (pending sign-ins in `req.session`, 10 min, at
+  most 5, removed on first lookup); in `backend.ts`: `startOidcSignin` (public), the callback route
+  after the session middleware, `signInVerifiedWebId` (drops unproven access before the first
+  email proof, as the code sign-in does), `hasAccountForEmail` for the hook, a startup check
+  (FatalConfigError without a `client_id` or with a bad `SITE_ROOT`); rate-limit rules
+  `oidcSignin`, `oidcCallback`. Exposure surface and the `Auth.webIdFor` call count (7 → 9)
+  updated in the tests. Validation: `npm test` 469/469 (`test/oidc-callback.test.mjs` 17 new, over
+  a real express app with a cookie jar); `npm run test:integration` 40/40
+  (`test/integration/oidc.fuseki.test.mjs` 2 new: person, account, verified email, and a session
+  that authenticates the next request).

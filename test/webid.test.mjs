@@ -112,7 +112,9 @@ test('an empty email is refused', () => {
 test('the built backend no longer calls emailToWebID directly', () => {
   const source = fs.readFileSync(new URL('backend.js', libDir), 'utf8');
   assert.doesNotMatch(source, /emailToWebID/);
-  assert.equal(source.match(/Auth\.webIdFor\(/g)?.length, 7);
+  // the seven of the email-based methods, plus the Solid-OIDC sign-in's email check and the
+  // account lookup for its mismatch hook
+  assert.equal(source.match(/Auth\.webIdFor\(/g)?.length, 9);
 });
 
 describe('backend.ts calls Auth.webIdFor', () => {
