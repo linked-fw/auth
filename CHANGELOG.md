@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.9.0
+
+### Minor Changes
+
+- [#123](https://github.com/linked-fw/auth/pull/123) [`95b34df`](https://github.com/linked-fw/auth/commit/95b34df6bbbe2d6b89198042503b61b1f1586beb) Thanks [@flyon](https://github.com/flyon)! - Sign in with an emailed code, a passwordless method next to password. `sendSigninCode(email)` emails an eight-digit code and a link carrying it (`${SITE_ROOT}/auth/signin-code?email=…&code=…`); `signinWithCode(email, code)` redeems it once, marks the email verified and signs in, creating the person (at the WebID `Auth.webIdFor` derives) and account for an email that has none. The code is stored only as a keyed hash (HMAC under a key derived from `JWT_SECRET`). The first code sign-in to a person whose email was not verified yet removes that person's password hashes and revokes their sessions, so a password set by someone who registered the email first stops working. Codes live `AUTH_SIGNIN_CODE_TTL` seconds (default 15 minutes) and are rate-limited by the new `signinCodeRequest` and `signinCode` rules. With `DEV_AUTH=true` and no email provider the link and code are printed to the server log. On the client: `useAuth().sendSigninCode` / `useAuth().signinWithCode` and `SigninWithCodeForm`, which is also the page behind the link (it fills in the code, asks the user to type their email, and signs in on a press). Existing methods are unchanged.
+
 ## 3.8.0
 
 ### Minor Changes
