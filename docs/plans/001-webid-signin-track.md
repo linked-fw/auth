@@ -367,7 +367,7 @@ app without sign-in config can serve nothing at that path (404) rather than a ha
 
 ## A5 — Emailed sign-in code and link
 
-**Depends on:** nothing. **Plan doc:** `docs/plans/005-…`. **Size:** medium, ~3 phases.
+**Depends on:** nothing. **PR:** [#123](https://github.com/linked-fw/auth/pull/123). **Size:** medium, ~3 phases.
 Implements [contract 5](#5-emailed-sign-in-code-a5--webidemail-w4).
 
 **Scope** (a generic passwordless method next to password; webid.email's pages use it in W4, and
@@ -491,5 +491,5 @@ sign in from the log line in dev, the readme documents them, and the release car
 - [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), report [007](../reports/007-issuer-discovery.md)
 - [ ] A2
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
-- [ ] A5
+- [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [ ] A4
