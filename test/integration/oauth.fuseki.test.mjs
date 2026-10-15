@@ -20,6 +20,9 @@ const libDir = new URL('../../lib/esm/', import.meta.url);
 await import(new URL('shapes/index.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const { IdentityToken } = await import(new URL('shapes/IdentityToken.js', libDir));
+const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
+const { Person } = await import('@_linked/schema/shapes/Person');
+const { UserAccount } = await import('@_linked/sioc/shapes/UserAccount');
 const { default: GoogleHelper } = await import(new URL('helpers/google.js', libDir));
 const { default: AppleHelper } = await import(new URL('helpers/apple.js', libDir));
 
@@ -60,6 +63,20 @@ function appleSays(email, sub) {
   mock.method(AppleHelper, 'decodeIdentityToken', async () => ({ email, sub }));
 }
 const GOOGLE = { authentication: { idToken: 'google-id-token' } };
+
+async function createLegacyOAuthOnlyAccount(email) {
+  const person = await Person.create({
+    __id: `https://legacy.example.test/person/${crypto.randomUUID()}`,
+    givenName: 'Legacy',
+  });
+  const account = await UserAccount.create({ accountOf: person, email });
+  await AuthCredential.create({
+    credentialOf: { id: person.id },
+    email,
+    emailVerifiedAt: new Date(),
+  });
+  return { person, account };
+}
 
 /** Every value stored on the identity tokens with this subject, by predicate. */
 async function identityTokensFor(sub) {
@@ -149,6 +166,44 @@ test('a verified email attaches a second provider to an OAuth-only account', asy
   const viaGoogle = await provider().signinOAuth('google', GOOGLE);
   assert.equal(viaGoogle.error, undefined, viaGoogle.error);
   assert.equal(viaGoogle.auth.userAccount.id, viaApple.auth.userAccount.id);
+});
+
+test('Google reuses an OAuth-only legacy account whose WebID is not derived from its email', async () => {
+  const email = newEmail();
+  const legacy = await createLegacyOAuthOnlyAccount(email);
+  googleSays(email, newSub());
+
+  const result = await provider().signinOAuth('google', GOOGLE);
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(result.auth.userAccount.id, legacy.account.id);
+  assert.equal(result.auth.user.id, legacy.person.id);
+});
+
+test('Apple reuses an OAuth-only legacy account whose WebID is not derived from its email', async () => {
+  const email = newEmail();
+  const legacy = await createLegacyOAuthOnlyAccount(email);
+  appleSays(email, newSub());
+
+  const result = await provider().signinOAuth('apple', { identityToken: 'apple-token' });
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(result.auth.userAccount.id, legacy.account.id);
+  assert.equal(result.auth.user.id, legacy.person.id);
+});
+
+test('a verified email matching several legacy accounts fails closed', async () => {
+  const email = newEmail();
+  await createLegacyOAuthOnlyAccount(email);
+  await createLegacyOAuthOnlyAccount(email);
+  const sub = newSub();
+  googleSays(email, sub);
+
+  const result = await provider().signinOAuth('google', GOOGLE);
+
+  assert.equal(result.auth, undefined);
+  assert.equal(result.action, 'account_conflict');
+  assert.equal((await identityTokensFor(sub)).length, 0, 'the ambiguous identity was linked');
 });
 
 test('a redeemed nonce is recorded once, and expired records are deleted', async () => {

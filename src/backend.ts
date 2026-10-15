@@ -258,26 +258,78 @@ async function givenNameOf(
   }
 }
 
+type OAuthAccountMatch = {
+  account?: UserAccountData;
+  personId?: string;
+  conflict?: true;
+};
+
 /**
- * The account and/or person that already exist for a WebID. A person can exist without an
- * account in this app (accounts are created on the fly), and it may hold a password.
+ * Resolve a verified OAuth email to an existing person/account.
+ *
+ * Older applications did not derive a person's WebID from `webid.email`, so checking only the
+ * current canonical WebID creates a duplicate account for those users. Account and credential
+ * email are therefore compatibility identifiers here. All matches are collected before choosing:
+ * if they disagree about the person or account, sign-in fails closed instead of selecting an
+ * arbitrary row.
  */
-async function findAccountForWebID(
+async function findAccountForOAuthEmail(
   provider: AuthBackendProvider,
-  webID: string
-): Promise<{ account?: UserAccountData; personId?: string }> {
-  const account = (await provider.accountShape
-    .select((a) => [
-      a.email,
-      a.accountOf.select((p) => [p.givenName, p.familyName, p.telephone]),
-    ])
-    .where((a) => a.accountOf.equals({ id: webID }))
-    .one()) as unknown as UserAccountData | null;
-  if (account?.accountOf?.id) {
-    return { account, personId: account.accountOf.id };
+  webID: string,
+  providerEmail: string,
+  normalizedEmail: string
+): Promise<OAuthAccountMatch> {
+  const accountsById = new Map<string, UserAccountData>();
+  const personIds = new Set<string>();
+
+  const rememberAccount = (value: unknown) => {
+    const account = value as UserAccountData | null;
+    if (!account?.id || !account.accountOf?.id) return;
+    accountsById.set(account.id, account);
+    personIds.add(account.accountOf.id);
+  };
+
+  const selectAccounts = () =>
+    provider.accountShape.select((account) => [
+      account.email,
+      account.accountOf.select((person) => [
+        person.givenName,
+        person.familyName,
+        person.telephone,
+      ]),
+    ]);
+
+  const canonicalAccount = await selectAccounts()
+    .where((account) => account.accountOf.equals({ id: webID }))
+    .one();
+  rememberAccount(canonicalAccount);
+
+  const canonicalPerson = await provider.userShape.select((person) => [person.givenName]).for(webID);
+  if (canonicalPerson?.id) personIds.add(canonicalPerson.id);
+
+  const emails = [...new Set([providerEmail.trim(), normalizedEmail])];
+  for (const email of emails) {
+    const emailAccounts = await selectAccounts()
+      .where((account) => account.email.equals(email));
+    for (const account of emailAccounts || []) rememberAccount(account);
+
+    const credentials = await AuthCredential.select((credential) => [credential.credentialOf])
+      .where((credential) => credential.email.equals(email));
+    for (const credential of credentials || []) {
+      const personId = credential.credentialOf?.id;
+      if (!personId) continue;
+      personIds.add(personId);
+      const accounts = await selectAccounts()
+        .where((account) => account.accountOf.equals({ id: personId }));
+      for (const account of accounts || []) rememberAccount(account);
+    }
   }
-  const person = await (provider.userShape as any).select((p) => [p.givenName]).for(webID);
-  return { personId: person?.id };
+
+  if (personIds.size > 1 || accountsById.size > 1) return { conflict: true };
+  return {
+    account: accountsById.values().next().value,
+    personId: personIds.values().next().value,
+  };
 }
 
 // The configured user shape (`Auth.userType`). Historically `SchemaPerson | FoafPerson`;
@@ -1230,7 +1282,14 @@ export default class AuthBackendProvider extends BackendProvider {
       return { error: 'Invalid email format' };
     }
 
-    const existing = await findAccountForWebID(this, webID);
+    const existing = await findAccountForOAuthEmail(this, webID, identity.email, email);
+    if (existing.conflict) {
+      console.error(`${provider} sign-in: verified email matches several accounts or people`);
+      return {
+        error: 'This email is associated with more than one account. Please contact support.',
+        action: 'account_conflict',
+      };
+    }
     if (existing.personId) {
       const decision = decideEmailMatchedAccount({
         provider,
