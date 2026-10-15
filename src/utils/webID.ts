@@ -5,8 +5,8 @@ const WEBID_PREFIX = 'https://webid.email/id';
 /**
  * Public namespace UUID for the webid.email WebID scheme.
  * Used as the UUID v5 namespace when deriving a WebID from an email address.
- * This value is fixed and published — both CN and the webid.email service use it.
- * Do NOT change this value; doing so would invalidate all existing WebID URIs.
+ * This value is fixed and published. Do NOT change it; doing so would invalidate every WebID
+ * `emailToWebID` has derived.
  */
 export const WEBID_EMAIL_NAMESPACE = 'f498d4c9-555c-4ebb-9b4b-b6e16910f84c';
 
@@ -16,9 +16,8 @@ export const WEBID_EMAIL_NAMESPACE = 'f498d4c9-555c-4ebb-9b4b-b6e16910f84c';
  * Algorithm: UUID v5 (SHA-1, RFC 4122) using WEBID_EMAIL_NAMESPACE as the namespace
  * and the normalized (trimmed, lowercased) email as the name.
  *
- * The algorithm is public. Knowing the WebID does not reveal the email address.
- * Both CN (dev mode) and the webid.email service (production) use the same algorithm,
- * so WebIDs are identical across environments.
+ * The default of `Auth.webIdFor`. The algorithm is public, so anyone can compute the WebID of a
+ * guessed email; webid.email mints its WebIDs with the keyed `hmacWebId` instead.
  *
  * e.g. alice@example.com -> https://webid.email/id/550e8400-e29b-41d4-a716-...
  */

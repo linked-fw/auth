@@ -117,3 +117,35 @@ and `backend.ts` may conflict with A5).
 - `npx linked build && npm test`: `# tests 321`, `# pass 321`, `# fail 0`.
 - `npm run test:integration` (`AUTH_TEST_FUSEKI_URL=http://localhost:3030`, throwaway `mem`
   datasets): `# tests 34`, `# pass 34`, `# fail 0`.
+
+## Review
+
+Against the step's scope and Verify list: all scope items are in, contract 1 is unchanged, the
+existing tests pass untouched, and both gates pass.
+
+- **Medium — stale comments.** `emailToWebID`'s doc comment and `WEBID_EMAIL_NAMESPACE`'s still
+  said CN and webid.email both use UUID v5; arch-08 now has webid.email minting with HMAC.
+- Low — the readme example passes `process.env.WEBID_SECRET` (`string | undefined`); a TypeScript
+  app needs a guard. `hmacWebIdFor` throws at startup on a missing secret, so a misconfiguration
+  fails early.
+- Low — the "configured function is called" check is behavioural for `sendResetPasswordLink` and
+  `signinWithPassword` and structural (the built `backend.js` has five `Auth.webIdFor(` calls and
+  no `emailToWebID`) for the OAuth paths and `createAccount`.
+
+## Iteration 1 — Ideation
+
+### Gap 1 of 1: stale comments in `utils/webID.ts`
+Only option inside the scope: rewrite the two comments to the current design (the UUID v5 rule is
+the default of `Auth.webIdFor`; webid.email uses `hmacWebId`). No code change.
+
+## Iteration 1 — Plan
+
+`src/utils/webID.ts` comments only. No contract change.
+
+## Iteration 1 — Phases
+
+### Phase 3: fix the stale comments
+- [x] Rewrite the `WEBID_EMAIL_NAMESPACE` and `emailToWebID` comments.
+
+Validation: `npx linked build && npm test` passes.
+
