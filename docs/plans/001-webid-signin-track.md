@@ -497,7 +497,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 
 ## A6 — Cookie-name prefix
 
-**Depends on:** nothing. **Plan doc:** `docs/plans/008-…`. **Size:** small, 2 phases.
+**Depends on:** nothing. **PR:** [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md). **Size:** small, 2 phases.
 Adds to [contract 2](#2-environment-variables-this-repo-must-know-cn-c0c2a-webidemail-w2).
 
 **Problem.** Two Linked apps on one host (CN on `localhost:4040`, webid.email on
@@ -570,3 +570,4 @@ reads, server and client side: `accessToken`, `refreshToken` (and its legacy `/`
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [x] A4 — [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md)
+- [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)
