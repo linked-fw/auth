@@ -1339,8 +1339,8 @@ export default class AuthBackendProvider extends BackendProvider {
    * Email a sign-in code to `email`: an eight-digit code and a link that carries it
    * (`{SITE_ROOT}/auth/signin-code?email=…&code=…`), for `signinWithCode`. The code works once,
    * until it expires (`AUTH_SIGNIN_CODE_TTL`), and a new request replaces it. An email with no
-   * account gets a code too, held by a pending credential: signing in with it creates the
-   * account.
+   * account gets a code too, held by a pending credential: signing in with it reaches the person
+   * that has the email by then, or creates one.
    *
    * Answers `true` for every well-formed email, whether or not an account exists for it and
    * whether or not the email could be sent, so the answer never tells which emails have an

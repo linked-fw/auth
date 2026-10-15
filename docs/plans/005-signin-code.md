@@ -3,7 +3,7 @@ summary: >
   Passwordless sign-in by emailed code and link in @_linked/auth (step A5 of CN's master plan
   065): sendSigninCode(email) and signinWithCode(email, code), a client hook method and form,
   rate limits, the dev log line, readme and changeset.
-status: Implementation
+status: Review
 ---
 
 # 005 — Sign-in by emailed code
@@ -198,3 +198,10 @@ Validation: `npx linked build && npm test` and `npm run test:integration` pass.
 the person at sign-in (3 new unit tests: an account elsewhere, a person at the WebID, a failed
 send for a new email); the form signs in on a press only. `npm test`: `# tests 347 # pass 347
 # fail 0`; `npm run test:integration`: `# tests 38 # pass 38 # fail 0`.
+
+## REVIEW
+
+Re-review of the iteration-1 commit: findings 1–4 and 7 addressed (1 partly, as planned), no
+regression; one stale JSDoc on `sendSigninCode` fixed. Only low findings remain (5, 6, 9, the
+unsalted email hash). Report: [008](../reports/008-signin-code.md). Follow-ups for the master
+plan: burn a code after N wrong guesses; sweep expired pending credentials. Ready for PR.
