@@ -488,7 +488,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 ## A4 — Native apps (Capacitor)
 
 **Depends on:** A2. Needed for Peace Game.
-**PR:** [#PRNUM](https://github.com/linked-fw/auth/pull/PRNUM), report [010](../reports/010-native-oidc-signin.md).
+**PR:** [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md).
 
 **Scope** (RFC 8252)
 - In a native build, the start step opens the authorization URL in the system browser
@@ -525,4 +525,4 @@ sign in from the log line in dev, the readme documents them, and the release car
 - [x] A2 — [#127](https://github.com/linked-fw/auth/pull/127), report [009](../reports/009-oidc-signin.md)
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
-- [x] A4 — [#PRNUM](https://github.com/linked-fw/auth/pull/PRNUM), report [010](../reports/010-native-oidc-signin.md)
+- [x] A4 — [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md)
