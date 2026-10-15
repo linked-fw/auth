@@ -103,6 +103,16 @@ describe('isFetchableUrl', () => {
       'https://[fe80::1]/',
       'https://[::ffff:10.0.0.1]/',
       'https://0x0a.0.0.1/',
+      'https://192.0.0.1/',
+      'https://198.18.0.1/',
+      'https://224.0.0.1/',
+      'https://255.255.255.255/',
+      'https://[::7f00:1]/',
+      'https://[64:ff9b::a9fe:a9fe]/',
+      'https://[64:ff9b:1::1]/',
+      'https://[2002:7f00:1::]/',
+      'https://[fec0::1]/',
+      'https://[ff02::1]/',
     ]) {
       assert.equal(isFetchableUrl(url, true), false, url);
     }
@@ -113,6 +123,12 @@ describe('isFetchableUrl', () => {
       assert.equal(isFetchableUrl(url), false, url);
       assert.equal(isFetchableUrl(url, true), true, url);
     }
+  });
+
+  test('a trailing dot does not hide a loopback host', () => {
+    assert.equal(isFetchableUrl('https://localhost./'), false);
+    assert.equal(isFetchableUrl('https://app.localhost./'), false);
+    assert.equal(isFetchableUrl('https://pod.example./'), true);
   });
 });
 
@@ -154,6 +170,70 @@ describe('readOidcIssuers', () => {
   test('JSON-LD: a remote context is not fetched, so its terms are not understood', () => {
     const body = JSON.stringify({ '@context': 'https://contexts.example/solid', '@id': '#me', oidcIssuer: 'https://i.test' });
     assert.deepEqual(readOidcIssuers(body, 'application/ld+json', doc, webId), []);
+  });
+
+  test('Turtle: a statement in a named graph is not an assertion, so TriG is not read', () => {
+    const trig = `<http://g> { <#me> <${SOLID}oidcIssuer> <https://evil.example> }`;
+    assert.deepEqual(readOidcIssuers(trig, 'text/turtle', doc, webId), []);
+    assert.deepEqual(readOidcIssuers(trig, 'application/trig', doc, webId), []);
+  });
+
+  test('N-Triples', () => {
+    const nt = `<${webId}> <${SOLID}oidcIssuer> <https://i.test> .`;
+    assert.deepEqual(readOidcIssuers(nt, 'application/n-triples', doc, webId), ['https://i.test']);
+  });
+
+  test('JSON-LD: a plain string is an issuer only where its term is coerced to an IRI', () => {
+    const body = JSON.stringify({ '@id': webId, [`${SOLID}oidcIssuer`]: 'https://literal.example' });
+    assert.deepEqual(readOidcIssuers(body, 'application/ld+json', doc, webId), []);
+    const typed = JSON.stringify({
+      '@context': { oidcIssuer: { '@id': `${SOLID}oidcIssuer`, '@type': '@vocab' } },
+      '@id': webId,
+      oidcIssuer: 'https://i.test',
+    });
+    assert.deepEqual(readOidcIssuers(typed, 'application/ld+json', doc, webId), ['https://i.test']);
+  });
+
+  test('JSON-LD: with @base null a relative id is no IRI', () => {
+    const body = JSON.stringify({
+      '@context': { '@base': null },
+      '@id': '#me',
+      [`${SOLID}oidcIssuer`]: { '@id': 'https://i.test' },
+    });
+    assert.deepEqual(readOidcIssuers(body, 'application/ld+json', doc, webId), []);
+  });
+
+  test('JSON-LD: values under a scoped context are skipped', () => {
+    const body = JSON.stringify({
+      '@context': { s: SOLID, inner: { '@id': 'https://x.example/inner', '@context': { s: 'https://other.example/' } } },
+      inner: { '@id': webId, 's:oidcIssuer': { '@id': 'https://evil.example' } },
+    });
+    assert.deepEqual(readOidcIssuers(body, 'application/ld+json', doc, webId), []);
+    const typeScoped = JSON.stringify({
+      '@context': { s: SOLID, Card: { '@id': 'https://x.example/Card', '@context': { s: 'https://other.example/' } } },
+      '@id': webId,
+      '@type': 'Card',
+      's:oidcIssuer': { '@id': 'https://evil.example' },
+    });
+    assert.deepEqual(readOidcIssuers(typeScoped, 'application/ld+json', doc, webId), []);
+  });
+
+  test('JSON-LD: a blank node id is not resolved as a relative IRI', () => {
+    const body = JSON.stringify({ '@id': '_:me', [`${SOLID}oidcIssuer`]: { '@id': 'https://i.test' } });
+    assert.deepEqual(readOidcIssuers(body, 'application/ld+json', `https://pod.example/`, 'https://pod.example/_:me'), []);
+  });
+
+  test('JSON-LD: a document too costly to read has no issuers, and is given up quickly', () => {
+    const terms = Object.fromEntries(Array.from({ length: 9000 }, (_, i) => [`t${i}`, `https://t.example/${i}`]));
+    const shapes = [
+      { '@context': [terms, ...Array.from({ length: 40000 }, () => ({}))], '@id': webId },
+      { '@context': terms, '@graph': Array.from({ length: 9000 }, () => ({ '@context': {}, '@id': webId })) },
+    ];
+    for (const shape of shapes) {
+      const started = Date.now();
+      assert.deepEqual(readOidcIssuers(JSON.stringify(shape), 'application/ld+json', doc, webId), []);
+      assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
+    }
   });
 
   test('an unreadable document has no issuers', () => {
@@ -199,6 +279,23 @@ describe('fetchOidcIssuers', () => {
       maxResponseBytes: 1000,
     });
     assert.deepEqual(result, { ok: false, webId: 'https://pod.example/card#me', reason: 'unreachable' });
+  });
+
+  test('a streamed body over the size cap is not read', async () => {
+    routes.set('/pod.example/card', (request, response) => {
+      response.writeHead(200, { 'content-type': 'text/turtle' });
+      response.write(turtleProfile(['https://i.test']));
+      response.end(`#${'x'.repeat(5000)}`);
+    });
+    const result = await fetchOidcIssuers('https://pod.example/card#me', {
+      fetch: async (url, init) => {
+        const response = await fixtureFetch(url, init);
+        assert.equal(response.headers.get('content-length'), null, 'the fixture streams without a length');
+        return response;
+      },
+      maxResponseBytes: 1000,
+    });
+    assert.equal(result.reason, 'unreachable');
   });
 
   test('issuers that would not be fetched are left out', async () => {
@@ -323,6 +420,37 @@ describe('createIssuerDiscovery', () => {
     const other = await d.discover('b@slow.example');
     assert.equal(other.reason, 'timeout');
     assert.equal(requests.length, 1);
+  });
+
+  test('a bad Location header is an error, not an unreachable domain', async () => {
+    routes.set('/example.org/.well-known/webfinger', (request, response) => {
+      response.writeHead(302, { location: 'https://exa mple.org:99999/' }).end();
+    });
+    const d = discovery();
+    assert.equal((await d.discover('a@example.org')).reason, 'error');
+    await d.discover('b@example.org');
+    assert.equal(requests.length, 2, 'the domain is asked again for another email');
+  });
+
+  test('concurrent lookups share one request', async () => {
+    routes.set('/semantu.com/.well-known/webfinger', (request, response) => {
+      setTimeout(() => {
+        response
+          .writeHead(200, { 'content-type': 'application/jrd+json' })
+          .end(JSON.stringify({ links: [{ rel: ISSUER_REL, href: 'https://login.semantu.com' }] }));
+      }, 50);
+    });
+    serve('/pod.example/card', 'text/turtle', turtleProfile(['https://i.test']));
+    const d = discovery();
+    const results = await Promise.all([
+      d.discover('rene@semantu.com'),
+      d.discover('Rene@Semantu.com'),
+      d.discover('https://pod.example/card#me'),
+      d.discover('https://pod.example/card#me'),
+    ]);
+    assert.equal(results[0], results[1]);
+    assert.equal(results[2].issuer, 'https://i.test');
+    assert.equal(requests.length, 2);
   });
 
   test('cache hit: a second lookup makes no request', async () => {

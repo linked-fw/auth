@@ -141,3 +141,70 @@ other `utils/` files, not this module; `package.json` and the readme may conflic
 - [x] Phase 3 — readme "Issuer discovery" (under How to use on Backend; every exported name and
   option in it checked against `lib/esm/utils/issuerDiscovery.d.ts`), changeset `issuer-discovery.md`
   (minor). Code unchanged since the phase-2 run, so `npm test` stands at 352/352.
+
+## Review
+
+An independent review of the branch (all 31 tests passing, claims checked with scratch probes):
+
+| # | Severity | Finding |
+|---|---|---|
+| 1 | high | A crafted JSON-LD profile (a ~227 KB body, many contexts) blocks the event loop for ~26 s: `applyContext` copies the term map once per context, and once per array item |
+| 2 | medium | IPv6 forms that carry IPv4 get through the guard: NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, IPv4-compatible `::/96`, site-local `fec0::/10` |
+| 3 | medium | `n3`'s default parser accepts TriG, so `<g> { <#me> solid:oidcIssuer <evil> }` is read as an assertion about the WebID |
+| 4 | low | JSON-LD accepts a plain string (a literal) as an issuer; Turtle needs an IRI. The two readers disagree |
+| 5 | low | `@base: null` is ignored |
+| 6 | low | Scoped contexts are ignored, so a nested node is read with the wrong prefixes |
+| 7 | low | A trailing dot (`https://localhost./`) gets past the loopback check |
+| 8 | low | IPv4 special ranges are missing: `198.18/15`, `192.0.0/24`, `224/4`, `240/4` |
+| 9 | low | A blank-node `@id` (`_:b0`) is resolved as a relative URL |
+| 10 | low | Concurrent lookups of one email, domain or WebID are not de-duplicated |
+| 11 | low | A bad `Location` header is reported as unreachable, so the domain is negative-cached |
+| — | tests | The streaming size-cap path (no `content-length`) is untested |
+
+## Iteration 1 — Ideation
+
+All twelve items are taken: each is a fix inside the module, with no design choice. Items 3–6 and 9
+matter beyond tidiness, because A2's issuer check relies on this reader never accepting an issuer
+that the profile does not assert for the WebID.
+
+- **Gap 1 of 12 (cost):** copy the term map once per `@context` value and apply array items in
+  place. A work budget per document (map entries copied plus term definitions plus nodes visited,
+  100 000) stops reading once spent; the document then counts as having no issuers. Rejected:
+  only fixing the array copy, because nested nodes each carrying `@context` still copy the map per
+  node.
+- **Gap 2 of 12:** add `::/96`, `64:ff9b::/96`, `64:ff9b:1::/48`, `2002::/16`, `fec0::/10` and
+  `ff00::/8` to the blocked list.
+- **Gap 3 of 12:** pick the parser format from the content type (`N-Triples` for
+  `application/n-triples`, otherwise `Turtle`, so TriG and N3 syntax is a parse error), and keep
+  only default-graph quads as well.
+- **Gap 4 of 12:** accept a string only when its term is coerced (`@type: @id` or `@vocab`);
+  otherwise require `{"@id": …}`.
+- **Gap 5 of 12:** `@base: null` means no base, so relative IRIs are dropped.
+- **Gap 6 of 12:** skip the value of a term that has a scoped `@context`, and skip a node whose
+  `@type` term has one. This can miss an issuer, but it never reads a wrong one.
+- **Gap 7 of 12:** strip one trailing dot from the host before checking it.
+- **Gap 8 of 12:** add the IPv4 ranges.
+- **Gap 9 of 12:** a `_:` id is no IRI (`null`).
+- **Gap 10 of 12:** keep a map of in-flight lookups by cache key, so callers share one promise.
+- **Gap 11 of 12:** a bad `Location` header is a `status` failure (not cached by domain).
+- **Gap 12 of 12:** a chunked response over the cap is refused (a test).
+
+## Iteration 1 — Plan
+
+Only `src/utils/issuerDiscovery.ts` and `test/issuer-discovery.test.mjs` change. The exports and
+the result types do not change. The JSON-LD reader gains a term `type` and a `scoped` flag, a
+nullable `base`, and a budget passed through `visit`/`applyContext`.
+
+## Iteration 1 — Phases
+
+### Phase 4: Review fixes
+
+Tasks: gaps 1–12 as above, with a test each (the cost case asserts `readOidcIssuers` returns within
+1 s on the reviewer's shapes).
+Validation: `npx linked build && node --test test/issuer-discovery.test.mjs`, then `npm test`.
+
+Phase 4 done: gaps 1–12 fixed, one test each (11 new tests). Validation:
+`node --test test/issuer-discovery.test.mjs` → `# pass 42`, `# fail 0` (both of the reviewer's cost
+shapes now return `[]` in under 1 s); `npm test` → `# tests 363`, `# pass 363`, `# fail 0`. Also
+fixed: the readme and the `timeoutMs` comment said "one deadline per lookup", but the deadline is
+per request, and an email whose WebFinger names a WebID makes two requests.

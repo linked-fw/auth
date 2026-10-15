@@ -479,7 +479,9 @@ await discovery.discover('https://pod.example/profile/card#me');
 
 - **A WebID** (an `http(s)` URL): its profile is fetched (Turtle preferred, JSON-LD read with
   inline contexts only; a remote `@context` is never fetched) and `solid:oidcIssuer` of that WebID
-  is read. A WebID never falls back: no issuer gives `{ok: false, reason: 'no-issuer'}`, a profile
+  is read. The reader may miss an issuer but never reads one the profile does not assert for that
+  WebID: statements in named graphs, values under scoped contexts and plain JSON-LD strings not
+  coerced to IRIs are ignored, and a JSON-LD document too costly to read has no issuers. A WebID never falls back: no issuer gives `{ok: false, reason: 'no-issuer'}`, a profile
   that cannot be fetched `'unreachable'`, a URL that may not be fetched `'refused'`.
 - **An email**: `GET https://<domain>/.well-known/webfinger?resource=acct:<email>`. An issuer link
   (`http://openid.net/specs/connect/1.0/issuer`) gives `source: 'webfinger'`; a WebID link
@@ -496,15 +498,15 @@ Options (all optional; the module reads no environment variables):
 |---|---|---|
 | `defaultIssuer` | `https://webid.email` | Issuer for emails whose domain gives no answer. Checked at setup |
 | `skipDomains` | `DEFAULT_SKIP_DOMAINS` | gmail.com, outlook.com, icloud.com, … : straight to the default issuer |
-| `timeoutMs` | `3000` | One deadline per lookup, redirects included |
+| `timeoutMs` | `3000` | Deadline per request, redirects included (an email whose WebFinger names a WebID makes two requests) |
 | `maxResponseBytes` | `262144` | A larger answer counts as none |
-| `cacheTtlMs` / `negativeCacheTtlMs` | 10 min / 5 min | Answers / no-answers; a domain that timed out or was unreachable is not asked again for `negativeCacheTtlMs` |
+| `cacheTtlMs` / `negativeCacheTtlMs` | 10 min / 5 min | Answers / no-answers; a domain that timed out or was unreachable is not asked again for `negativeCacheTtlMs`. Concurrent lookups of one email or WebID share a request |
 | `cacheMaxEntries` | `1000` | Oldest entry goes first |
 | `allowLocalhost` | `false` | Also fetch `http://` and loopback hosts, for development (an issuer on `http://localhost:4050`) |
 | `fetch` | global `fetch` | Replaces it (tests, a custom agent) |
 
-The URLs come from user input, so only `https://` is fetched, IP literals in private, link-local
-and unique-local ranges are refused, redirects (at most 3) are checked hop by hop, and issuer or
+The URLs come from user input, so only `https://` is fetched, IP literals in private, link-local,
+unique-local, multicast and IPv4-carrying IPv6 ranges (NAT64, 6to4) are refused, redirects (at most 3) are checked hop by hop, and issuer or
 WebID links that fail these checks are ignored. Host names are not resolved first, so a public name
 that resolves to a private address is not caught; run the server with egress rules if that
 matters. `fetchOidcIssuers(webId, options)` reads a profile's issuers without the cache, and

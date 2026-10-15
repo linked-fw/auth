@@ -12,7 +12,7 @@
  * See arch-08 §Sign-in → Flow in the Create Now repo. Server-only: every lookup fetches URLs that
  * come from user input, so only `https://` is fetched (`http://` and loopback only with
  * `allowLocalhost`), IP literals in private ranges are refused, redirects are checked hop by hop,
- * one deadline covers each lookup and response bodies are capped.
+ * each request has a deadline (redirects included) and response bodies are capped.
  *
  * Results are returned, never thrown. The module reads no environment variables: the caller passes
  * its options to `createIssuerDiscovery`.
@@ -57,7 +57,10 @@ export const DEFAULT_SKIP_DOMAINS: readonly string[] = [
 ];
 
 export interface IssuerFetchOptions {
-  /** Deadline for one lookup, redirects included. Default 3000 ms. */
+  /**
+   * Deadline for one request, redirects included. Default 3000 ms. An email whose WebFinger names a
+   * WebID makes two requests: WebFinger, then the profile.
+   */
   timeoutMs?: number;
   /** Largest response body read; a larger one counts as no answer. Default 256 KB. */
   maxResponseBytes?: number;
@@ -169,10 +172,21 @@ privateAddresses.addSubnet('10.0.0.0', 8, 'ipv4');
 privateAddresses.addSubnet('100.64.0.0', 10, 'ipv4');
 privateAddresses.addSubnet('169.254.0.0', 16, 'ipv4');
 privateAddresses.addSubnet('172.16.0.0', 12, 'ipv4');
+privateAddresses.addSubnet('192.0.0.0', 24, 'ipv4');
 privateAddresses.addSubnet('192.168.0.0', 16, 'ipv4');
-privateAddresses.addAddress('::', 'ipv6');
+privateAddresses.addSubnet('198.18.0.0', 15, 'ipv4');
+privateAddresses.addSubnet('224.0.0.0', 4, 'ipv4');
+privateAddresses.addSubnet('240.0.0.0', 4, 'ipv4');
+// IPv6: unspecified and IPv4-compatible, NAT64 and 6to4 (which carry an IPv4 address), unique-local,
+// link-local, site-local and multicast.
+privateAddresses.addSubnet('::', 96, 'ipv6');
+privateAddresses.addSubnet('64:ff9b::', 96, 'ipv6');
+privateAddresses.addSubnet('64:ff9b:1::', 48, 'ipv6');
+privateAddresses.addSubnet('2002::', 16, 'ipv6');
 privateAddresses.addSubnet('fc00::', 7, 'ipv6');
 privateAddresses.addSubnet('fe80::', 10, 'ipv6');
+privateAddresses.addSubnet('fec0::', 10, 'ipv6');
+privateAddresses.addSubnet('ff00::', 8, 'ipv6');
 
 const ipFamily = (host: string): 'ipv4' | 'ipv6' | null => {
   const version = net.isIP(host);
@@ -205,7 +219,9 @@ export const isFetchableUrl = (href: string, allowLocalhost = false): boolean =>
   if (url.username || url.password) {
     return false;
   }
-  const host = url.hostname.startsWith('[') ? url.hostname.slice(1, -1) : url.hostname;
+  // `localhost.` is `localhost`: drop the trailing dot of a fully qualified name before checking.
+  const hostname = url.hostname.endsWith('.') ? url.hostname.slice(0, -1) : url.hostname;
+  const host = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname;
   if (isLoopbackHost(host)) {
     return allowLocalhost;
   }
@@ -278,7 +294,11 @@ const fetchDocument = async (
         if (!location) {
           return { ok: false, failure: 'status' };
         }
-        current = new URL(location, current).href;
+        try {
+          current = new URL(location, current).href;
+        } catch {
+          return { ok: false, failure: 'status' };
+        }
         continue;
       }
       if (!response.ok) {
@@ -310,11 +330,17 @@ const normaliseIri = (iri: string): string | null => {
   }
 };
 
-const readTurtleIssuers = (body: string, documentUrl: string, webId: string): string[] => {
-  const quads = new Parser({ baseIRI: documentUrl }).parse(body);
+/**
+ * Turtle or N-Triples, never TriG or N3: a statement inside a named graph or a formula is quoted,
+ * not asserted, so only default-graph triples count.
+ */
+const readTurtleIssuers = (body: string, mediaType: string, documentUrl: string, webId: string): string[] => {
+  const format = mediaType === 'application/n-triples' ? 'N-Triples' : 'Turtle';
+  const quads = new Parser({ baseIRI: documentUrl, format }).parse(body);
   return quads
     .filter(
       (quad) =>
+        quad.graph.termType === 'DefaultGraph' &&
         quad.subject.termType === 'NamedNode' &&
         normaliseIri(quad.subject.value) === webId &&
         quad.predicate.value === SOLID_OIDC_ISSUER &&
@@ -323,8 +349,23 @@ const readTurtleIssuers = (body: string, documentUrl: string, webId: string): st
     .map((quad) => quad.object.value);
 };
 
-type JsonLdTerm = { id: string };
-type JsonLdContext = { base: string; vocab: string | null; terms: Map<string, JsonLdTerm> };
+/** `type` is the term's `@type` coercion; `scoped` marks a term with its own `@context`. */
+type JsonLdTerm = { id: string; type: string | null; scoped: boolean };
+type JsonLdContext = { base: string | null; vocab: string | null; terms: Map<string, JsonLdTerm> };
+
+/** Work allowed on one JSON-LD document: term-map entries copied, terms defined, nodes visited. */
+const JSON_LD_BUDGET = 100_000;
+
+class JsonLdBudgetSpent extends Error {}
+
+type Budget = { remaining: number };
+
+const spend = (budget: Budget, units: number) => {
+  budget.remaining -= units;
+  if (budget.remaining < 0) {
+    throw new JsonLdBudgetSpent();
+  }
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -352,8 +393,12 @@ const expandKey = (key: string, context: JsonLdContext, depth = 0): string | nul
 /**
  * An `@id` value to a full IRI: a compact IRI by the context's prefixes, a relative one against
  * `@base`. An absolute IRI is kept as written, since an issuer must match a token's `iss` exactly.
+ * A blank node id (`_:b0`) is no IRI.
  */
 const expandId = (value: string, context: JsonLdContext): string | null => {
+  if (value.startsWith('_:')) {
+    return null;
+  }
   const colon = value.indexOf(':');
   if (colon > 0 && !value.slice(colon + 1).startsWith('//')) {
     const prefix = context.terms.get(value.slice(0, colon));
@@ -364,6 +409,9 @@ const expandId = (value: string, context: JsonLdContext): string | null => {
   if (hasScheme(value)) {
     return value;
   }
+  if (context.base === null) {
+    return null;
+  }
   try {
     return new URL(value, context.base).href;
   } catch {
@@ -371,45 +419,74 @@ const expandId = (value: string, context: JsonLdContext): string | null => {
   }
 };
 
-/** Applies an `@context` value. Remote contexts (strings) are not fetched and add nothing. */
-const applyContext = (context: JsonLdContext, value: unknown, documentUrl: string): JsonLdContext => {
+/** Applies an `@context` value to `target` in place. Remote contexts (strings) are not fetched and add nothing. */
+const applyContextInto = (target: JsonLdContext, value: unknown, documentUrl: string, budget: Budget) => {
   if (value === null) {
-    return { base: documentUrl, vocab: null, terms: new Map() };
+    target.base = documentUrl;
+    target.vocab = null;
+    target.terms.clear();
+    return;
   }
   if (Array.isArray(value)) {
-    return value.reduce<JsonLdContext>((ctx, item) => applyContext(ctx, item, documentUrl), context);
+    value.forEach((item) => applyContextInto(target, item, documentUrl, budget));
+    return;
   }
   if (!isRecord(value)) {
-    return context;
+    return;
   }
-  const next: JsonLdContext = { base: context.base, vocab: context.vocab, terms: new Map(context.terms) };
+  spend(budget, 1);
   if (typeof value['@base'] === 'string') {
-    next.base = new URL(value['@base'], context.base).href;
+    target.base = target.base === null ? null : new URL(value['@base'], target.base).href;
+  } else if (value['@base'] === null) {
+    target.base = null;
   }
   if (typeof value['@vocab'] === 'string') {
-    next.vocab = value['@vocab'];
+    target.vocab = value['@vocab'];
   } else if (value['@vocab'] === null) {
-    next.vocab = null;
+    target.vocab = null;
   }
   for (const [key, definition] of Object.entries(value)) {
     if (key.startsWith('@')) {
       continue;
     }
+    spend(budget, 1);
     if (typeof definition === 'string') {
-      next.terms.set(key, { id: definition });
+      target.terms.set(key, { id: definition, type: null, scoped: false });
     } else if (isRecord(definition) && typeof definition['@id'] === 'string') {
-      next.terms.set(key, { id: definition['@id'] });
+      target.terms.set(key, {
+        id: definition['@id'],
+        type: typeof definition['@type'] === 'string' ? definition['@type'] : null,
+        scoped: '@context' in definition,
+      });
+    } else if (isRecord(definition) && '@context' in definition) {
+      // A term that only adds a scoped context (e.g. one for a @type).
+      target.terms.set(key, { id: key, type: null, scoped: true });
     } else if (definition === null) {
-      next.terms.delete(key);
+      target.terms.delete(key);
     }
   }
+};
+
+const applyContext = (context: JsonLdContext, value: unknown, documentUrl: string, budget: Budget): JsonLdContext => {
+  spend(budget, context.terms.size + 1);
+  const next: JsonLdContext = { base: context.base, vocab: context.vocab, terms: new Map(context.terms) };
+  applyContextInto(next, value, documentUrl, budget);
   return next;
+};
+
+/** Whether a node's `@type` names a term with a scoped context, which this reader does not apply. */
+const hasTypeScopedContext = (node: Record<string, unknown>, context: JsonLdContext) => {
+  const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+  return types.some((type) => typeof type === 'string' && context.terms.get(type)?.scoped);
 };
 
 /**
  * Reads `solid:oidcIssuer` of `webId` from a JSON-LD document without a JSON-LD processor: full
- * and compact IRIs, terms from inline contexts, `@vocab`, `@base`, `@graph` and nested nodes. A
- * remote `@context` is never fetched, so terms that only it defines are not understood.
+ * and compact IRIs, terms from inline contexts, `@vocab`, `@base`, `@graph` and nested nodes. It
+ * may miss an issuer but never reads one the document does not assert: a remote `@context` is never
+ * fetched (terms only it defines are not understood), values under a scoped context are skipped, a
+ * plain string counts as an IRI only where its term is coerced to one, and a document that costs
+ * more than `JSON_LD_BUDGET` to read has no issuers.
  */
 const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): string[] => {
   let document: unknown;
@@ -419,10 +496,12 @@ const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): st
     return [];
   }
   const issuers: string[] = [];
+  const budget: Budget = { remaining: JSON_LD_BUDGET };
   const visit = (node: unknown, inherited: JsonLdContext, depth: number) => {
     if (depth > MAX_JSON_DEPTH) {
       return;
     }
+    spend(budget, 1);
     if (Array.isArray(node)) {
       node.forEach((item) => visit(item, inherited, depth + 1));
       return;
@@ -430,7 +509,11 @@ const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): st
     if (!isRecord(node)) {
       return;
     }
-    const context = '@context' in node ? applyContext(inherited, node['@context'], documentUrl) : inherited;
+    const context =
+      '@context' in node ? applyContext(inherited, node['@context'], documentUrl, budget) : inherited;
+    if (hasTypeScopedContext(node, context)) {
+      return;
+    }
     const id = typeof node['@id'] === 'string' ? expandId(node['@id'], context) : null;
     const subject = id ? normaliseIri(id) : null;
     for (const [key, value] of Object.entries(node)) {
@@ -438,14 +521,17 @@ const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): st
         visit(value, context, depth + 1);
         continue;
       }
-      if (key.startsWith('@')) {
+      if (key.startsWith('@') || context.terms.get(key)?.scoped) {
         continue;
       }
       if (subject === webId && expandKey(key, context) === SOLID_OIDC_ISSUER) {
+        const coerced = ['@id', '@vocab'].includes(context.terms.get(key)?.type ?? '');
         for (const item of Array.isArray(value) ? value : [value]) {
           const iri =
             typeof item === 'string'
-              ? expandId(item, context)
+              ? coerced
+                ? expandId(item, context)
+                : null
               : isRecord(item) && typeof item['@id'] === 'string'
                 ? expandId(item['@id'], context)
                 : null;
@@ -457,14 +543,21 @@ const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): st
       visit(value, context, depth + 1);
     }
   };
-  visit(document, { base: documentUrl, vocab: null, terms: new Map() }, 0);
+  try {
+    visit(document, { base: documentUrl, vocab: null, terms: new Map() }, 0);
+  } catch (error) {
+    if (error instanceof JsonLdBudgetSpent) {
+      return [];
+    }
+    throw error;
+  }
   return issuers;
 };
 
 /**
- * The `solid:oidcIssuer` values of `webId` in a profile document: Turtle (the default, parsed with
- * `n3`) or JSON-LD (by content type). Statements about other subjects are ignored. An unreadable
- * document has no issuers.
+ * The `solid:oidcIssuer` values of `webId` in a profile document: Turtle or N-Triples (the default,
+ * parsed with `n3`) or JSON-LD (by content type). Statements about other subjects, and statements
+ * in named graphs, are ignored. An unreadable document has no issuers.
  */
 export const readOidcIssuers = (
   body: string,
@@ -481,7 +574,7 @@ export const readOidcIssuers = (
   try {
     const issuers = isJson
       ? readJsonLdIssuers(body, documentUrl, subject)
-      : readTurtleIssuers(body, documentUrl, subject);
+      : readTurtleIssuers(body, mediaType, documentUrl, subject);
     return [...new Set(issuers)];
   } catch {
     return [];
@@ -616,7 +709,8 @@ const freeze = <T extends IssuerDiscoveryResult>(result: T): T => {
 /**
  * An issuer discovery with its own cache. Answers are cached for `cacheTtlMs`, no-answers for
  * `negativeCacheTtlMs`; a domain whose WebFinger timed out or was unreachable is remembered for
- * `negativeCacheTtlMs`, so its next user is not kept waiting.
+ * `negativeCacheTtlMs`, so its next user is not kept waiting. Concurrent lookups of the same email
+ * or WebID share one request.
  */
 export const createIssuerDiscovery = (options: IssuerDiscoveryOptions = {}): IssuerDiscovery => {
   const fetchOptions = resolveFetchOptions(options);
@@ -633,6 +727,17 @@ export const createIssuerDiscovery = (options: IssuerDiscoveryOptions = {}): Iss
     options.cacheMaxEntries ?? 1000,
     options.now ?? Date.now,
   );
+  // Lookups under way, by cache key: concurrent callers share one request.
+  const inFlight = new Map<string, Promise<unknown>>();
+  const once = <T>(key: string, run: () => Promise<T>): Promise<T> => {
+    const pending = inFlight.get(key) as Promise<T> | undefined;
+    if (pending) {
+      return pending;
+    }
+    const promise = run().finally(() => inFlight.delete(key));
+    inFlight.set(key, promise);
+    return promise;
+  };
 
   const cachedProfileIssuers = async (webId: string): Promise<ProfileIssuersResult> => {
     const key = `webid ${webId}`;
@@ -640,9 +745,11 @@ export const createIssuerDiscovery = (options: IssuerDiscoveryOptions = {}): Iss
     if (hit) {
       return hit;
     }
-    const result = await profileIssuers(webId, fetchOptions);
-    cache.set(key, result, result.ok && result.issuers.length ? ttl : negativeTtl);
-    return result;
+    return once(key, async () => {
+      const result = await profileIssuers(webId, fetchOptions);
+      cache.set(key, result, result.ok && result.issuers.length ? ttl : negativeTtl);
+      return result;
+    });
   };
 
   const fallback = (loginHint: string, reason: FallbackReason) =>
@@ -717,9 +824,11 @@ export const createIssuerDiscovery = (options: IssuerDiscoveryOptions = {}): Iss
     if (hit) {
       return hit;
     }
-    const result = await lookUpEmail(email, host);
-    cache.set(key, result, result.ok && result.source !== 'fallback' ? ttl : negativeTtl);
-    return result;
+    return once(key, async () => {
+      const result = await lookUpEmail(email, host);
+      cache.set(key, result, result.ok && result.source !== 'fallback' ? ttl : negativeTtl);
+      return result;
+    });
   };
 
   const discover = (input: string): Promise<IssuerDiscoveryResult> => {
