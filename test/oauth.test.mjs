@@ -49,6 +49,7 @@ let existingPerson;
 let personHasPassword;
 let linkedProviders;
 let lookedUpWebID;
+let credentialTable;
 
 beforeEach(() => {
   provider = new AuthBackendProvider(null, fakeLincdServer);
@@ -68,11 +69,30 @@ beforeEach(() => {
   mock.method(OAuthIdentityStore, 'findLinkedProviders', async () => linkedProviders);
   mock.method(OAuthIdentityStore, 'upgradeLegacyLink', async () => {});
   createLink = mock.method(OAuthIdentityStore, 'createLink', async () => {});
+  credentialTable = fakeCredentialTable();
+  credentialTable.install(AuthCredential);
   provider.accountShape = {
     select: () => ({
       where: (filter) => {
-        filter({ accountOf: { equals: (node) => (lookedUpWebID = node.id) } });
-        return { one: async () => existingAccount };
+        let matches = true;
+        filter({
+          accountOf: {
+            equals: (node) => {
+              lookedUpWebID = node.id;
+              matches = existingAccount?.accountOf?.id === node.id;
+            },
+          },
+          email: {
+            equals: (email) => {
+              matches = existingAccount?.email === email;
+            },
+          },
+        });
+        const result = () => (matches && existingAccount ? [existingAccount] : []);
+        return {
+          one: async () => result()[0] ?? null,
+          then: (resolve, reject) => Promise.resolve(result()).then(resolve, reject),
+        };
       },
       for: async (node) => (existingAccount?.id === node.id ? existingAccount : null),
     }),
@@ -186,6 +206,11 @@ function verifiedGoogle(email = 'ada@example.test', sub = 'g-1') {
 }
 const ADA_WEBID = emailToWebID('ada@example.test');
 const ADA_ACCOUNT = { id: 'https://app.test/account/ada', accountOf: { id: ADA_WEBID } };
+const LEGACY_ADA_ACCOUNT = {
+  id: 'https://app.test/account/legacy-ada',
+  email: 'ada@example.test',
+  accountOf: { id: 'https://legacy.example.test/person/ada' },
+};
 
 test('a linked identity signs in to its account without looking at the email', async () => {
   verifiedGoogle('someone-else@example.test');
@@ -250,6 +275,27 @@ test('a verified email attaches to an OAuth-only account and links the identity'
   assert.deepEqual([identity.provider, identity.subject, accountId], ['google', 'g-1', ADA_ACCOUNT.id]);
 });
 
+test('Google attaches to an OAuth-only legacy account found by account email', async () => {
+  verifiedGoogle();
+  existingAccount = LEGACY_ADA_ACCOUNT;
+  const result = await provider.signinOAuth('google', GOOGLE);
+  assert.equal(result, SIGNED_IN);
+  assert.equal(createLink.mock.calls[0].arguments[1], LEGACY_ADA_ACCOUNT.id);
+  assert.equal(login.mock.callCount(), 0, 'a duplicate canonical account was created');
+});
+
+test('Apple attaches to an OAuth-only legacy account found by account email', async () => {
+  mock.method(AppleHelper, 'decodeIdentityToken', async () => ({
+    email: 'ada@example.test',
+    sub: 'apple-legacy-ada',
+  }));
+  existingAccount = LEGACY_ADA_ACCOUNT;
+  const result = await provider.signinOAuth('apple', { identityToken: 'apple-token' });
+  assert.equal(result, SIGNED_IN);
+  assert.equal(createLink.mock.calls[0].arguments[1], LEGACY_ADA_ACCOUNT.id);
+  assert.equal(login.mock.callCount(), 0, 'a duplicate canonical account was created');
+});
+
 test('a second identity at the same provider is not attached by email', async () => {
   verifiedGoogle('ada@example.test', 'g-2');
   existingAccount = ADA_ACCOUNT;
@@ -273,8 +319,6 @@ function credentialsOf(table, personId) {
 }
 
 test('a new OAuth user gets a credential whose email is already verified', async () => {
-  const table = fakeCredentialTable();
-  table.install(AuthCredential);
   verifiedGoogle();
   provider.userShape = { ...provider.userShape, create: async (data) => ({ id: data.__id }) };
   provider.accountShape = { ...provider.accountShape, create: async () => ({ id: 'acc-new' }) };
@@ -282,7 +326,7 @@ test('a new OAuth user gets a credential whose email is already verified', async
   assert.deepEqual(loginLabels(), ['google OAuth']);
   // run the create step Auth.login was handed
   await login.mock.calls[0].arguments[2]();
-  const [credential] = credentialsOf(table, ADA_WEBID);
+  const [credential] = credentialsOf(credentialTable, ADA_WEBID);
   assert.ok(credential, 'a credential was created');
   assert.equal(credential.email, 'ada@example.test');
   assert.ok(credential.emailVerifiedAt, 'emailVerifiedAt is set');
@@ -290,37 +334,31 @@ test('a new OAuth user gets a credential whose email is already verified', async
 });
 
 test('a linked sign-in whose verified email maps to the person marks the email verified', async () => {
-  const table = fakeCredentialTable();
-  table.install(AuthCredential);
-  table.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
+  credentialTable.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
   verifiedGoogle('Ada@Example.test');
   links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
   existingAccount = ADA_ACCOUNT;
   assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
-  assert.ok(credentialsOf(table, ADA_WEBID)[0].emailVerifiedAt);
+  assert.ok(credentialsOf(credentialTable, ADA_WEBID)[0].emailVerifiedAt);
 });
 
 test('a linked sign-in whose email is another address does not mark the email verified', async () => {
-  const table = fakeCredentialTable();
-  table.install(AuthCredential);
-  table.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
+  credentialTable.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
   verifiedGoogle('someone-else@example.test');
   links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
   existingAccount = ADA_ACCOUNT;
   assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
-  assert.equal(credentialsOf(table, ADA_WEBID)[0].emailVerifiedAt, undefined);
-  assert.equal(credentialsOf(table, ADA_WEBID).length, 1);
+  assert.equal(credentialsOf(credentialTable, ADA_WEBID)[0].emailVerifiedAt, undefined);
+  assert.equal(credentialsOf(credentialTable, ADA_WEBID).length, 1);
 });
 
 test('a verified email attached to an OAuth-only account marks the email verified', async () => {
-  const table = fakeCredentialTable();
-  table.install(AuthCredential);
-  table.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
+  credentialTable.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
   verifiedGoogle();
   existingAccount = ADA_ACCOUNT;
   linkedProviders = ['apple'];
   assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
-  assert.ok(credentialsOf(table, ADA_WEBID)[0].emailVerifiedAt);
+  assert.ok(credentialsOf(credentialTable, ADA_WEBID)[0].emailVerifiedAt);
 });
 
 test('linkOAuthIdentity needs a signed-in account', async () => {

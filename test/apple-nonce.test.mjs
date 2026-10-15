@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fakeCredentialTable } from './fakeStore.mjs';
 
 process.env.NODE_ENV = 'test';
 process.env.SITE_ROOT = 'https://app.test';
@@ -26,6 +27,7 @@ const { default: jwt } = await import('jsonwebtoken');
 const { Auth } = await import(new URL('utils/auth.js', libDir));
 const { default: AppleHelper } = await import(new URL('helpers/apple.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
+const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
 const { OAuthIdentityStore } = await import(new URL('utils/oauthIdentities.js', libDir)).catch(
   () => ({ OAuthIdentityStore: null })
 );
@@ -76,9 +78,16 @@ beforeEach(() => {
     mock.method(OAuthIdentityStore, 'createLink', async () => {});
   }
   provider.accountShape = {
-    select: () => ({ where: () => ({ one: async () => null }), for: async () => null }),
+    select: () => ({
+      where: () => ({
+        one: async () => null,
+        then: (resolve, reject) => Promise.resolve([]).then(resolve, reject),
+      }),
+      for: async () => null,
+    }),
   };
   provider.userShape = { select: () => ({ for: async () => null }) };
+  fakeCredentialTable().install(AuthCredential);
   used = new Set();
   if (nonces) {
     mock.method(nonces.UsedNonceStore, 'markUsed', async (hash) => {
