@@ -20,7 +20,8 @@ sees no difference: no route, and the start method answers `not_configured`. Eve
 method is unchanged.
 
 Step A2 of [plan 001](../plans/001-webid-signin-track.md#a2--the-redirect-and-callback),
-implementing contract 4 against contract 3's public client. Design: arch-08 §Sign-in, §Protocol
+implementing contract 4 against contract 3's public client. PR
+[#127](https://github.com/linked-fw/auth/pull/127). Design: arch-08 §Sign-in, §Protocol
 and §Verified email decides the WebID, plan 063 decisions 1, 2 and 10 (in Create Now). It also
 closes A1's DNS-rebinding follow-up.
 

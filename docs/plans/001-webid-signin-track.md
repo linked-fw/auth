@@ -23,7 +23,7 @@ decisions 1–7, 9 and 10.
 its Rules apply (worktrees, a changeset per PR, PRs ending in an Outcome section, never "Claude" in
 commits or PRs), and its §Contracts is the cross-repo source of the [Contracts](#contracts) below.
 Each step agent works in its own plan doc (numbers assigned by 065: A0 → `002`, A1 → `003`,
-A3 → `004`, A5 → `005`; A2 and A4 get theirs when they start). The issuer side is webid.email
+A3 → `004`, A5 → `005`, A2 → `006`; A4 gets its number when it starts). The issuer side is webid.email
 ([its plan](https://github.com/Semantu/webid-email/blob/main/docs/plans/001-webid-email-service.md)).
 
 **The steps.** A0 makes the email → WebID derivation configurable and exports the HMAC rule
@@ -272,6 +272,7 @@ app that configures nothing is none.
 ## A2 — The redirect and callback
 
 **Depends on:** A1. Tested against a mock issuer until webid.email's W3 exists, then against it.
+**PR:** [#127](https://github.com/linked-fw/auth/pull/127), report [009](../reports/009-oidc-signin.md).
 
 **Scope** (on panva's `openid-client`)
 - **Start:** a provider method that, for an email or WebID, discovers the issuer (A1) and returns
@@ -506,7 +507,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 
 - [x] A0 — [#119](https://github.com/linked-fw/auth/pull/119), report [005](../reports/005-webid-derivation-hmac.md)
 - [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), report [007](../reports/007-issuer-discovery.md)
-- [ ] A2
+- [x] A2 — [#127](https://github.com/linked-fw/auth/pull/127), report [009](../reports/009-oidc-signin.md)
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [ ] A4
