@@ -302,6 +302,55 @@ Sign-up still answers "This email address is already in use" when a person, acco
 exists for the email: it signs the user in at once, so it cannot give one answer for both cases.
 It is rate limited to 10 per hour per IP (`signup`), which makes it a slow way to test emails.
 
+### Sign in with an emailed code
+
+A passwordless method next to password: the user types their email, gets an eight-digit code and a
+link carrying it, and signs in with either. The code in the email lets a link opened on one device
+be typed on another. Signing in with a code proves control of the email, so it is marked verified,
+and an email without an account gets one (the person at the WebID `Auth.webIdFor` derives, and
+its account).
+
+```tsx
+const auth = useAuth();
+
+const sent = await auth.sendSigninCode(email); // true, or {error, action?, retryAfter?}
+// ...the user types the code from the email
+const result = await auth.signinWithCode(email, code);
+if ('error' in result) showError(result.error); // action: 'invalid_code' | 'rate_limited'
+```
+
+- `sendSigninCode(email)` answers `true` for every well-formed email, account or not, and whether
+  or not the email could be sent, like `sendResetPasswordLink`. A new request replaces the earlier
+  code.
+- `signinWithCode(email, code)` checks the code against the email it was sent to. Case and
+  surrounding spaces in the email, and spaces or dashes in the code, are ignored. A wrong,
+  expired or already used code, or a code for another email, all answer `{error: 'This sign-in
+  code is invalid or has expired.', action: 'invalid_code'}`. A wrong code, or one tried with
+  another email, leaves the right one working; an expired one is used up.
+- The code works once, for `AUTH_SIGNIN_CODE_TTL` seconds (default 15 minutes). The person's
+  `AuthCredential` stores only a hash of an HMAC of the email and code, keyed with a key derived
+  from `JWT_SECRET`, so a copy of the store does not give the codes away (a new `JWT_SECRET` ends
+  outstanding codes). An email with no account keeps its code on a pending credential, which has
+  no person and stores only the keyed hash of the email (`signinCodeEmailHash`), so signup,
+  password sign-in, reset and OAuth never see it; the first sign-in attaches it to the person:
+  one that has the email by then, or a new one. Pending credentials of codes that were never used
+  are not removed yet ([backlog 004](docs/backlog/004-signin-code-hardening.md)).
+- **The first proof of an email ends unproven access.** Sign-up does not verify the email, so
+  someone may have registered the owner's email with a password of their own, waiting for the
+  owner. When a code sign-in reaches a person whose email was not verified yet, that person's
+  password hashes are removed and every session of their accounts is revoked, before the new
+  session starts. The owner can set a password through a reset link.
+- Eight digits are guessable without a limit: `signinWithCode` allows 5 attempts per email per 15
+  minutes (`signinCode`), from any number of addresses, and `sendSigninCode` 3 requests per email
+  per hour (`signinCodeRequest`). A wrong guess does not end the code, so the per-email limit is
+  the only bound on guessing: **do not turn `signinCode`'s account limit off**
+  (`AUTH_RATE_LIMIT_SIGNIN_CODE_ACCOUNT`) without first ending codes after a few wrong guesses.
+  See *Rate limits*.
+- The link is `${SITE_ROOT}/auth/signin-code?email=…&code=…`. Render `SigninWithCodeForm` at that
+  route (see *Setup sign-in by code*): it shows the code filled in, asks the user to type their
+  email, and signs in when they press Sign in. Elsewhere it is the form that asks for the email
+  and then the code, showing the email the code was sent to.
+
 ### Email verification
 
 Verification is a **soft flag**: sign-up signs the user in at once, as before, and sends a
@@ -316,7 +365,8 @@ an unverified account may not do.**
   `VerifyEmailCallback` (see *Setup Verify Email*). The link works once, for
   `AUTH_EMAIL_VERIFICATION_TTL` seconds (default 7 days); only a hash of the token is stored.
 - An email also counts as verified after a completed password reset (the link came from the
-  inbox) and after a Google or Apple sign-in whose email the provider has verified.
+  inbox), after a sign-in with an emailed code, and after a Google or Apple sign-in whose email
+  the provider has verified.
 - Dev accounts (`signinDev`) normally report `emailVerified: false`.
 
 ```tsx
@@ -577,7 +627,7 @@ methods**, and in `warn` mode nothing of auth's is logged as undeclared.
 
 | Level | Methods | What the server does |
 |---|---|---|
-| `public` | `AuthBackendProvider`: `signinWithPassword`, `createAccount`, `signinOAuth`, `createOAuthNonce`, `signinTemporary`, `signinDev`, `sendResetPasswordLink`, `resetPassword`, `verifyEmail`, `validateToken`, `signout` | runs, signed in or not |
+| `public` | `AuthBackendProvider`: `signinWithPassword`, `createAccount`, `signinOAuth`, `createOAuthNonce`, `signinTemporary`, `signinDev`, `sendResetPasswordLink`, `sendSigninCode`, `signinWithCode`, `resetPassword`, `verifyEmail`, `validateToken`, `signout` | runs, signed in or not |
 | `user` | `AuthBackendProvider`: `linkOAuthIdentity`, `resendEmailVerification`, `getReauthenticationMethods`, `removeAccount`; `AuthCredentialProvider`: `userHasAuthCredential`, `userHasPassword` | 401 without a session, before the method runs |
 | internal | `AuthBackendProvider`: `upgradePasswordHash`, `getPasswordForUser`, `getOrCreateAccount`, `loadAccountForSession`, `loadUserForSession`, `checkSignin`, `validateRequestToken`, `refreshSession`, `getTokenFromRequest`, `getTokenCandidates`, `getRefreshTokenFromRequest`; `AuthCredentialProvider`: `createNewCredential`, `hasAuthCredential` | 501 over HTTP in every mode; backend code can still call them |
 
@@ -654,6 +704,8 @@ does not reveal whether it does.
 | `credentialLookup` | `AuthCredentialProvider.hasAuthCredential` | 60 / minute | |
 | `emailVerificationRequest` | `resendEmailVerification` (sends an email) | 10 / hour | 3 / hour (signed-in account) |
 | `emailVerify` | `verifyEmail` | 10 / minute | |
+| `signinCodeRequest` | `sendSigninCode` (sends an email) | 10 / hour | 3 / hour (by email) |
+| `signinCode` | `signinWithCode` (guessing an eight-digit code) | 10 / minute | 5 / 15 minutes (by email) |
 | `reauthenticate` | `removeAccount` when it checks a password or ID token | 10 / minute | 5 / 15 minutes (signed-in account) |
 
 A limited call answers `{error: 'Too many attempts. Please wait a moment and try again.', action:
@@ -665,7 +717,7 @@ backend code that calls these while serving a request counts against that reques
 | Variable | Meaning |
 |---|---|
 | `AUTH_RATE_LIMIT` | `off` (or `false`/`0`) turns every limit off, e.g. for a test run |
-| `AUTH_RATE_LIMIT_<RULE>_<IP\|ACCOUNT>` | one limit as `<max>/<windowSeconds>`, or `off`. The rule in upper snake case: `AUTH_RATE_LIMIT_SIGNIN_IP=20/60`, `AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_ACCOUNT=5/3600`, `AUTH_RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_ACCOUNT=5/3600` |
+| `AUTH_RATE_LIMIT_<RULE>_<IP\|ACCOUNT>` | one limit as `<max>/<windowSeconds>`, or `off`. The rule in upper snake case: `AUTH_RATE_LIMIT_SIGNIN_IP=20/60`, `AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_ACCOUNT=5/3600`, `AUTH_RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_ACCOUNT=5/3600`, `AUTH_RATE_LIMIT_SIGNIN_CODE_ACCOUNT=5/900` (never `off`: it is the only per-email bound on guessing a sign-in code) |
 
 In code, `configureRateLimits({signin: {ip: {max: 20, windowSeconds: 60}}})` from
 `@_linked/auth/utils/rateLimit` does the same (the environment wins), and `resetRateLimits()`
@@ -684,8 +736,8 @@ clears the counters and overrides between tests.
 
 ## Email configuration
 
-auth sends two emails, the password reset link and the email verification link, through
-`LinkedEmail` from `@_linked/server-utils`. Register a provider once at server startup:
+auth sends three emails, the password reset link, the email verification link and the sign-in
+code (with its link), through `LinkedEmail` from `@_linked/server-utils`. Register a provider once at server startup:
 
 ```ts
 import { LinkedEmail } from '@_linked/server-utils/utils/LinkedEmail';
@@ -701,11 +753,20 @@ LinkedEmail.setDefaultProvider({
 The emails use `APP_NAME` in the subject and greeting, and `SITE_ROOT` in the links.
 
 **Without a provider, nothing is sent.** Sign-up still creates the account (it stays
-unverified), `sendResetPasswordLink` still answers `true`, and the unsent link's token is removed
-again. A provider that throws or rejects is handled the same way, and its error is logged without
-the address or the link. With `DEV_AUTH=true` and no provider, the link is printed to the server
-log instead (`[@_linked/auth] dev: verify link: …`), so local sign-up and reset can be tested
-without mail.
+unverified), `sendResetPasswordLink` and `sendSigninCode` still answer `true`, and the unsent
+link's token (or code) is removed again. A provider that throws or rejects is handled the same
+way, and its error is logged without the address, the link or the code. With `DEV_AUTH=true` and
+no provider, the link is printed to the server log instead, so local sign-up, reset and code
+sign-in can be tested without mail:
+
+```
+[@_linked/auth] dev: verify link: https://app.test/auth/verify-email?token=…
+[@_linked/auth] dev: reset link: https://app.test/auth/reset-password?token=…
+[@_linked/auth] dev: signin-code link: https://app.test/auth/signin-code?email=ada%40example.test&code=12345678 (code 12345678)
+```
+
+The sign-in code line is the one place a code is logged on purpose; a test or a local issuer reads
+the code from it. `DEV_AUTH` also opens `signinDev`, so it must stay unset in production.
 
 ## Setup Reset Password
 
@@ -718,6 +779,28 @@ reset_password_callback: {
     () =>
       import(
         '@_linked/auth/components/ForgotPasswordCallback' /* webpackPrefetch: true */
+      ),
+  ),
+},
+```
+
+## Setup sign-in by code
+
+The sign-in code email links to `${SITE_ROOT}/auth/signin-code?email=…&code=…`. Define a route
+there that renders `SigninWithCodeForm`; with both values in the URL it shows the code filled in,
+asks the user to type their email, and signs in when they press Sign in. It never signs in on its
+own, because mail scanners open links and would use the code up, and it never takes the email
+from the link on trust, because a link someone made from their own email and code would sign the
+user in to that other account. Use the same component wherever the user should start a code sign-in. It reads the URL with
+React Router's `useSearchParams`, and calls `onLoggedIn(authResponse)` once signed in.
+
+```tsx
+signin_code: {
+  path: '/auth/signin-code',
+  component: lazy(
+    () =>
+      import(
+        '@_linked/auth/components/SigninWithCodeForm' /* webpackPrefetch: true */
       ),
   ),
 },

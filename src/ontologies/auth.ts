@@ -53,6 +53,13 @@ export var emailVerificationToken = ns('emailVerificationToken');
 export var emailVerificationTokenExpiresAt = ns('emailVerificationTokenExpiresAt');
 /** The same marker for an email verification token consume. */
 export var emailVerificationConsumeMarker = ns('emailVerificationConsumeMarker');
+/** The hash of an emailed sign-in code, bound to the email it was sent to. */
+export var signinCode = ns('signinCode');
+export var signinCodeExpiresAt = ns('signinCodeExpiresAt');
+/** The same marker for a sign-in code consume. */
+export var signinCodeConsumeMarker = ns('signinCodeConsumeMarker');
+/** The hash of the email a pending credential (of nobody yet) holds sign-in codes for. */
+export var signinCodeEmailHash = ns('signinCodeEmailHash');
 export var telephone = ns('telephone');
 export var hash = ns('hash');
 export var tokenHash = ns('tokenHash');
@@ -90,6 +97,10 @@ export const auth = {
   emailVerificationToken,
   emailVerificationTokenExpiresAt,
   emailVerificationConsumeMarker,
+  signinCode,
+  signinCodeExpiresAt,
+  signinCodeConsumeMarker,
+  signinCodeEmailHash,
   telephone,
   hash,
   tokenHash,

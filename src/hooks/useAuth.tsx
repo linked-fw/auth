@@ -35,6 +35,7 @@ import type {
   RemoveAccountProof,
   RemoveAccountResult,
   ResendEmailVerificationResult,
+  SigninCodeError,
   VerifyEmailResult,
 } from '../types/auth.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
@@ -126,6 +127,16 @@ export const useAuth = <
     refreshToken: string;
     email?: string;
   }) => Promise<AuthenticationResponse>;
+  /**
+   * Email a sign-in code (and a link carrying it) to `email`. Resolves to `true` for every
+   * well-formed email, account or not, or to `{error, action?, retryAfter?}`.
+   */
+  sendSigninCode: (email: string) => Promise<true | SigninCodeError>;
+  /**
+   * Sign in with an emailed code. Resolves to the signed-in auth response, or to
+   * `{error, action?, retryAfter?}` (`action: 'invalid_code'` for a wrong, expired or used code).
+   */
+  signinWithCode: (email: string, code: string) => Promise<AuthenticationResponse | SigninCodeError>;
   /**
    * Sign in with a provider credential. Resolves to the signed-in auth response, or to
    * `{error, action?}` (e.g. `action: 'sign_in_to_link'`).
@@ -362,6 +373,37 @@ function useProvideAuth(signinRoute: string = '') {
         }
       }
     );
+  };
+
+  const sendSigninCode = async (email: string): Promise<true | SigninCodeError> => {
+    const response = await Server.call(packageName, 'sendSigninCode', email);
+    if (response === true) return true;
+    return {
+      error: response?.error || "Sorry, we couldn't send the code, please try again later",
+      ...(response?.action ? { action: response.action } : {}),
+      ...(response?.retryAfter ? { retryAfter: response.retryAfter } : {}),
+    };
+  };
+
+  const signinWithCode = async (
+    email: string,
+    code: string
+  ): Promise<AuthenticationResponse | SigninCodeError> => {
+    const response = await Server.call(packageName, 'signinWithCode', email, code);
+    if (response && response.auth) {
+      return updateAuth({
+        auth: response.auth,
+        accessToken: response.accessToken,
+        refreshToken: response.refreshToken,
+        refreshTokenExpiresIn: response.refreshTokenExpiresIn,
+        refreshTokenExpiresAt: response.refreshTokenExpiresAt,
+      });
+    }
+    return {
+      error: response?.error || "Couldn't sign in with this code",
+      ...(response?.action ? { action: response.action } : {}),
+      ...(response?.retryAfter ? { retryAfter: response.retryAfter } : {}),
+    };
   };
 
   /**
@@ -633,6 +675,8 @@ function useProvideAuth(signinRoute: string = '') {
     signout,
     updateAuth,
     signinWithPassword,
+    sendSigninCode,
+    signinWithCode,
     signinDev,
     signinTemporary,
     createAccount,

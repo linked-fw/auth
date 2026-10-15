@@ -1,0 +1,49 @@
+:root {
+  --ld-auth-signin-code-text-error: var(--ld-auth-text-color-error);
+}
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+
+  .input {
+    width: 100%;
+  }
+
+  .codeInput {
+    width: 100%;
+    letter-spacing: 0.3em;
+  }
+
+  .button {
+    width: 100%;
+  }
+
+  .ErrorMessage {
+    margin: 0;
+    color: var(--ld-auth-signin-code-text-error);
+  }
+
+  .HelperText {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  .links {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .link {
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--ld-auth-text-hyperlink);
+    font: inherit;
+  }
+}

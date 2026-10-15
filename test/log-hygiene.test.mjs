@@ -135,3 +135,35 @@ test('a reset email that fails to send logs neither the address nor the token', 
   assert.ok(!allLogs().includes(EMAIL), `the email was logged:\n${allLogs()}`);
   assert.ok(!allLogs().includes(token), `the token was logged:\n${allLogs()}`);
 });
+
+test('a sign-in code email that fails to send logs neither the address nor the code', async () => {
+  delete process.env.DEV_AUTH;
+  process.env.SITE_ROOT = 'https://app.test';
+  class CodeProvider extends AuthBackendProvider {
+    userShape = {
+      select: () => ({ for: () => ({ one: async () => ({ id: 'p1', givenName: 'Ada' }) }) }),
+    };
+    async getPasswordForUser() {
+      return { id: 'c1', passwordHash: 'hash' };
+    }
+  }
+  mock.method(AuthCredential, 'update', () => ({ for: async () => {}, where: async () => {} }));
+  let code;
+  // a provider whose error message repeats what it was asked to send
+  mock.method(LinkedEmail, 'send', async (options) => {
+    code = options.htmlbody.match(/code=(\d+)/)[1];
+    throw new Error(
+      `rejected ${options.to[0].email_address.address} (${options.subject}): ${options.htmlbody}`
+    );
+  });
+  const provider = new CodeProvider(null, fakeLincdServer);
+  assert.equal(await provider.sendSigninCode(EMAIL), true);
+  assert.ok(code, 'no send was attempted');
+  assert.ok(
+    allLogs().includes('could not send the signin-code email'),
+    `failure not logged:\n${allLogs()}`
+  );
+  assert.ok(!allLogs().includes(EMAIL), `the email was logged:\n${allLogs()}`);
+  assert.ok(!allLogs().includes(encodeURIComponent(EMAIL)), `the email was logged:\n${allLogs()}`);
+  assert.ok(!allLogs().includes(code), `the code was logged:\n${allLogs()}`);
+});

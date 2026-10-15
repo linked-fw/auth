@@ -57,6 +57,12 @@ export type VerifyEmailResult =
   | { verified: true }
   | { error: string; action?: string; retryAfter?: number };
 
+/**
+ * A refused `sendSigninCode` or `signinWithCode`: `action` is `'invalid_code'` for a wrong,
+ * expired or used code and `'rate_limited'` (with `retryAfter`, in seconds) when over a limit.
+ */
+export type SigninCodeError = { error: string; action?: string; retryAfter?: number };
+
 /** The result of `resendEmailVerification`. `{verified: true}`: already verified, nothing sent. */
 export type ResendEmailVerificationResult =
   | { sent: true }

@@ -112,7 +112,7 @@ test('an empty email is refused', () => {
 test('the built backend no longer calls emailToWebID directly', () => {
   const source = fs.readFileSync(new URL('backend.js', libDir), 'utf8');
   assert.doesNotMatch(source, /emailToWebID/);
-  assert.equal(source.match(/Auth\.webIdFor\(/g)?.length, 5);
+  assert.equal(source.match(/Auth\.webIdFor\(/g)?.length, 7);
 });
 
 describe('backend.ts calls Auth.webIdFor', () => {
@@ -160,6 +160,16 @@ describe('backend.ts calls Auth.webIdFor', () => {
 
   test('signinWithPassword derives the WebID with Auth.webIdFor', async () => {
     await provider.signinWithPassword(EMAIL, 'not-the-password');
+    assert.deepEqual(derived, [EMAIL]);
+  });
+
+  test('sendSigninCode derives the WebID with Auth.webIdFor', async () => {
+    await provider.sendSigninCode(EMAIL);
+    assert.deepEqual(derived, [EMAIL]);
+  });
+
+  test('signinWithCode derives the WebID with Auth.webIdFor', async () => {
+    await provider.signinWithCode(EMAIL, '123456');
     assert.deepEqual(derived, [EMAIL]);
   });
 });
