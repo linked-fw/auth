@@ -118,6 +118,10 @@ Tasks
 Validation: `npx linked build && npm test`; `npm run test:integration` when the Fuseki variables
 are set; readme examples match the exported names (grep).
 
+**Done.** Readme section, RPC and rate-limit rows, plan 001 contract 4 note, changeset; a native
+case added to `test/integration/oidc.fuseki.test.mjs`. `npm test`: 506/506;
+`npm run test:integration`: 41/41.
+
 ## Dependencies and parallel work
 
 Phase 2 needs phase 1's RPC methods; phase 3 documents both. Sequential, one commit per phase.

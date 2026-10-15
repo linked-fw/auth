@@ -137,6 +137,13 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
   a shared artifact; C1 is the first test across the two real processes.
+- **Native apps (A4):** the same exchange and checks, with the redirect URI an app-claimed link
+  from the Client ID Document's extra `redirect_uris` (`Auth.signinClient.redirectUris`; Universal
+  Link, App Link or custom scheme). RPCs `startNativeOidcSignin({input, redirectUri, prompt?,
+  providerHint?})` → `{url, state, pending}` and `completeNativeOidcSignin({callbackUrl, pending})`
+  → tokens in the body plus `outcome`; `pending` is the pending sign-in sealed by the server and
+  held on the device. An issuer sees only a different `redirect_uri`, so W3 needs nothing new beyond
+  accepting every URI the document lists.
 
 ### 5. Emailed sign-in code (A5 → webid.email W4)
 

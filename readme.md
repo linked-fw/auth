@@ -31,7 +31,7 @@ The client refreshes ~60 s before the access token's `exp`, again when the tab b
 
 ### Native apps
 
-Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/token`) before rendering `ProvideAuth`. The client then sends `x-linked-auth-transport: body`, the server returns the refresh token in the response body, and both tokens are stored through your functions (`expires` in seconds). Other non-browser clients (scripts, tests) can send that header too.
+Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/token`) before rendering `ProvideAuth`. The client then sends `x-linked-auth-transport: body`, the server returns the refresh token in the response body, and both tokens are stored through your functions (`expires` in seconds). Other non-browser clients (scripts, tests) can send that header too. For WebID sign-in in a native app, see *Native apps (Capacitor)* under *Sign in through a Solid-OIDC issuer*.
 
 ## Upgrading to 3.4
 
@@ -719,6 +719,160 @@ The exchange itself is `createOidcRelyingParty({clientId, redirectUri, …})` fr
 `@_linked/auth/utils/oidcSignin`, with `begin` and `complete`. It is free of Express and the
 store, and its results are returned, never thrown.
 
+#### Native apps (Capacitor)
+
+A native build signs in the same way, following RFC 8252: the issuer opens in the **system
+browser**, never a WebView (`ASWebAuthenticationSession` on iOS, Custom Tabs on Android), and comes
+back through a link the app claims. The system browser shares no cookie with the app, so the
+server keeps nothing between the two steps: the pending sign-in (PKCE verifier, nonce, DPoP key,
+hinted email, issuer, redirect URI) is sealed by the server (AES-256-GCM, a key derived from
+`JWT_SECRET`) and held on the device, in the token storage the app registered.
+
+```ts
+import { setOidcSigninBrowser } from '@_linked/auth/utils/nativeOidcSignin';
+import { setAuthTokenStorageMethods } from '@_linked/auth/utils/token';
+
+setAuthTokenStorageMethods(get, set, remove); // as for every native app (see Native apps above)
+setOidcSigninBrowser(openSystemBrowser); // see the two recipes below
+
+// in a component
+const auth = useAuth();
+const answer = await auth.startNativeOidcSignin({
+  input: 'ada@example.com', // an email or a WebID
+  redirectUri: 'https://example.com/auth/oidc/native', // one of Auth.signinClient.redirectUris
+  // prompt: 'none', providerHint: 'google'
+});
+// signed in: answer.auth, answer.outcome; or {waiting: true, state}; or {error, action}
+```
+
+1. `startNativeOidcSignin` calls the server's `startNativeOidcSignin` RPC, which finds the issuer and
+   answers `{url, state, pending}` (`pending` is the sealed record). The client keeps
+   `{state, pending}` under the storage key `oidcPending` for 10 minutes; a new start replaces it.
+2. It opens `url` with the function given to `setOidcSigninBrowser(open)`. `open(url, {redirectUri})`
+   resolves to the URL the issuer returned to, or to nothing when that link reaches the app through
+   its URL listener instead; it rejects when the user cancels (`browser_failed`, and the record is
+   removed).
+3. `completeOidcSignin(callbackUrl)` (also on `useAuth`) reads `state` from the URL. A URL whose
+   `state` is not the pending one is refused on the device (`invalid_state`) without a call, and
+   the pending sign-in stays. Otherwise the record is removed (it is used once) and the server's
+   `completeNativeOidcSignin` RPC runs the callback's steps 2–6 above. It answers with the session's
+   tokens in the body, which are stored with the app's token storage, and with `outcome`.
+   Failures are `{error, action, outcome}`, `action` being the callback's error codes.
+   `onEmailMismatch` applies; `onResult` is not called, since nothing is redirected.
+
+The server opens the record only when it is intact and younger than 10 minutes, when the callback
+URL is the record's redirect URI (scheme, host and path) with its `state`, and while that redirect
+URI is still configured. Start errors add `invalid_redirect_uri` to the web start's list: the
+`redirectUri` must be one of `Auth.signinClient.redirectUris`, written as a URL parser writes it
+(`https://example.com/auth/oidc/native`, not `https://Example.com/...`), with no query or fragment.
+The web callback `{SITE_ROOT}/auth/oidc/callback` is never a native redirect URI.
+
+**The system browser.** auth does not pin a plugin; the app passes `open`:
+
+- **A plugin that resolves to the callback URL** (an `ASWebAuthenticationSession` wrapper on iOS):
+  the sign-in completes inside `startNativeOidcSignin`. For a Universal Link, iOS 17.4 and later
+  match an `https:` callback (`ASWebAuthenticationSession.Callback.https(host:path:)`, which needs
+  the `webcredentials:` associated domain below); earlier versions match only a custom scheme.
+
+  ```ts
+  setOidcSigninBrowser((url, { redirectUri }) => AuthSession.start({ url, callback: redirectUri })); // your plugin
+  ```
+
+- **A browser tab whose link arrives through the app** (Custom Tabs on Android, with
+  `@capacitor/browser` and `@capacitor/app`): `open` resolves to nothing and the app's
+  `appUrlOpen` listener completes the sign-in.
+
+  ```ts
+  import { Browser } from '@capacitor/browser';
+  import { App } from '@capacitor/app';
+
+  setOidcSigninBrowser(async (url) => {
+    await Browser.open({ url });
+  });
+  // where useAuth is available, once
+  App.addListener('appUrlOpen', async ({ url }) => {
+    if (!url.startsWith('https://example.com/auth/oidc/native')) return;
+    await Browser.close().catch(() => {});
+    const answer = await auth.completeOidcSignin(url);
+  });
+  ```
+
+**App-claimed links.** List every link the app returns through in the Client ID Document, next to
+the web callback:
+
+```ts
+Auth.signinClient = {
+  clientName: 'Example',
+  redirectUris: [
+    'https://example.com/auth/oidc/native', // Universal Link (iOS) and App Link (Android)
+    'com.example.app:/oidc/callback', // optional custom scheme (RFC 8252 §7.1), reverse domain
+  ],
+};
+```
+
+Prefer the `https:` link: only the domain's owner can claim it, while another app can register the
+same custom scheme (PKCE and the device-held DPoP key keep an intercepted code useless, but the
+sign-in then fails). Use a path of its own, not `/auth/oidc/callback`. When the app is not installed
+the link opens in the browser, so serve a page there that says to open the app.
+
+The domain proves the claim with two files at `https://<domain>/.well-known/`, served with
+`Content-Type: application/json`, over `https:`, without redirects. auth does not serve them; the
+app does (the token check already skips `/.well-known/`).
+
+`apple-app-site-association` (no file extension):
+
+```json
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["<TEAM_ID>.<BUNDLE_ID>"],
+        "components": [{ "/": "/auth/oidc/native", "comment": "WebID sign-in" }]
+      }
+    ]
+  },
+  "webcredentials": { "apps": ["<TEAM_ID>.<BUNDLE_ID>"] }
+}
+```
+
+The iOS app has the Associated Domains capability with `applinks:<domain>` and
+`webcredentials:<domain>` (entitlement `com.apple.developer.associated-domains`). A custom scheme
+goes in `Info.plist` under `CFBundleURLTypes`.
+
+`assetlinks.json`:
+
+```json
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "<PACKAGE_NAME>",
+      "sha256_cert_fingerprints": ["<SIGNING_CERT_SHA256>"]
+    }
+  }
+]
+```
+
+The Android app's `AndroidManifest.xml` has, on its main activity, an intent filter with
+`android:autoVerify="true"`, the action `android.intent.action.VIEW`, the categories `DEFAULT` and
+`BROWSABLE`, and `<data android:scheme="https" android:host="<domain>" android:path="/auth/oidc/native" />`
+(a custom scheme: a second filter with `android:scheme="com.example.app"`).
+
+What the app owner supplies:
+
+| Value | Where it comes from | Where it goes |
+|---|---|---|
+| Hosting domain | the `https:` domain the app's link is on, usually the app's `SITE_ROOT` domain | the link in `redirectUris`; `applinks:` and `webcredentials:` entries; the Android intent filter's `host`; where both files are served |
+| Bundle ID | Xcode target, e.g. `com.example.app` | `appIDs` and `webcredentials.apps` as `<TEAM_ID>.<BUNDLE_ID>` |
+| Team ID | Apple Developer account, Membership (10 characters) | the same prefix |
+| Package name | Android `applicationId`, e.g. `com.example.app` | `package_name` |
+| Signing certificate SHA-256 | Play Console, App integrity, App signing key certificate (also the upload key's, for builds you install yourself; `keytool -list -v -keystore …` for a local key) | `sha256_cert_fingerprints`, colon-separated hex, one entry per key |
+| Custom scheme (optional) | the reverse of a domain the owner controls | `redirectUris`, `CFBundleURLTypes`, the second intent filter |
+
+`@_linked/auth/utils/nativeOidcSignin` holds the client side (`setOidcSigninBrowser`,
+`startNativeOidcSignin`, `completeOidcSignin`, `OIDC_PENDING_STORAGE_KEY`); it imports no React.
+
 ## RPC surface
 
 auth declares which of its provider methods the server may dispatch over HTTP
@@ -731,7 +885,7 @@ methods**, and in `warn` mode nothing of auth's is logged as undeclared.
 
 | Level | Methods | What the server does |
 |---|---|---|
-| `public` | `AuthBackendProvider`: `signinWithPassword`, `createAccount`, `signinOAuth`, `createOAuthNonce`, `signinTemporary`, `signinDev`, `sendResetPasswordLink`, `sendSigninCode`, `signinWithCode`, `startOidcSignin`, `resetPassword`, `verifyEmail`, `validateToken`, `signout` | runs, signed in or not |
+| `public` | `AuthBackendProvider`: `signinWithPassword`, `createAccount`, `signinOAuth`, `createOAuthNonce`, `signinTemporary`, `signinDev`, `sendResetPasswordLink`, `sendSigninCode`, `signinWithCode`, `startOidcSignin`, `startNativeOidcSignin`, `completeNativeOidcSignin`, `resetPassword`, `verifyEmail`, `validateToken`, `signout` | runs, signed in or not |
 | `user` | `AuthBackendProvider`: `linkOAuthIdentity`, `resendEmailVerification`, `getReauthenticationMethods`, `removeAccount`; `AuthCredentialProvider`: `userHasAuthCredential`, `userHasPassword` | 401 without a session, before the method runs |
 | internal | `AuthBackendProvider`: `upgradePasswordHash`, `getPasswordForUser`, `getOrCreateAccount`, `loadAccountForSession`, `loadUserForSession`, `checkSignin`, `validateRequestToken`, `refreshSession`, `getTokenFromRequest`, `getTokenCandidates`, `getRefreshTokenFromRequest`; `AuthCredentialProvider`: `createNewCredential`, `hasAuthCredential` | 501 over HTTP in every mode; backend code can still call them |
 
@@ -811,8 +965,8 @@ does not reveal whether it does.
 | `signinCodeRequest` | `sendSigninCode` (sends an email) | 10 / hour | 3 / hour (by email) |
 | `signinCode` | `signinWithCode` (guessing an eight-digit code) | 10 / minute | 5 / 15 minutes (by email) |
 | `reauthenticate` | `removeAccount` when it checks a password or ID token | 10 / minute | 5 / 15 minutes (signed-in account) |
-| `oidcSignin` | `startOidcSignin` (may fetch WebFinger, a profile and issuer metadata) | 20 / minute | |
-| `oidcCallback` | `GET /auth/oidc/callback` (calls the issuer's token endpoint); a limited callback redirects with `oidc_error=rate_limited` | 20 / minute | |
+| `oidcSignin` | `startOidcSignin`, `startNativeOidcSignin` (may fetch WebFinger, a profile and issuer metadata) | 20 / minute | |
+| `oidcCallback` | `GET /auth/oidc/callback` and `completeNativeOidcSignin` (call the issuer's token endpoint); a limited callback redirects with `oidc_error=rate_limited` | 20 / minute | |
 
 A limited call answers `{error: 'Too many attempts. Please wait a moment and try again.', action:
 'rate_limited', retryAfter}` (seconds) with a `Retry-After` header, in place of its usual result.
