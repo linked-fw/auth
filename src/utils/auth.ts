@@ -20,6 +20,7 @@ import { BackendProvider } from '@_linked/server-utils/utils/BackendProvider.js'
 import { setQueryContext } from '@_linked/core/queries/QueryContext';
 import { personEmailVerified } from '../helpers/emailVerification.js';
 import { emailToWebID } from './webID.js';
+import type { SigninClientConfig } from './clientIdDocument.js';
 
 export class Auth {
   // define the default user and account types
@@ -36,6 +37,14 @@ export class Auth {
    * before requests are served, e.g. `Auth.webIdFor = hmacWebIdFor({secret, issuer})`.
    */
   static webIdFor: (email: string) => string = emailToWebID;
+
+  /**
+   * The app's Client ID Document configuration, for signing in through a Solid-OIDC issuer. When
+   * set, the backend serves the document at `{SITE_ROOT}/.well-known/linked-client.jsonld`; when
+   * not, nothing is served there. Set it once in the backend setup, before
+   * `setupBeforeControllers` runs, e.g. `Auth.signinClient = {clientName: 'Create.Now', theme}`.
+   */
+  static signinClient?: SigninClientConfig;
 
   /**
    * Login method

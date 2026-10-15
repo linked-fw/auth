@@ -42,7 +42,8 @@ import {
   stopSessionCleanup,
 } from './utils/sessions.js';
 import { clearAuthCookies, deliverTokens } from './utils/cookies.js';
-import { assertAuthSecrets } from './utils/secrets.js';
+import { assertAuthSecrets, FatalConfigError } from './utils/secrets.js';
+import { buildClientIdDocument, CLIENT_ID_DOCUMENT_PATH } from './utils/clientIdDocument.js';
 import { refreshTokenExpiryFields } from './utils/token.js';
 import {
   emitAccountWillBeRemovedEvent,
@@ -480,6 +481,29 @@ async function verifyReauthentication(
   return links.some((link) => link.accountId === accountId);
 }
 
+/**
+ * The app's Client ID Document as JSON, when `Auth.signinClient` is set; `undefined` otherwise,
+ * so nothing is served. Built once at startup: invalid theme values are logged and left out, and
+ * a SITE_ROOT or configured URL an issuer would reject stops the server from starting. The path is
+ * under `.well-known`, which the token check skips.
+ */
+function clientIdDocumentBody(): string | undefined {
+  const config = Auth.signinClient;
+  if (!config) return undefined;
+  let built: ReturnType<typeof buildClientIdDocument>;
+  try {
+    built = buildClientIdDocument(config, process.env.SITE_ROOT ?? '');
+  } catch (err) {
+    throw new FatalConfigError((err as Error).message);
+  }
+  for (const { path, value, reason } of built.problems) {
+    console.warn(
+      `[auth] Client ID Document: dropped theme value ${path || '(theme)'} = ${JSON.stringify(value)}: ${reason}`
+    );
+  }
+  return JSON.stringify(built.document);
+}
+
 export default class AuthBackendProvider extends BackendProvider {
   public accountShape: typeof UserAccount = UserAccount;
   public userShape: typeof SchemaPerson = SchemaPerson;
@@ -514,6 +538,15 @@ export default class AuthBackendProvider extends BackendProvider {
     // set the user and account shapes for auth
     Auth.userType = this.userShape;
     Auth.accountType = this.accountShape;
+
+    const clientIdDocument = clientIdDocumentBody();
+    if (clientIdDocument) {
+      this.registerRoute('get', CLIENT_ID_DOCUMENT_PATH, (_req, res) => {
+        res.set('Content-Type', 'application/ld+json');
+        res.set('Cache-Control', 'public, max-age=600');
+        res.send(clientIdDocument);
+      });
+    }
 
     // FOR initial page requests we send the JWT token as a cookie (Stored in the browser)
     // see getToken for how we use the cookie and set this.request.linkedAuth

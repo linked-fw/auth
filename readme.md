@@ -135,7 +135,7 @@ import { PaidAccountTier1 } from 'lincd-dating/lib/shapes/PaidAccountTier1';
 |---|---|---|
 | `JWT_SECRET` | yes (outside development/test) | signs access tokens — `openssl rand -base64 48` |
 | `SESSION_SECRET` | yes (outside development/test) | signs the session cookie — `openssl rand -base64 48` |
-| `SITE_ROOT` | yes | the access token audience |
+| `SITE_ROOT` | yes | the access token audience, and the base URL of the links in emails and of the Client ID Document |
 | `AUTH_ACCESS_TOKEN_TTL` | no | access token lifetime in seconds (default 900; development 3600) |
 | `AUTH_REFRESH_TOKEN_TTL` | no | refresh token lifetime in seconds (default 60 days; development 30) |
 | `AUTH_SESSION_IDLE_TTL` | no | a session not refreshed for this long ends (default 7 days; `0` = off) |
@@ -512,6 +512,58 @@ that resolves to a private address is not caught; run the server with egress rul
 matters. `fetchOidcIssuers(webId, options)` reads a profile's issuers without the cache, and
 `readOidcIssuers(body, contentType, documentUrl, webId)` reads them from a document already
 fetched.
+
+### Client ID Document
+
+An app that signs users in through a Solid-OIDC issuer (webid.email, or a user's own) serves a
+Client ID Document: the issuer fetches it to learn the app's name, its redirect URIs and how to
+style the sign-in page. Set `Auth.signinClient` once in the backend setup, before
+`setupBeforeControllers` runs, and auth serves the document at
+`{SITE_ROOT}/.well-known/linked-client.jsonld`. Without it nothing is served there.
+
+```ts
+import { Auth } from '@_linked/auth/utils/auth';
+
+Auth.signinClient = {
+  clientName: 'Create.Now',
+  logoUri: 'https://create.now/logo.svg',
+  policyUri: 'https://create.now/privacy', // also clientUri (default SITE_ROOT) and tosUri
+  redirectUris: ['com.example.app:/callback'], // optional, e.g. app-claimed links of native builds
+  theme: {
+    layout: 'two-column', // or 'card'
+    colors: { primary: '#1a73e8', accent: '#ff8000', background: 'white', panel: '#0b1020', text: '#222' },
+    font: 'Inter',
+    scheme: 'light', // or 'dark'
+    brand: { name: 'Create.Now', logoUri: 'https://create.now/logo.svg' },
+    panelArt: 'https://create.now/art/bow.svg', // an image or animated SVG, shown as an <img>
+  },
+};
+```
+
+- The `client_id` is the document's own URL; `redirect_uris` starts with
+  `{SITE_ROOT}/auth/oidc/callback`. The document also declares a public client
+  (`token_endpoint_auth_method: none`, the code flow, scope `openid webid email`).
+- `SITE_ROOT` loses one trailing slash and may not have a query or fragment. It and the configured
+  `logoUri`, `clientUri`, `policyUri` and `tosUri` must be `https:`; `http:` is allowed only on
+  `localhost`. Extra `redirectUris` may also use an app's own scheme, but never `javascript:`,
+  `data:`, `file:`, `blob:` or `vbscript:`. Anything else stops the server at startup.
+- The theme sits under the key `https://linked.cm/ns/signin#theme`, which other issuers ignore.
+  Every field is optional. Colours are plain CSS colours: hex, `rgb()`/`hsl()` with numbers, or a
+  lowercase named colour; never `url(` or `var(`. Fonts come from `SIGNIN_THEME_FONTS`: `system-ui`,
+  Inter, Roboto, Open Sans, Lato, Montserrat, Source Sans 3, Nunito, Poppins, Work Sans,
+  Merriweather, Lora, Playfair Display. Logo and panel art URLs follow the `https:` rule, may not
+  contain whitespace, quotes, angle brackets, parentheses, backticks or backslashes, and are kept
+  in their normalised form. The issuer enforces the art's size limits.
+- At startup an invalid theme value is logged (`[auth] Client ID Document: dropped theme value …`)
+  and left out of the document; the rest is served.
+- It is served as `application/ld+json` with `Cache-Control: public, max-age=600`.
+
+`@_linked/auth/utils/clientIdDocument` holds the definition of the theme, for issuers that render
+it: the `SigninTheme` type, `SIGNIN_THEME_JSON_SCHEMA`, `SIGNIN_THEME_FONTS`, and
+`validateClientTheme(doc)`, which reads the theme of a fetched document and returns
+`{theme, problems}`: the valid values, and each dropped one with its path and reason. It never
+throws. `buildClientIdDocument(config, siteRoot)` builds the document itself. The module imports
+neither Express nor Node built-ins.
 
 ## RPC surface
 
