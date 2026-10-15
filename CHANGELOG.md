@@ -1,5 +1,15 @@
 # @\_linked/auth
 
+## 3.12.0
+
+### Minor Changes
+
+- [#131](https://github.com/linked-fw/auth/pull/131) [`48cdc30`](https://github.com/linked-fw/auth/commit/48cdc30ff5c6082127b1c298d9ac1e0d5fd3cfe1) Thanks [@flyon](https://github.com/flyon)! - A configurable cookie-name prefix, `AUTH_COOKIE_PREFIX` (or `Auth.cookiePrefix`), applied to every
+  cookie auth sets and reads: `accessToken`, `refreshToken`, `linkedAuthSession` and the session
+  cookie `linked.auth`, on the server and in the client's session hint. Two Linked apps on one host
+  (browsers share cookies across ports) no longer sign each other out. Default empty: existing apps
+  keep today's cookie names.
+
 ## 3.11.0
 
 ### Minor Changes
