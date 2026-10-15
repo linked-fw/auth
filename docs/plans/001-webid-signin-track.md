@@ -471,7 +471,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 ## Progress
 
 - [x] A0 — [#119](https://github.com/linked-fw/auth/pull/119), report [005](../reports/005-webid-derivation-hmac.md)
-- [ ] A1
+- [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), plan doc [003](003-issuer-discovery.md), report [007](../reports/007-issuer-discovery.md)
 - [ ] A2
 - [ ] A3
 - [ ] A5
