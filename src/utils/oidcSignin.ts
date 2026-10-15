@@ -142,8 +142,10 @@ const ANSWERED_ERRORS: Record<string, OidcSigninError> = {
  */
 export const isIssuerIdentifier = (href: unknown, allowLocalhost = false): href is string => {
   if (typeof href !== 'string' || !isFetchableUrl(href, allowLocalhost)) return false;
-  if (href.includes('/.well-known/') || href.includes('?') || href.includes('#')) return false;
-  return true;
+  if (href.includes('?') || href.includes('#')) return false;
+  // as written and as parsed (`\` reads as `/`), in any case
+  const spellings = `${href} ${new URL(href).href}`.toLowerCase();
+  return !spellings.includes('/.well-known/') && !spellings.includes('\\.well-known');
 };
 
 /** Equal as issuer identifiers: exactly, or but for one trailing slash. */

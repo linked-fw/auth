@@ -121,8 +121,15 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
 - ID token claims: `iss`, `aud`, `exp`, `iat`, `nonce`, `webid` (required), `auth_time`
   (required); `email`, `email_verified` (webid.email always; others optional).
 - The relying party checks that `iss` is a `solid:oidcIssuer` of `webid`'s profile, skipping the
-  fetch when `webid` is on the issuer's origin. `login_required` and a refused issuer check are
-  returned to the app, not thrown.
+  fetch only when the issuer is the root of `webid`'s origin (`https://webid.email` for
+  `https://webid.email/id/…`); an issuer with a path is always checked (A2 review: on a shared
+  origin a path may belong to one user). An issuer identifier has no query, fragment or
+  `/.well-known/`, and its metadata must name exactly it. `login_required` and a refused issuer
+  check are returned to the app, not thrown.
+- The token's `email` is trusted (stored on the account, marked verified) only when it **proves
+  the WebID**: `email_verified` is true and `Auth.webIdFor(email) === webid`. Any issuer can claim
+  any email for its own WebIDs, so an app that resolves anything by email (CN's invitations, C2b)
+  uses the email only when the callback's outcome says `emailProven`.
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
   a shared artifact; C1 is the first test across the two real processes.
@@ -478,6 +485,16 @@ sign in from the log line in dev, the readme documents them, and the release car
   the app passes the callback URL to auth, which completes the exchange (PKCE, DPoP key held by the
   app) and stores tokens with auth's existing native token storage.
 - Documentation: the associated-domains / asset-links setup and the Client ID Document entries.
+
+**Pitfalls** (from A2, [report 009](../reports/009-oidc-signin.md))
+- A2 keeps the pending sign-in in the browser's express-session (cookie `linked.auth`) and
+  completes it in the `GET /auth/oidc/callback` route, ending in a redirect with cookies. The
+  system browser and the app share no cookies, so a native build needs its own completion: an RPC
+  that takes the returned callback query and finds the pending record another way (bound to the
+  app's request, not a browser cookie), answering with tokens in the body. Reuse
+  `createOidcRelyingParty().complete(pending, query)` and `signInVerifiedWebId`'s rules (email
+  trusted only when it proves the WebID); the redirect URI is the app-claimed link, which must be
+  in `Auth.signinClient.redirectUris`.
 
 **Verify**
 - A test app (or Peace Game's dev build) on an iOS simulator and an Android emulator signs in

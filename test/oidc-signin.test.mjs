@@ -280,6 +280,8 @@ test('begin: a /.well-known/ URL, a query or a fragment is not an issuer identif
     `${issuer.issuer}/?x=/.well-known/`,
     `${issuer.issuer}/#/.well-known/`,
     `${issuer.issuer}/?tenant=a`,
+    `${issuer.issuer}/x/.WELL-KNOWN/openid-configuration`,
+    `${issuer.issuer}\\x\\.well-known\\openid-configuration`,
   ]) {
     assert.deepEqual(await rp.begin({ issuer: bad }), { ok: false, error: 'invalid_issuer' }, bad);
   }
