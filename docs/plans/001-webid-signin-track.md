@@ -104,6 +104,14 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   (`light` | `dark`), `brand` (`name`, `logoUri`), `panelArt` (URL of an image or animated SVG;
   rendered as `<img>`; limits enforced by webid.email: ~50 KB compressed SVG, ~150 KB image).
 - `Cache-Control` on the document; webid.email caches per it and keeps a short dev-client list.
+- The document declares a **public client**, so A2 and W3 agree on it and the issuer does not fall
+  back to its defaults (`oidc-provider` defaults to `client_secret_basic`):
+  `token_endpoint_auth_method: 'none'`, `grant_types: ['authorization_code']`,
+  `response_types: ['code']`, `scope: 'openid webid email'` (no `refresh_token`: the relying party
+  discards the issuer's tokens). Exported from **`@_linked/auth/utils/clientIdDocument`**:
+  `buildClientIdDocument`, `validateClientTheme`, `SIGNIN_THEME_JSON_SCHEMA` (`$id`
+  `https://linked.cm/ns/signin/theme`; draft 2020-12 allows no fragment in `$id`, so it differs from
+  the extension key), `SIGNIN_THEME_FONTS` and the `SigninTheme` types.
 
 ### 4. The sign-in exchange (A2 ↔ webid.email W3)
 
@@ -482,6 +490,6 @@ sign in from the log line in dev, the readme documents them, and the release car
 - [x] A0 — [#119](https://github.com/linked-fw/auth/pull/119), report [005](../reports/005-webid-derivation-hmac.md)
 - [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), report [007](../reports/007-issuer-discovery.md)
 - [ ] A2
-- [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), plan [004](004-client-id-document.md), report [006](../reports/006-client-id-document.md)
+- [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [ ] A5
 - [ ] A4
