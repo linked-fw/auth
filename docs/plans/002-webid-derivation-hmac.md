@@ -86,10 +86,10 @@ Validation
 ### Phase 2 — docs, changeset, full gate
 
 Tasks
-- [ ] `readme.md`: a "WebID derivation" section (default, `Auth.webIdFor`, the HMAC function and
+- [x] `readme.md`: a "WebID derivation" section (default, `Auth.webIdFor`, the HMAC function and
       factory, the test vector, the subpath import).
-- [ ] `.changeset/`: a `minor` entry.
-- [ ] Full gate: `npx linked build && npm test`; `npm run test:integration` with the
+- [x] `.changeset/`: a `minor` entry.
+- [x] Full gate: `npx linked build && npm test`; `npm run test:integration` with the
       `AUTH_TEST_FUSEKI_*` variables set.
 
 Validation
@@ -111,3 +111,9 @@ and `backend.ts` may conflict with A5).
   must stay browser-safe. `hmacWebId` loads `node:crypto` at call time through
   `process.getBuiltinModule` (Node ≥ 22.3) instead of a static import; the built `webID.js` imports
   only `uuid`. Calling it in a browser throws "runs only on the server". Contract 1 is unchanged.
+
+**Phase 2 — done.**
+- `readme.md`: "WebID derivation" under "How to use on Backend". `.changeset/webid-derivation-hmac.md`: minor.
+- `npx linked build && npm test`: `# tests 321`, `# pass 321`, `# fail 0`.
+- `npm run test:integration` (`AUTH_TEST_FUSEKI_URL=http://localhost:3030`, throwaway `mem`
+  datasets): `# tests 34`, `# pass 34`, `# fail 0`.

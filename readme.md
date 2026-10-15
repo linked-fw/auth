@@ -431,6 +431,36 @@ export default class SPBackendProvider extends BackendProvider {
 }
 ```
 
+### WebID derivation
+
+Sign-in methods that start from an email (password, sign-up, reset links, Google/Apple/Facebook)
+turn it into the user's WebID, the IRI of their Person, with `Auth.webIdFor(email)`. The default is
+`emailToWebID`: a UUID v5 under `https://webid.email/id/`, so an app that sets nothing keeps the
+WebIDs it has.
+
+An app that derives WebIDs another way sets `Auth.webIdFor` once in its backend setup, before
+requests are served. `@_linked/auth/utils/webID` exports the keyed rule webid.email mints WebIDs
+with:
+
+```ts
+import { Auth } from '@_linked/auth/utils/auth';
+import { hmacWebIdFor } from '@_linked/auth/utils/webID';
+
+// {issuer}/id/{h}#me, h = first 128 bits of HMAC-SHA256(secret, trim(lowercase(email))) as hex
+Auth.webIdFor = hmacWebIdFor({ secret: process.env.WEBID_SECRET, issuer: 'https://webid.email' });
+```
+
+- `hmacWebId(email, {secret, issuer})` is the same rule as a plain function. Both throw on an empty
+  secret or issuer and on an issuer ending in `/`; `hmacWebIdFor` checks them when it is called, so
+  a misconfigured app fails at startup. They run on the server only.
+- The secret is permanent: changing it changes every WebID derived with it. Without it nobody can
+  turn an email into a WebID.
+- `HMAC_WEBID_TEST_VECTOR` (`{email, secret, issuer, webId}`, with the local dev secret
+  `local-dev-webid-secret` and issuer `http://localhost:4050`) is the published example every
+  implementation of the rule asserts.
+- Changing the derivation of an app that already has users changes their WebIDs: their existing
+  Person IRIs need migrating.
+
 ## RPC surface
 
 auth declares which of its provider methods the server may dispatch over HTTP
