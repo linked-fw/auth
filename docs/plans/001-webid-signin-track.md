@@ -482,6 +482,6 @@ sign in from the log line in dev, the readme documents them, and the release car
 - [x] A0 — [#119](https://github.com/linked-fw/auth/pull/119), report [005](../reports/005-webid-derivation-hmac.md)
 - [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), report [007](../reports/007-issuer-discovery.md)
 - [ ] A2
-- [ ] A3
+- [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), plan [004](004-client-id-document.md), report [006](../reports/006-client-id-document.md)
 - [ ] A5
 - [ ] A4
