@@ -161,3 +161,19 @@ Dependencies: 1 → 2 → 3 → 4, sequential (each builds on the previous modul
   a real express app with a cookie jar); `npm run test:integration` 40/40
   (`test/integration/oidc.fuseki.test.mjs` 2 new: person, account, verified email, and a session
   that authenticates the next request).
+- **Phase 4 done.** Readme: "Sign in through a Solid-OIDC issuer" (configuration, start, callback
+  steps, error codes, the guarded fetch, startup checks), the RPC table and two rate-limit rows,
+  and Issuer discovery's DNS note now points at `createGuardedFetch`. `.changeset/oidc-signin.md`
+  (minor). Validation: `npm test` 469/469, `npm run test:integration` 40/40.
+
+## Review
+
+Self-review (iteration 1):
+- **Medium — unbounded issuer-metadata cache.** Issuers come from user input (typed WebIDs,
+  WebFinger answers), and the relying party kept every issuer's configuration. Fixed: bounded
+  (`metadataMaxEntries`, default 100, oldest out) with a test.
+- **Low — a configuration that only breaks after startup** (set after `setupBeforeControllers`)
+  threw from the RPC and the route. Fixed: `not_configured` / `failed`, logged.
+- Low, left: two tabs starting at the same instant can lose one pending record (express-session
+  `resave: true`, last write wins); the user starts again. An abandoned sign-in's DPoP key stays in
+  the session row until the next start in that session prunes it.

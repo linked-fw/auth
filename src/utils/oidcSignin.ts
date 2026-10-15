@@ -42,6 +42,8 @@ export interface OidcRelyingPartyOptions {
   timeoutMs?: number;
   /** How long an issuer's discovered metadata is reused. Default 10 minutes. */
   metadataTtlMs?: number;
+  /** Most issuers whose metadata is kept; the oldest goes first. Default 100. */
+  metadataMaxEntries?: number;
   /** Replaces the guarded fetch (tests). Every request to the issuer and the profile uses it. */
   fetch?: typeof fetch;
   /** Clock in ms, for the metadata cache and the pending sign-in's age. Default `Date.now`. */
@@ -179,6 +181,7 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
   const allowLocalhost = options.allowLocalhost ?? false;
   const timeoutMs = options.timeoutMs ?? 5000;
   const metadataTtlMs = options.metadataTtlMs ?? 10 * 60 * 1000;
+  const metadataMaxEntries = Math.max(1, options.metadataMaxEntries ?? 100);
   const now = options.now ?? Date.now;
   const fetchImpl = options.fetch ?? createGuardedFetch({ allowLocalhost });
   const configurations = new Map<string, { at: number; config: Promise<client.Configuration> }>();
@@ -204,6 +207,11 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
         client.enableNonRepudiationChecks(discovered);
         return discovered;
       });
+    // issuers come from user input: keep a bounded number, oldest first out
+    configurations.delete(issuer);
+    while (configurations.size >= metadataMaxEntries) {
+      configurations.delete(configurations.keys().next().value as string);
+    }
     configurations.set(issuer, { at: now(), config });
     // a failed discovery is not kept: the next sign-in asks again
     config.catch(() => {

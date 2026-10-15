@@ -80,6 +80,7 @@ export async function startMockIssuer() {
     authorizeRequests: [],
     tokenRequests: [],
     profileRequests: 0,
+    discoveryRequests: 0,
     profiles: new Map(),
     authorizeError: undefined,
     claims: (defaults) => defaults,
@@ -92,6 +93,7 @@ export async function startMockIssuer() {
       mock.authorizeRequests = [];
       mock.tokenRequests = [];
       mock.profileRequests = 0;
+      mock.discoveryRequests = 0;
       mock.profiles = new Map();
       mock.authorizeError = undefined;
       mock.claims = (defaults) => defaults;
@@ -111,6 +113,7 @@ export async function startMockIssuer() {
     };
 
     if (url.pathname === '/.well-known/openid-configuration') {
+      mock.discoveryRequests++;
       return json(200, {
         issuer: mock.issuer,
         authorization_endpoint: `${mock.issuer}/authorize`,

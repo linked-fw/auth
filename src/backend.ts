@@ -834,7 +834,13 @@ async function handleOidcCallback(provider: AuthBackendProvider, req: any, res: 
   const returnTo = pending.returnTo;
 
   const query = new URL(req.originalUrl ?? req.url ?? '', 'http://callback.invalid').search;
-  const runtime = oidcRuntimeFor(config);
+  let runtime: OidcRuntime;
+  try {
+    runtime = oidcRuntimeFor(config);
+  } catch (error) {
+    console.error(`[auth] ${(error as Error).message}`);
+    return fail('failed', { returnTo });
+  }
   const result = await runtime.relyingParty.complete(pending, query);
   if (result.ok === false) return fail(result.error, { returnTo });
   const identity = result.identity;
@@ -1785,7 +1791,13 @@ export default class AuthBackendProvider extends BackendProvider {
     const session = (this.request as any)?.session;
     if (!session) return { error: 'Sign-in needs a browser session', action: 'no_session' };
 
-    const runtime = oidcRuntimeFor(config);
+    let runtime: OidcRuntime;
+    try {
+      runtime = oidcRuntimeFor(config);
+    } catch (error) {
+      console.error(`[auth] ${(error as Error).message}`);
+      return { error: 'WebID sign-in is not available', action: 'not_configured' };
+    }
     const found = await runtime.discovery.discover(input);
     if (found.ok === false) {
       if (found.reason === 'invalid-input') {

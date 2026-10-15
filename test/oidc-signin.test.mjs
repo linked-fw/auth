@@ -245,3 +245,30 @@ test('sameIssuer ignores one trailing slash only', () => {
   assert.equal(sameIssuer('https://i.test', 'https://i.test/x'), false);
   assert.equal(sameIssuer('https://i.test', 'http://i.test'), false);
 });
+
+test('issuer metadata is reused for its TTL, and only for a bounded number of issuers', async () => {
+  let clock = 1_000_000;
+  const cached = createOidcRelyingParty({
+    clientId: CLIENT_ID,
+    redirectUri: REDIRECT_URI,
+    allowLocalhost: true,
+    metadataTtlMs: 60_000,
+    metadataMaxEntries: 1,
+    now: () => clock,
+  });
+  await cached.begin({ issuer: issuer.issuer });
+  await cached.begin({ issuer: issuer.issuer });
+  assert.equal(issuer.discoveryRequests, 1);
+  clock += 60_001;
+  await cached.begin({ issuer: issuer.issuer });
+  assert.equal(issuer.discoveryRequests, 2, 'expired metadata is fetched again');
+
+  const second = await startMockIssuer();
+  try {
+    assert.equal((await cached.begin({ issuer: second.issuer })).ok, true);
+    await cached.begin({ issuer: issuer.issuer });
+    assert.equal(issuer.discoveryRequests, 3, 'the first issuer was evicted by the second');
+  } finally {
+    second.close();
+  }
+});
