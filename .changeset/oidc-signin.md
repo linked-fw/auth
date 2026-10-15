@@ -1,5 +1,0 @@
----
-'@_linked/auth': minor
----
-
-Sign in through a Solid-OIDC issuer (opt-in with `Auth.oidcSignin`). `startOidcSignin({input})` finds the issuer for an email or WebID and returns its authorization URL (code flow with PKCE, a DPoP key bound with `dpop_jkt`, `login_hint`, optional `prompt=none` and `provider_hint`); the pending sign-in stays in the browser's server-side session. The callback at `/auth/oidc/callback` exchanges the code with a DPoP proof, checks the ID token's signature against the issuer's JWKS and its `iss`, `aud`, `exp` and `nonce`, requires `webid` and `auth_time`, checks that the WebID's profile names the issuer, and starts a session for the Person at the WebID. A hinted email that differs from the token's goes to `onEmailMismatch`; `onResult` chooses where the browser goes, and errors such as `login_required` are reported, not thrown. New `@_linked/auth/utils/guardedFetch`: a fetch that resolves each host and refuses private addresses before connecting (closes DNS rebinding for issuer discovery when passed as its `fetch`). New dependencies: `openid-client`, `undici`. Without `Auth.oidcSignin` nothing changes.
