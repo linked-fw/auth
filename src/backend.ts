@@ -734,17 +734,30 @@ async function hasAccountForEmail(provider: AuthBackendProvider, email: string):
   }
 }
 
+/** Whether a person has a password while its email was never verified (see `dropUnprovenAccess`). */
+async function hasUnprovenPassword(personId: string): Promise<boolean> {
+  if (await personEmailVerified(personId)) return false;
+  const credentials = await AuthCredential.select((cred) => [cred.passwordHash]).where((cred) =>
+    cred.credentialOf.equals({ id: personId })
+  );
+  return (credentials || []).some((credential) => Boolean(credential.passwordHash));
+}
+
 /**
  * The last step of a Solid-OIDC sign-in: the person whose IRI is the verified WebID, its account,
- * and a session, as the other methods end. A new WebID gets a person and an account (with the
- * token's email). The email counts as verified only when the issuer says so and it is the email
- * the WebID derives from (`Auth.webIdFor`), as for OAuth; the first such proof ends access nobody
- * proved, as a code sign-in does (see `dropUnprovenAccess`). The issuer's tokens are not kept.
+ * and a session, as the other methods end. The issuer's tokens are not kept.
+ *
+ * The token's email is trusted only when it proves the WebID: the issuer verified it and it is the
+ * email the WebID derives from (`Auth.webIdFor`), as for OAuth. Any issuer can claim any email for
+ * its own WebIDs, and the email is how the other methods find an account, so an email that does
+ * not prove the WebID is neither stored on the account nor marked verified. A sign-in that proves
+ * the person (always the WebID, and the email when it does) ends access nobody proved, as a code
+ * sign-in does: unverified passwords and their sessions (see `dropUnprovenAccess`).
  */
 async function signInVerifiedWebId(
   provider: AuthBackendProvider,
   identity: VerifiedOidcIdentity
-): Promise<{ isNewAccount: boolean }> {
+): Promise<{ isNewAccount: boolean; emailProven: boolean }> {
   const webId = identity.webId;
   const email = identity.email ? normalizeSigninEmail(identity.email) : undefined;
   let emailProvesWebId = false;
@@ -761,10 +774,13 @@ async function signInVerifiedWebId(
     if (emailProvesWebId) {
       await dropUnprovenAccess(provider, webId);
       await markEmailVerified(webId, email);
+    } else if (await hasUnprovenPassword(webId)) {
+      // checked first, so later sign-ins without an email proof do not end each other's sessions
+      await dropUnprovenAccess(provider, webId);
     }
     const account = await provider.getOrCreateAccount({ id: webId });
     await Auth.onSigninSuccessful(provider, { id: webId } as UserData, account as UserAccountData);
-    return { isNewAccount: false };
+    return { isNewAccount: false, emailProven: emailProvesWebId };
   }
 
   await Auth.login(
@@ -779,7 +795,7 @@ async function signInVerifiedWebId(
         });
       if (emailProvesWebId) await markEmailVerified(user.id, email);
       const account = await provider.accountShape
-        .create({ accountOf: user, ...(email ? { email } : {}) })
+        .create({ accountOf: user, ...(emailProvesWebId ? { email } : {}) })
         .catch((err) => {
           console.error(`Error creating account for user ${user.id}:`, err);
           throw new Error(`Could not create account for user ${user.id}`);
@@ -789,7 +805,7 @@ async function signInVerifiedWebId(
     },
     'oidc'
   );
-  return { isNewAccount: true };
+  return { isNewAccount: true, emailProven: emailProvesWebId };
 }
 
 /**
@@ -867,8 +883,9 @@ async function handleOidcCallback(provider: AuthBackendProvider, req: any, res: 
   }
 
   let isNewAccount: boolean;
+  let emailProven: boolean;
   try {
-    ({ isNewAccount } = await signInVerifiedWebId(provider, identity));
+    ({ isNewAccount, emailProven } = await signInVerifiedWebId(provider, identity));
   } catch (error) {
     console.error('[auth] OIDC sign-in: could not create the session', error);
     return fail('failed', { returnTo, mismatch });
@@ -878,6 +895,7 @@ async function handleOidcCallback(provider: AuthBackendProvider, req: any, res: 
     webId: identity.webId,
     issuer: identity.issuer,
     ...(returned ? { email: returned } : {}),
+    emailProven,
     isNewAccount,
     ...(returnTo ? { returnTo } : {}),
     ...(mismatch ? { mismatch } : {}),

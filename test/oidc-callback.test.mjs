@@ -188,6 +188,7 @@ test('an email signs in through the default issuer: person, account, session, re
     webId,
     issuer: issuer.issuer,
     email: ADA,
+    emailProven: true,
     isNewAccount: true,
     returnTo: '/projects?tab=1',
   });
@@ -219,12 +220,44 @@ test('a first proven sign-in ends the unproven password of a pre-registered pers
   assert.ok(credential.emailVerifiedAt);
 });
 
-test('an email the issuer does not verify is stored but not marked verified', async () => {
+test('an email the issuer does not verify is neither stored nor marked verified', async () => {
   issuer.emailVerified = false;
   const { base } = await startApp();
   await signIn(browser(base));
-  assert.equal(accounts.created[0].email, ADA);
+  assert.equal(accounts.created.length, 1);
+  assert.equal(accounts.created[0].email, undefined);
   assert.equal(credentials.rows.size, 0);
+  assert.equal(outcomes[0].email, ADA);
+  assert.equal(outcomes[0].emailProven, false);
+});
+
+test("another issuer's verified email for its own WebID is not stored: it proves nothing here", async () => {
+  // a WebID whose profile names this issuer, with someone else's email claimed as verified
+  const webId = issuer.addProfile('mallory', [issuer.issuer]);
+  issuer.claims = (c) => ({ ...c, webid: webId, email: 'victim@example.test', email_verified: true });
+  const { base } = await startApp();
+  await signIn(browser(base), { input: webId });
+  assert.equal(accounts.created[0].email, undefined);
+  assert.equal(credentials.rows.size, 0);
+  assert.equal(outcomes[0].emailProven, false);
+});
+
+test('a sign-in without an email proof still ends an unproven password, once', async () => {
+  const webId = issuer.webIdFor(ADA);
+  people.rows.push({ id: webId, givenName: 'Mallory' });
+  accounts.rows.push({ id: 'https://app.test/account/ada', email: ADA, accountOf: { id: webId } });
+  credentials.insert({ credentialOf: { id: webId }, email: ADA, passwordHash: 'attacker' });
+  issuer.claims = (c) => ({ ...c, email: undefined, email_verified: undefined });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  const [credential] = [...credentials.rows.values()];
+  assert.equal(credential.passwordHash, undefined, 'the unverified password is removed');
+  assert.equal(credential.emailVerifiedAt, undefined);
+  const live = () => [...sessionStore.records.values()].filter((r) => !r.revokedAt).length;
+  assert.equal(live(), 1);
+  // a second sign-in (another device) does not end the first one's session
+  await signIn(browser(base));
+  assert.equal(live(), 2);
 });
 
 test('a typed WebID: the issuer from its profile, no login_hint, the issuer check against it', async () => {

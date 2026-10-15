@@ -645,6 +645,9 @@ Auth.oidcSignin = {
 - `input` is an email or a WebID. A WebID's profile names its issuer. For an email, its domain's
   WebFinger answer does, else the default issuer gets the email as `login_hint` (see Issuer
   discovery).
+- An issuer must be an `https:` URL with no query, no fragment and no `/.well-known/` (a
+  profile or WebFinger answer naming anything else gets `invalid_issuer`), and its metadata must
+  name exactly that issuer.
 - `prompt: 'none'` asks for a silent sign-in. `providerHint` (letters, digits, `-`, `_`) is sent as
   `provider_hint`, e.g. `google`. `returnTo` is a path on this site (`/…`; anything else is
   ignored).
@@ -668,21 +671,26 @@ Auth.oidcSignin = {
 1. The pending sign-in is taken from the browser's session by `state`, once. A callback opened in
    another browser, replayed, or older than 10 minutes ends in `invalid_state`.
 2. The code is exchanged with a DPoP proof. The ID token's signature is checked against the
-   issuer's JWKS, and its `iss`, `aud`, `exp`, `iat` and `nonce` are checked.
+   issuer's JWKS, and its `iss`, `aud`, `exp`, `iat` and `nonce` are checked; `iss` must be the
+   issuer the user was sent to.
 3. `webid` and `auth_time` are required, and so is `email` with `requireEmail`.
-4. The issuer check: `iss` must be a `solid:oidcIssuer` in the `webid`'s profile. The profile is
-   not fetched when the WebID is on the issuer's origin, and one trailing slash is ignored.
+4. The issuer check: `iss` must be a `solid:oidcIssuer` in the `webid`'s profile (one trailing
+   slash is ignored). The profile is not fetched when the issuer is the root of the WebID's origin
+   (`https://webid.email` for `https://webid.email/id/…`); an issuer with a path is always checked.
 5. When the user typed one email and the token carries another, `onEmailMismatch` decides:
    `'signin'` (the default: the returned email wins) or `'refuse'`. Its `hasAccount(email)` looks
    accounts up inside the callback; it is never callable.
-6. The person at the WebID and its account are found or created, with the token's email on a new
-   account, and a session starts as for the other methods (cookies). The email counts as verified
-   only when the issuer verified it and it derives this WebID (`Auth.webIdFor`); that first proof
-   removes unverified passwords and sessions, as a code sign-in does.
+6. The person at the WebID and its account are found or created, and a session starts as for the
+   other methods (cookies). The token's email is trusted only when it proves the WebID: the issuer
+   verified it and it is the email this WebID derives from (`Auth.webIdFor`). Only then is it
+   stored on a new account and marked verified, since any issuer can claim any email for its own
+   WebIDs. A sign-in to a person with a password but no verified email removes that password and
+   its sessions, as a code sign-in does.
 7. The browser is redirected to `onResult(outcome)`'s answer. The default is the start's
    `returnTo` (or `/`), or `/signin?oidc_error=<error>` on failure. No email goes into the URL.
-   `outcome` is `{ok: true, webId, issuer, email?, isNewAccount, returnTo?, mismatch?}` or
-   `{ok: false, error, returnTo?, mismatch?}`, where `mismatch` is `{hinted, returned}`.
+   `outcome` is `{ok: true, webId, issuer, email?, emailProven, isNewAccount, returnTo?, mismatch?}`
+   or `{ok: false, error, returnTo?, mismatch?}`, where `mismatch` is `{hinted, returned}` and
+   `email` is what the issuer claims (trust it only with `emailProven`).
 
 The callback's error codes:
 

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { startMockIssuer } from './mockIssuer.mjs';
 
 const libDir = new URL('../lib/esm/', import.meta.url);
-const { createOidcRelyingParty, sameIssuer, jwkThumbprint, OIDC_SIGNIN_SCOPE } = await import(
+const { createOidcRelyingParty, sameIssuer, jwkThumbprint, isIssuerIdentifier, OIDC_SIGNIN_SCOPE } = await import(
   new URL('utils/oidcSignin.js', libDir)
 );
 
@@ -271,4 +271,32 @@ test('issuer metadata is reused for its TTL, and only for a bounded number of is
   } finally {
     second.close();
   }
+});
+
+test('begin: a /.well-known/ URL, a query or a fragment is not an issuer identifier', async () => {
+  for (const bad of [
+    `${issuer.issuer}/.well-known/openid-configuration`,
+    `${issuer.issuer}/x/.well-known/openid-configuration`,
+    `${issuer.issuer}/?x=/.well-known/`,
+    `${issuer.issuer}/#/.well-known/`,
+    `${issuer.issuer}/?tenant=a`,
+  ]) {
+    assert.deepEqual(await rp.begin({ issuer: bad }), { ok: false, error: 'invalid_issuer' }, bad);
+  }
+  assert.equal(issuer.discoveryRequests, 0);
+  assert.equal(isIssuerIdentifier(issuer.issuer, true), true);
+  assert.equal(isIssuerIdentifier(`${issuer.issuer}/tenant`, true), true);
+});
+
+test('metadata that names another issuer is refused', async () => {
+  issuer.metadataIssuer = 'https://webid.email';
+  assert.deepEqual(await rp.begin({ issuer: issuer.issuer }), { ok: false, error: 'issuer_unreachable' });
+});
+
+test('an issuer with a path is checked against the profile even for a WebID on its origin', async () => {
+  issuer.issuerPath = '/tenant';
+  // a WebID elsewhere on the issuer's origin: the issuer server has no profile there
+  issuer.claims = (c) => ({ ...c, webid: `${issuer.origin}/alice/profile#me` });
+  const { result } = await signIn();
+  assert.deepEqual(result, { ok: false, error: 'issuer_refused' });
 });

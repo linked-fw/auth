@@ -51,7 +51,7 @@ function lookup(fn, hostname, options = {}) {
 }
 
 test('isBlockedAddress: private ranges always, loopback without allowLocalhost, public never', () => {
-  for (const address of ['10.1.2.3', '192.168.0.1', '172.16.5.5', '169.254.169.254', '::ffff:10.0.0.1', 'fd00::1', '0.0.0.0']) {
+  for (const address of ['10.1.2.3', '192.168.0.1', '172.16.5.5', '169.254.169.254', '::ffff:10.0.0.1', 'fd00::1', '0.0.0.0', '2001:0:4136:e378::1', '2001:db8::1', '100::1']) {
     assert.equal(isBlockedAddress(address, true), true, address);
   }
   assert.equal(isBlockedAddress('127.0.0.1'), true);

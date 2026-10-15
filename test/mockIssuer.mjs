@@ -75,7 +75,14 @@ export async function startMockIssuer() {
 
   const codes = new Map();
   const mock = {
-    issuer: '',
+    /** The issuer's origin; `issuer` is this plus `issuerPath`. */
+    origin: '',
+    issuerPath: '',
+    get issuer() {
+      return `${mock.origin}${mock.issuerPath}`;
+    },
+    /** When set, the metadata document names this issuer instead of its own. */
+    metadataIssuer: undefined,
     profileOrigin: '',
     authorizeRequests: [],
     tokenRequests: [],
@@ -94,6 +101,8 @@ export async function startMockIssuer() {
       mock.tokenRequests = [];
       mock.profileRequests = 0;
       mock.discoveryRequests = 0;
+      mock.issuerPath = '';
+      mock.metadataIssuer = undefined;
       mock.profiles = new Map();
       mock.authorizeError = undefined;
       mock.claims = (defaults) => defaults;
@@ -106,7 +115,10 @@ export async function startMockIssuer() {
   };
 
   const issuerServer = http.createServer(async (req, res) => {
-    const url = new URL(req.url, mock.issuer);
+    const url = new URL(req.url, mock.origin);
+    if (mock.issuerPath && url.pathname.startsWith(mock.issuerPath)) {
+      url.pathname = url.pathname.slice(mock.issuerPath.length) || '/';
+    }
     const json = (status, body) => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(body));
@@ -115,7 +127,7 @@ export async function startMockIssuer() {
     if (url.pathname === '/.well-known/openid-configuration') {
       mock.discoveryRequests++;
       return json(200, {
-        issuer: mock.issuer,
+        issuer: mock.metadataIssuer ?? mock.issuer,
         authorization_endpoint: `${mock.issuer}/authorize`,
         token_endpoint: `${mock.issuer}/token`,
         jwks_uri: `${mock.issuer}/jwks`,
@@ -212,7 +224,7 @@ export async function startMockIssuer() {
     res.end(body);
   });
 
-  mock.issuer = `http://localhost:${await listen(issuerServer)}`;
+  mock.origin = `http://localhost:${await listen(issuerServer)}`;
   mock.profileOrigin = `http://localhost:${await listen(profileServer)}`;
 
   /** A WebID on the profile host whose profile names `issuers`. */

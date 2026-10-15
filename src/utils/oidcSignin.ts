@@ -8,9 +8,9 @@
  *   provider hint. It returns the URL and the pending sign-in, which the caller keeps server-side.
  * - **complete:** the code is exchanged with a DPoP proof; the ID token's signature is checked
  *   against the issuer's JWKS and its `iss`, `aud`, `exp`, `iat` and `nonce` are checked
- *   (openid-client). `webid` and `auth_time` are required, `email` when configured. Then the
- *   issuer check: `iss` must be a `solid:oidcIssuer` of the WebID's profile, unless the WebID is on
- *   the issuer's origin.
+ *   (openid-client), and `iss` must be the issuer the user was sent to. `webid` and `auth_time` are
+ *   required, `email` when configured. Then the issuer check: `iss` must be a `solid:oidcIssuer`
+ *   of the WebID's profile, unless the issuer is the root of the WebID's origin.
  *
  * Every request goes through a guarded fetch (see `guardedFetch.ts`), since the issuer and the
  * WebID come from user input. Results are returned, never thrown. Free of Express and the store.
@@ -134,6 +134,18 @@ const ANSWERED_ERRORS: Record<string, OidcSigninError> = {
   access_denied: 'access_denied',
 };
 
+/**
+ * Whether `href` can be an issuer identifier this server signs in with: a URL it fetches, with no
+ * query or fragment (OpenID Connect Discovery §2), and not a `/.well-known/` URL. openid-client
+ * reads a URL containing `/.well-known/` as the metadata document itself and then accepts whatever
+ * `issuer` that document names, so such a URL would let any server speak for any issuer.
+ */
+export const isIssuerIdentifier = (href: unknown, allowLocalhost = false): href is string => {
+  if (typeof href !== 'string' || !isFetchableUrl(href, allowLocalhost)) return false;
+  if (href.includes('/.well-known/') || href.includes('?') || href.includes('#')) return false;
+  return true;
+};
+
 /** Equal as issuer identifiers: exactly, or but for one trailing slash. */
 export const sameIssuer = (a: string, b: string): boolean =>
   a === b || a.replace(/\/$/, '') === b.replace(/\/$/, '');
@@ -203,6 +215,11 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
         }
       )
       .then((discovered) => {
+        // openid-client checks this too; checked again here so no special case of the library
+        // can let a metadata document speak for another issuer
+        if (!sameIssuer(discovered.serverMetadata().issuer, issuer)) {
+          throw new Error(`the metadata names another issuer (${discovered.serverMetadata().issuer})`);
+        }
         // the ID token's signature is checked against the issuer's JWKS, not only trusted by TLS
         client.enableNonRepudiationChecks(discovered);
         return discovered;
@@ -221,7 +238,7 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
   };
 
   const begin = async (begin: BeginOidcSigninOptions): Promise<BeginOidcSigninResult> => {
-    if (typeof begin?.issuer !== 'string' || !isFetchableUrl(begin.issuer, allowLocalhost)) {
+    if (!isIssuerIdentifier(begin?.issuer, allowLocalhost)) {
       return { ok: false, error: 'invalid_issuer' };
     }
     let config: client.Configuration;
@@ -261,14 +278,28 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
     if (begin.prompt === 'none') parameters.prompt = 'none';
     if (begin.providerHint) parameters.provider_hint = begin.providerHint;
 
-    return { ok: true, url: client.buildAuthorizationUrl(config, parameters).href, pending };
+    let url: string;
+    try {
+      url = client.buildAuthorizationUrl(config, parameters).href;
+    } catch (error) {
+      // metadata without a usable authorization endpoint
+      console.warn(`[auth] OIDC sign-in: no usable authorization endpoint at ${begin.issuer}: ${describe(error)}`);
+      return { ok: false, error: 'issuer_unreachable' };
+    }
+    return { ok: true, url, pending };
   };
 
-  /** `iss` must be an issuer of the WebID's profile, unless the WebID is on the issuer's origin. */
+  /**
+   * `iss` must be an issuer of the WebID's profile. The profile is not fetched when the issuer is
+   * the root of the WebID's origin (webid.email and its WebIDs): that server controls every
+   * document on the origin anyway. An issuer with a path is always checked, since on a server
+   * hosting many users' documents a path may belong to one of them.
+   */
   const checkIssuer = async (webId: string, issuer: string): Promise<string | null> => {
     if (!isFetchableUrl(webId, allowLocalhost)) return 'the WebID is not a URL this server fetches';
     const issuerOrigin = originOf(issuer);
-    if (issuerOrigin && originOf(webId) === issuerOrigin) return null;
+    const issuerIsOriginRoot = issuerOrigin !== undefined && new URL(issuer).pathname === '/';
+    if (issuerIsOriginRoot && originOf(webId) === issuerOrigin) return null;
     const profile = await fetchOidcIssuers(webId, { allowLocalhost, timeoutMs, fetch: fetchImpl });
     if (profile.ok === false) return `the WebID's profile could not be read (${profile.reason})`;
     if (!profile.issuers.some((listed) => sameIssuer(listed, issuer))) {
@@ -338,6 +369,12 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
     const email = typeof claims.email === 'string' && claims.email ? claims.email : undefined;
     if (options.requireEmail && !email) return { ok: false, error: 'missing_claim', detail: 'email' };
     const issuer = claims.iss as string;
+    // openid-client compared `iss` with the discovered metadata; this ties it to the issuer the
+    // user was sent to as well
+    if (typeof issuer !== 'string' || !sameIssuer(issuer, pending.issuer)) {
+      console.warn(`[auth] OIDC sign-in: the ID token's iss is not ${pending.issuer}`);
+      return { ok: false, error: 'invalid_token' };
+    }
 
     const refused = await checkIssuer(webId, issuer);
     if (refused) {
@@ -395,7 +432,14 @@ export type OidcSigninOutcome =
       ok: true;
       webId: string;
       issuer: string;
+      /** The token's `email`, as the issuer claims it. */
       email?: string;
+      /**
+       * Whether the issuer verified `email` and it is the email this WebID derives from
+       * (`Auth.webIdFor`). Only then is it stored on the account and marked verified; any issuer
+       * can claim any email for its own WebIDs.
+       */
+      emailProven: boolean;
       isNewAccount: boolean;
       /** The path the start asked to return to. */
       returnTo?: string;

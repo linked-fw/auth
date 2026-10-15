@@ -177,3 +177,24 @@ Self-review (iteration 1):
 - Low, left: two tabs starting at the same instant can lose one pending record (express-session
   `resave: true`, last write wins); the user starts again. An abandoned sign-in's DPoP key stays in
   the session row until the next start in that session prunes it.
+
+Independent review (subagent, iteration 1), all fixed with tests:
+- **Critical — an issuer URL containing `/.well-known/` skipped openid-client's issuer check**
+  (it reads such a URL as the metadata document and accepts any `issuer` in it), so a profile
+  naming `https://evil/x/.well-known/openid-configuration` could mint tokens for any WebID.
+  Fixed: `isIssuerIdentifier` (no `/.well-known/`, query or fragment) in `begin`; discovered
+  metadata must name the issuer asked for; the ID token's `iss` must be the pending issuer.
+- **High — the same-origin skip let a path issuer on a shared origin speak for every WebID there.**
+  Fixed: the skip applies only when the issuer is the root of the WebID's origin. *Deviation:*
+  contract 4 says "skipping the fetch when `webid` is on the issuer's origin"; narrowed in
+  plan 001's contract 4 and reported (065 §Contracts 4 needs the same wording).
+- **High — an unproven email claim was stored on the new account**, where the code, reset, OAuth
+  and signup lookups find accounts by email. Fixed: stored only when it proves the WebID
+  (`emailProven` in the outcome). *Deviation:* the scope's "store `email` when given" is narrowed
+  to "when it proves the WebID".
+- **Medium — a sign-in without an email proof left an unverified password in place.** Fixed: the
+  WebID proof ends it too, only when such a password exists (so later sign-ins do not end each
+  other's sessions).
+- Low: `buildAuthorizationUrl` could throw (now `issuer_unreachable`); Teredo, discard and
+  documentation IPv6 ranges added to the block list.
+Validation after the fixes: `npm test` 475/475, `npm run test:integration` 40/40.

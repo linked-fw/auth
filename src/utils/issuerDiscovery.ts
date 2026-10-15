@@ -187,6 +187,10 @@ privateAddresses.addSubnet('fc00::', 7, 'ipv6');
 privateAddresses.addSubnet('fe80::', 10, 'ipv6');
 privateAddresses.addSubnet('fec0::', 10, 'ipv6');
 privateAddresses.addSubnet('ff00::', 8, 'ipv6');
+// Teredo (carries an IPv4 address), discard-only and documentation
+privateAddresses.addSubnet('2001::', 32, 'ipv6');
+privateAddresses.addSubnet('100::', 64, 'ipv6');
+privateAddresses.addSubnet('2001:db8::', 32, 'ipv6');
 
 const ipFamily = (host: string): 'ipv4' | 'ipv6' | null => {
   const version = net.isIP(host);
