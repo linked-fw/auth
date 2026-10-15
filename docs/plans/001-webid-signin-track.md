@@ -144,7 +144,7 @@ with `npx linked build`); `npm run test:integration` against throwaway Fuseki da
 
 ## Progress
 
-- [x] A0
+- [x] A0 — [#117](https://github.com/linked-fw/auth/pull/117)
 - [ ] A1
 - [ ] A2
 - [ ] A3
