@@ -431,6 +431,43 @@ export default class SPBackendProvider extends BackendProvider {
 }
 ```
 
+## WebID derivation
+
+Every sign-in method ends in the same step: verified email → the Person's WebID → `UserAccount` →
+session. auth turns the email into the WebID with `webIdFor(email)` from
+`@_linked/auth/utils/webID`. **Its default is `emailToWebID`** (UUID v5 under a published
+namespace), so an app that configures nothing keeps the WebIDs it has.
+
+An app that mints its own WebIDs sets the derivation once at server startup, before the first
+request:
+
+```ts
+import { setWebIdFor } from '@_linked/auth/utils/webID';
+import { hmacWebId } from '@_linked/auth/utils/hmacWebId';
+
+setWebIdFor((email) =>
+  hmacWebId(email, { secret: process.env.WEBID_SECRET, issuer: 'https://webid.email' })
+);
+```
+
+`hmacWebId(email, {secret, issuer})` gives `{issuer}/id/{h}#me`, where `h` is the first 128 bits
+of `HMAC-SHA256(secret, trim(lowercase(email)))` as 32 hex characters. Only the holder of the
+secret can compute it, so a WebID neither reveals nor confirms an email. It is server-only
+(`node:crypto`); `utils/webID` itself stays safe to import in the browser.
+
+`HMAC_WEBID_TEST_VECTOR` (same module) is the published vector every implementation checks itself
+against, so a local webid.email and an app's dev sign-in give one email one WebID:
+
+| | |
+|---|---|
+| email | `alice@example.com` |
+| secret | `webid-dev-secret` |
+| issuer | `http://localhost:4050` |
+| WebID | `http://localhost:4050/id/9d4e3c342ed7dc86a07831ea7b5dd19e#me` |
+
+Changing the derivation of a running app changes every email's WebID: existing accounts become
+unreachable by email until their data is migrated.
+
 ## RPC surface
 
 auth declares which of its provider methods the server may dispatch over HTTP

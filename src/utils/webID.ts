@@ -80,3 +80,23 @@ export const telephoneToWebID = (phone: string): string => {
   }
   return `${WEBID_PREFIX}/${uuidv5(normalizedPhone, WEBID_PHONE_NAMESPACE)}`;
 };
+
+/** Turns a (verified) email into the IRI of its Person. */
+export type WebIdDerivation = (email: string) => string;
+
+let configuredWebIdFor: WebIdDerivation = emailToWebID;
+
+/**
+ * Sets how auth turns an email into a Person IRI: at sign-in, sign-up, password reset and OAuth
+ * sign-in. Call it once at server startup, before the first request. `null` restores the default,
+ * `emailToWebID`, which every app uses until it sets something else, so existing WebIDs stay.
+ *
+ * e.g. `setWebIdFor((email) => hmacWebId(email, {secret, issuer}))` with `hmacWebId` from
+ * `@_linked/auth/utils/hmacWebId`.
+ */
+export const setWebIdFor = (derivation: WebIdDerivation | null): void => {
+  configuredWebIdFor = derivation ?? emailToWebID;
+};
+
+/** The Person IRI for `email`, by the derivation set with `setWebIdFor` (default `emailToWebID`). */
+export const webIdFor = (email: string): string => configuredWebIdFor(email);

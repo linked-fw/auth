@@ -74,7 +74,7 @@ import { QResult } from '@_linked/core/queries/SelectQuery';
 import type { AuthSession } from './types/auth.js';
 
 import connect_sqlite3 from 'connect-sqlite3';
-import { emailToWebID } from './utils/webID.js';
+import { webIdFor } from './utils/webID.js';
 import { limitRequest } from './utils/rateLimit.js';
 
 var SQLiteStore = connect_sqlite3(session);
@@ -406,7 +406,7 @@ async function markOAuthEmailVerified(identity: VerifiedOAuthIdentity, personId:
   if (!identity.email || !identity.emailVerified) return;
   try {
     const email = identity.email.trim().toLowerCase();
-    if (emailToWebID(email) !== personId) return;
+    if (webIdFor(email) !== personId) return;
     await markEmailVerified(personId, email);
   } catch (error) {
     console.error(`${identity.provider} sign-in: could not mark the email verified`, error);
@@ -673,7 +673,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     let webID: string;
     try {
-      webID = emailToWebID(email);
+      webID = webIdFor(email);
     } catch (error) {
       console.error('Invalid email format during signin');
       return {
@@ -790,7 +790,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     let webIDFromEmail: string;
     try {
-      webIDFromEmail = emailToWebID(email);
+      webIDFromEmail = webIdFor(email);
     } catch (error) {
       console.error('Invalid email format during account creation');
       return {
@@ -1107,7 +1107,7 @@ export default class AuthBackendProvider extends BackendProvider {
     const normalizedEmail = email.toLowerCase();
     let webID: string;
     try {
-      webID = emailToWebID(normalizedEmail);
+      webID = webIdFor(normalizedEmail);
     } catch (error) {
       console.error('Invalid email format during password reset request');
       return {
@@ -1276,7 +1276,7 @@ export default class AuthBackendProvider extends BackendProvider {
     const email = identity.email.trim().toLowerCase();
     let webID: string;
     try {
-      webID = emailToWebID(email);
+      webID = webIdFor(email);
     } catch (error) {
       console.error('Invalid email format during OAuth signin');
       return { error: 'Invalid email format' };

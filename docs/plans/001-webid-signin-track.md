@@ -144,7 +144,7 @@ with `npx linked build`); `npm run test:integration` against throwaway Fuseki da
 
 ## Progress
 
-- [ ] A0
+- [x] A0
 - [ ] A1
 - [ ] A2
 - [ ] A3
