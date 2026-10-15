@@ -62,6 +62,8 @@ const SURFACE = {
       sendSigninCode: 'public',
       signinWithCode: 'public',
       startOidcSignin: 'public',
+      startNativeOidcSignin: 'public',
+      completeNativeOidcSignin: 'public',
       resetPassword: 'public',
       verifyEmail: 'public',
       validateToken: 'public',
