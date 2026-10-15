@@ -23,7 +23,7 @@ decisions 1–7, 9 and 10.
 its Rules apply (worktrees, a changeset per PR, PRs ending in an Outcome section, never "Claude" in
 commits or PRs), and its §Contracts is the cross-repo source of the [Contracts](#contracts) below.
 Each step agent works in its own plan doc (numbers assigned by 065: A0 → `002`, A1 → `003`,
-A3 → `004`, A5 → `005`, A2 → `006`; A4 gets its number when it starts). The issuer side is webid.email
+A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`). The issuer side is webid.email
 ([its plan](https://github.com/Semantu/webid-email/blob/main/docs/plans/001-webid-email-service.md)).
 
 **The steps.** A0 makes the email → WebID derivation configurable and exports the HMAC rule
@@ -137,6 +137,13 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
   a shared artifact; C1 is the first test across the two real processes.
+- **Native apps (A4):** the same exchange and checks, with the redirect URI an app-claimed link
+  from the Client ID Document's extra `redirect_uris` (`Auth.signinClient.redirectUris`; Universal
+  Link, App Link or custom scheme). RPCs `startNativeOidcSignin({input, redirectUri, prompt?,
+  providerHint?})` → `{url, state, pending}` and `completeNativeOidcSignin({callbackUrl, pending})`
+  → tokens in the body plus `outcome`; `pending` is the pending sign-in sealed by the server and
+  held on the device. An issuer sees only a different `redirect_uri`, so W3 needs nothing new beyond
+  accepting every URI the document lists.
 
 ### 5. Emailed sign-in code (A5 → webid.email W4)
 
@@ -481,6 +488,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 ## A4 — Native apps (Capacitor)
 
 **Depends on:** A2. Needed for Peace Game.
+**PR:** [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md).
 
 **Scope** (RFC 8252)
 - In a native build, the start step opens the authorization URL in the system browser
@@ -502,8 +510,11 @@ sign in from the log line in dev, the readme documents them, and the release car
   in `Auth.signinClient.redirectUris`.
 
 **Verify**
-- A test app (or Peace Game's dev build) on an iOS simulator and an Android emulator signs in
-  through the system browser and returns signed in.
+- [x] Against the mock issuer, with synthetic callback URLs (Universal Link and custom scheme): see
+  report [010](../reports/010-native-oidc-signin.md).
+- [ ] A test app (or Peace Game's dev build) on an iOS simulator and an Android emulator signs in
+  through the system browser and returns signed in: **deferred to P1**, backlog
+  [006](../backlog/006-native-oidc-device-run.md).
 
 ---
 
@@ -514,4 +525,4 @@ sign in from the log line in dev, the readme documents them, and the release car
 - [x] A2 — [#127](https://github.com/linked-fw/auth/pull/127), report [009](../reports/009-oidc-signin.md)
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
-- [ ] A4
+- [x] A4 — [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md)

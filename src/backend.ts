@@ -41,8 +41,8 @@ import {
   startSessionCleanup,
   stopSessionCleanup,
 } from './utils/sessions.js';
-import { clearAuthCookies, deliverTokens } from './utils/cookies.js';
-import { assertAuthSecrets, FatalConfigError } from './utils/secrets.js';
+import { clearAuthCookies, deliverTokens, wantsTokensInBody } from './utils/cookies.js';
+import { assertAuthSecrets, FatalConfigError, getJwtSecret } from './utils/secrets.js';
 import {
   buildClientIdDocument,
   CLIENT_ID_DOCUMENT_PATH,
@@ -62,9 +62,12 @@ import type {
   OidcRelyingParty,
   OidcSigninConfig,
   OidcSigninOutcome,
+  PendingOidcSignin,
   VerifiedOidcIdentity,
 } from './utils/oidcSignin.js';
 import { rememberPendingOidc, takePendingOidc } from './helpers/oidcPending.js';
+import { openPendingOidc, sealPendingOidc } from './helpers/oidcSealedPending.js';
+import type { NativeOidcSigninAnswer, NativeOidcStartAnswer } from './types/auth.js';
 import { refreshTokenExpiryFields } from './utils/token.js';
 import {
   emitAccountWillBeRemovedEvent,
@@ -757,7 +760,7 @@ async function hasUnprovenPassword(personId: string): Promise<boolean> {
 async function signInVerifiedWebId(
   provider: AuthBackendProvider,
   identity: VerifiedOidcIdentity
-): Promise<{ isNewAccount: boolean; emailProven: boolean }> {
+): Promise<{ isNewAccount: boolean; emailProven: boolean; authentication: AuthenticationResult }> {
   const webId = identity.webId;
   const email = identity.email ? normalizeSigninEmail(identity.email) : undefined;
   let emailProvesWebId = false;
@@ -779,11 +782,15 @@ async function signInVerifiedWebId(
       await dropUnprovenAccess(provider, webId);
     }
     const account = await provider.getOrCreateAccount({ id: webId });
-    await Auth.onSigninSuccessful(provider, { id: webId } as UserData, account as UserAccountData);
-    return { isNewAccount: false, emailProven: emailProvesWebId };
+    const authentication = await Auth.onSigninSuccessful(
+      provider,
+      { id: webId } as UserData,
+      account as UserAccountData
+    );
+    return { isNewAccount: false, emailProven: emailProvesWebId, authentication };
   }
 
-  await Auth.login(
+  const authentication = await Auth.login(
     provider,
     async () => null,
     async () => {
@@ -805,7 +812,126 @@ async function signInVerifiedWebId(
     },
     'oidc'
   );
-  return { isNewAccount: true, emailProven: emailProvesWebId };
+  return { isNewAccount: true, emailProven: emailProvesWebId, authentication };
+}
+
+/**
+ * Everything after the pending sign-in is found, for the web callback and a native app's
+ * completion alike: the exchange and its checks, the mismatch hook, and the session. The outcome
+ * is returned, never thrown; `authentication` is the session's tokens, on success.
+ */
+async function completeOidcExchange(
+  provider: AuthBackendProvider,
+  config: OidcSigninConfig,
+  pending: PendingOidcSignin,
+  query: string | URLSearchParams,
+  returnTo?: string
+): Promise<{ outcome: OidcSigninOutcome; authentication?: AuthenticationResult }> {
+  const failed = (
+    error: OidcCallbackError,
+    mismatch?: { hinted: string; returned: string }
+  ): { outcome: OidcSigninOutcome } => ({
+    outcome: {
+      ok: false,
+      error,
+      ...(returnTo ? { returnTo } : {}),
+      ...(mismatch ? { mismatch } : {}),
+    },
+  });
+
+  let runtime: OidcRuntime;
+  try {
+    runtime = oidcRuntimeFor(config);
+  } catch (error) {
+    console.error(`[auth] ${(error as Error).message}`);
+    return failed('failed');
+  }
+  const result = await runtime.relyingParty.complete(pending, query);
+  if (result.ok === false) return failed(result.error);
+  const identity = result.identity;
+
+  let mismatch: { hinted: string; returned: string } | undefined;
+  const returned = identity.email ? normalizeSigninEmail(identity.email) : undefined;
+  if (pending.loginHint && returned && returned !== pending.loginHint) {
+    mismatch = { hinted: pending.loginHint, returned };
+    let decision: 'signin' | 'refuse' = 'signin';
+    if (config.onEmailMismatch) {
+      try {
+        decision = await config.onEmailMismatch({
+          ...mismatch,
+          webId: identity.webId,
+          issuer: identity.issuer,
+          hasAccount: (email) => hasAccountForEmail(provider, email),
+        });
+      } catch (error) {
+        console.error('[auth] OIDC sign-in: onEmailMismatch failed', error);
+        decision = 'refuse';
+      }
+    }
+    if (decision !== 'signin') return failed('email_mismatch', mismatch);
+  }
+
+  let signedIn: Awaited<ReturnType<typeof signInVerifiedWebId>>;
+  try {
+    signedIn = await signInVerifiedWebId(provider, identity);
+  } catch (error) {
+    console.error('[auth] OIDC sign-in: could not create the session', error);
+    return failed('failed', mismatch);
+  }
+  return {
+    outcome: {
+      ok: true,
+      webId: identity.webId,
+      issuer: identity.issuer,
+      ...(returned ? { email: returned } : {}),
+      emailProven: signedIn.emailProven,
+      isNewAccount: signedIn.isNewAccount,
+      ...(returnTo ? { returnTo } : {}),
+      ...(mismatch ? { mismatch } : {}),
+    },
+    authentication: signedIn.authentication,
+  };
+}
+
+/**
+ * The app-claimed link `redirectUri` names, when it is one of the Client ID Document's extra
+ * `redirect_uris` (`Auth.signinClient.redirectUris`) and written as a URL parser writes it, without
+ * a query or fragment: the issuer compares it as a string, and the token request repeats it in its
+ * parsed form. `undefined` otherwise.
+ */
+function nativeRedirectUri(redirectUri: unknown): string | undefined {
+  if (typeof redirectUri !== 'string' || !redirectUri) return undefined;
+  if (!(Auth.signinClient?.redirectUris ?? []).includes(redirectUri)) return undefined;
+  try {
+    const url = new URL(redirectUri);
+    if (url.search || url.hash || url.href !== redirectUri) {
+      console.warn(
+        `[auth] OIDC sign-in: the redirect URI ${JSON.stringify(redirectUri)} must be written as ${JSON.stringify(url.origin === 'null' ? url.href : `${url.origin}${url.pathname}`)}, without a query or fragment`
+      );
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return redirectUri;
+}
+
+/**
+ * The answer of the native sign-in methods to a caller that is not a native client: one sends
+ * `x-linked-auth-transport: body` (it registered its token storage), which a cross-site web page
+ * cannot send without the server's CORS consent.
+ */
+const NOT_NATIVE = {
+  error: 'Native sign-in needs a native client (setAuthTokenStorageMethods)',
+  action: 'not_native',
+} as const;
+
+/** Whether `callbackUrl` is `redirectUri` with a query: the same scheme, host and path. */
+function isCallbackFor(callbackUrl: URL, redirectUri: string): boolean {
+  const bare = new URL(callbackUrl.href);
+  bare.search = '';
+  bare.hash = '';
+  return bare.href === new URL(redirectUri).href;
 }
 
 /**
@@ -832,16 +958,7 @@ async function handleOidcCallback(provider: AuthBackendProvider, req: any, res: 
     }
     res.redirect(302, location || defaultOidcResultLocation(outcome));
   };
-  const fail = (
-    error: OidcCallbackError,
-    extra: { returnTo?: string; mismatch?: { hinted: string; returned: string } } = {}
-  ) =>
-    finish({
-      ok: false,
-      error,
-      ...(extra.returnTo ? { returnTo: extra.returnTo } : {}),
-      ...(extra.mismatch ? { mismatch: extra.mismatch } : {}),
-    });
+  const fail = (error: OidcCallbackError) => finish({ ok: false, error });
 
   if (await limitRequest('oidcCallback', req, res)) return fail('rate_limited');
 
@@ -850,56 +967,8 @@ async function handleOidcCallback(provider: AuthBackendProvider, req: any, res: 
   const returnTo = pending.returnTo;
 
   const query = new URL(req.originalUrl ?? req.url ?? '', 'http://callback.invalid').search;
-  let runtime: OidcRuntime;
-  try {
-    runtime = oidcRuntimeFor(config);
-  } catch (error) {
-    console.error(`[auth] ${(error as Error).message}`);
-    return fail('failed', { returnTo });
-  }
-  const result = await runtime.relyingParty.complete(pending, query);
-  if (result.ok === false) return fail(result.error, { returnTo });
-  const identity = result.identity;
-
-  let mismatch: { hinted: string; returned: string } | undefined;
-  const returned = identity.email ? normalizeSigninEmail(identity.email) : undefined;
-  if (pending.loginHint && returned && returned !== pending.loginHint) {
-    mismatch = { hinted: pending.loginHint, returned };
-    let decision: 'signin' | 'refuse' = 'signin';
-    if (config.onEmailMismatch) {
-      try {
-        decision = await config.onEmailMismatch({
-          ...mismatch,
-          webId: identity.webId,
-          issuer: identity.issuer,
-          hasAccount: (email) => hasAccountForEmail(provider, email),
-        });
-      } catch (error) {
-        console.error('[auth] OIDC sign-in: onEmailMismatch failed', error);
-        decision = 'refuse';
-      }
-    }
-    if (decision !== 'signin') return fail('email_mismatch', { returnTo, mismatch });
-  }
-
-  let isNewAccount: boolean;
-  let emailProven: boolean;
-  try {
-    ({ isNewAccount, emailProven } = await signInVerifiedWebId(provider, identity));
-  } catch (error) {
-    console.error('[auth] OIDC sign-in: could not create the session', error);
-    return fail('failed', { returnTo, mismatch });
-  }
-  return finish({
-    ok: true,
-    webId: identity.webId,
-    issuer: identity.issuer,
-    ...(returned ? { email: returned } : {}),
-    emailProven,
-    isNewAccount,
-    ...(returnTo ? { returnTo } : {}),
-    ...(mismatch ? { mismatch } : {}),
-  });
+  const { outcome } = await completeOidcExchange(provider, config, pending, query, returnTo);
+  return finish(outcome);
 }
 
 export default class AuthBackendProvider extends BackendProvider {
@@ -1840,6 +1909,153 @@ export default class AuthBackendProvider extends BackendProvider {
   }
 
   /**
+   * Start a sign-in through the user's Solid-OIDC issuer from a native app (RFC 8252), when the app
+   * set `Auth.oidcSignin`. As `startOidcSignin`, but the issuer returns to `redirectUri`, one of the
+   * app-claimed links in the Client ID Document (`Auth.signinClient.redirectUris`), and the pending
+   * sign-in is not kept here: the system browser the app opens shares no cookie with it. The answer
+   * carries it sealed (`pending`), for the app to hold until it calls `completeNativeOidcSignin`.
+   *
+   * @param options.input - An email or a WebID
+   * @param options.redirectUri - The app-claimed link (Universal Link, App Link or custom scheme)
+   * @param options.prompt - `'none'` for a silent sign-in
+   * @param options.providerHint - Passed on as `provider_hint`, e.g. `'google'`
+   * @returns `{url, state, pending}`, or `{error, action}` with `action` one of `not_configured`,
+   *   `invalid_input`, `invalid_redirect_uri`, `issuer_not_found`, `invalid_issuer`,
+   *   `issuer_unreachable`, or the rate-limited result
+   */
+  async startNativeOidcSignin(options: {
+    input: string;
+    redirectUri: string;
+    prompt?: 'none';
+    providerHint?: string;
+  }): Promise<NativeOidcStartAnswer> {
+    const limited = await limitRequest('oidcSignin', this.request, this.response);
+    if (limited) return limited;
+
+    const config = Auth.oidcSignin;
+    if (!config) return { error: 'WebID sign-in is not available', action: 'not_configured' };
+    if (!wantsTokensInBody(this.request)) return NOT_NATIVE;
+
+    const input = typeof options?.input === 'string' ? options.input.trim() : '';
+    if (!input || input.length > OIDC_INPUT_MAX_LENGTH) {
+      return { error: 'Enter an email or a WebID', action: 'invalid_input' };
+    }
+    const redirectUri = nativeRedirectUri(options?.redirectUri);
+    if (!redirectUri) {
+      return {
+        error: "This app's sign-in link is not in its Client ID Document",
+        action: 'invalid_redirect_uri',
+      };
+    }
+    const prompt = options?.prompt === 'none' ? 'none' : undefined;
+    const providerHint =
+      typeof options?.providerHint === 'string' && /^[a-z0-9_-]{1,32}$/i.test(options.providerHint)
+        ? options.providerHint
+        : undefined;
+
+    let runtime: OidcRuntime;
+    try {
+      runtime = oidcRuntimeFor(config);
+    } catch (error) {
+      console.error(`[auth] ${(error as Error).message}`);
+      return { error: 'WebID sign-in is not available', action: 'not_configured' };
+    }
+    const found = await runtime.discovery.discover(input);
+    if (found.ok === false) {
+      if (found.reason === 'invalid-input') {
+        return { error: 'Enter an email or a WebID', action: 'invalid_input' };
+      }
+      return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
+    }
+
+    const begun = await runtime.relyingParty.begin({
+      issuer: found.issuer,
+      redirectUri,
+      ...('loginHint' in found ? { loginHint: found.loginHint } : {}),
+      ...(prompt ? { prompt } : {}),
+      ...(providerHint ? { providerHint } : {}),
+    });
+    if (begun.ok === false) {
+      return { error: 'The sign-in service could not be reached', action: begun.error };
+    }
+    return {
+      url: begun.url,
+      state: begun.pending.state,
+      pending: sealPendingOidc({ ...begun.pending, redirectUri }, getJwtSecret()),
+    };
+  }
+
+  /**
+   * Finish a native app's Solid-OIDC sign-in: the app hands in the URL the issuer sent the user back
+   * to (its app-claimed link) and the sealed `pending` record `startNativeOidcSignin` gave it. The
+   * code is exchanged and checked as on the web callback, a mismatch between the hinted and the
+   * returned email goes to `onEmailMismatch`, and a session is created. The tokens come back in the
+   * body (the refresh token too, for a client that asked for body transport), with the `outcome`;
+   * `onResult` is not called, since nothing is redirected.
+   *
+   * @param options.callbackUrl - The full URL the issuer redirected to
+   * @param options.pending - The sealed record from `startNativeOidcSignin`
+   * @returns the authentication response with `outcome`, or `{error, action, outcome?}` with
+   *   `action` one of the callback's errors (`invalid_state`, `login_required`, `issuer_refused`,
+   *   `email_mismatch`, …) or `not_configured`
+   */
+  async completeNativeOidcSignin(options: {
+    callbackUrl: string;
+    pending: string;
+  }): Promise<NativeOidcSigninAnswer> {
+    const refused = (
+      action: string,
+      outcome?: Extract<OidcSigninOutcome, { ok: false }>,
+      retryAfter?: number
+    ): NativeOidcSigninAnswer => ({
+      error: 'The sign-in did not complete',
+      action,
+      ...(retryAfter ? { retryAfter } : {}),
+      ...(outcome ? { outcome } : {}),
+    });
+
+    const limited = await limitRequest('oidcCallback', this.request, this.response);
+    if (limited) {
+      return refused('rate_limited', { ok: false, error: 'rate_limited' }, limited.retryAfter);
+    }
+    const config = Auth.oidcSignin;
+    if (!config) return refused('not_configured');
+    // a web page cannot send this header to another site without CORS, so a page cannot sign its
+    // visitor in to an account of its choosing (login CSRF) with a record it started itself
+    if (!wantsTokensInBody(this.request)) return NOT_NATIVE;
+
+    const invalidState = () => refused('invalid_state', { ok: false, error: 'invalid_state' });
+    const pending = openPendingOidc(options?.pending, getJwtSecret());
+    if (!pending) return invalidState();
+    let callbackUrl: URL;
+    try {
+      callbackUrl = new URL(String(options?.callbackUrl ?? ''));
+    } catch {
+      return invalidState();
+    }
+    // the link the sign-in started with, still listed, and the state it was sent with
+    if (
+      nativeRedirectUri(pending.redirectUri) !== pending.redirectUri ||
+      !isCallbackFor(callbackUrl, pending.redirectUri) ||
+      callbackUrl.searchParams.get('state') !== pending.state
+    ) {
+      return invalidState();
+    }
+
+    const { outcome, authentication } = await completeOidcExchange(
+      this,
+      config,
+      pending,
+      callbackUrl.search
+    );
+    if (outcome.ok === false) return refused(outcome.error, outcome);
+    if (!authentication || !('auth' in authentication)) {
+      return refused('failed', { ok: false, error: 'failed' });
+    }
+    return { ...authentication, outcome };
+  }
+
+  /**
    * Sign in with an OAuth provider.
    *
    * Only providers whose credential this server verifies itself are accepted (see
@@ -2594,6 +2810,8 @@ declareCallable(AuthBackendProvider, {
   sendSigninCode: 'public',
   signinWithCode: 'public',
   startOidcSignin: 'public',
+  startNativeOidcSignin: 'public',
+  completeNativeOidcSignin: 'public',
   resetPassword: 'public',
   verifyEmail: 'public',
   validateToken: 'public',

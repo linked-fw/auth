@@ -32,7 +32,10 @@ export const OIDC_SIGNIN_SCOPE = 'openid webid email';
 export interface OidcRelyingPartyOptions {
   /** The app's `client_id`: the URL of its Client ID Document. */
   clientId: string;
-  /** The callback URL, listed in the Client ID Document's `redirect_uris`. */
+  /**
+   * The callback URL, listed in the Client ID Document's `redirect_uris`. A sign-in can name
+   * another listed one (`BeginOidcSigninOptions.redirectUri`, a native app's claimed link).
+   */
   redirectUri: string;
   /** Allow `http://` and loopback issuers and WebIDs, for development. Default `false`. */
   allowLocalhost?: boolean;
@@ -62,6 +65,8 @@ export interface PendingOidcSignin {
   dpopPrivateJwk: JsonWebKey;
   /** The email sent as `login_hint`, normalised; compared with the token's `email`. */
   loginHint?: string;
+  /** The redirect URI the sign-in was sent with, when not the relying party's own. */
+  redirectUri?: string;
   /** Milliseconds since the epoch. */
   createdAt: number;
 }
@@ -74,6 +79,11 @@ export interface BeginOidcSigninOptions {
   prompt?: 'none';
   /** Sent as `provider_hint` (e.g. `google`); not standard, other issuers ignore it. */
   providerHint?: string;
+  /**
+   * The callback URL for this sign-in instead of the relying party's own: a native app's
+   * app-claimed link. It must be in the Client ID Document's `redirect_uris`; the caller checks.
+   */
+  redirectUri?: string;
 }
 
 export type BeginOidcSigninResult =
@@ -263,11 +273,12 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
       dpopPublicJwk,
       dpopPrivateJwk,
       ...(begin.loginHint ? { loginHint: begin.loginHint } : {}),
+      ...(begin.redirectUri ? { redirectUri: begin.redirectUri } : {}),
       createdAt: now(),
     };
 
     const parameters: Record<string, string> = {
-      redirect_uri: options.redirectUri,
+      redirect_uri: begin.redirectUri ?? options.redirectUri,
       response_type: 'code',
       scope: OIDC_SIGNIN_SCOPE,
       state: pending.state,
@@ -314,7 +325,8 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
     pending: PendingOidcSignin,
     callbackQuery: string | URLSearchParams
   ): Promise<CompleteOidcSigninResult> => {
-    const callbackUrl = new URL(options.redirectUri);
+    // the token request repeats the redirect URI the authorization request named
+    const callbackUrl = new URL(pending.redirectUri ?? options.redirectUri);
     callbackUrl.search = new URLSearchParams(callbackQuery).toString();
 
     let config: client.Configuration;
@@ -486,7 +498,8 @@ export interface OidcSigninConfig {
   onEmailMismatch?: (mismatch: OidcEmailMismatch) => 'signin' | 'refuse' | Promise<'signin' | 'refuse'>;
   /**
    * Where the browser goes after the callback. Default: the start's `returnTo` (or `/`) on success,
-   * `/signin?oidc_error=<error>` otherwise. Return `undefined` to keep the default.
+   * `/signin?oidc_error=<error>` otherwise. Return `undefined` to keep the default. Not called for a
+   * native app's sign-in (`completeNativeOidcSignin`), which answers with the outcome instead.
    */
   onResult?: (outcome: OidcSigninOutcome) => string | undefined | Promise<string | undefined>;
 }

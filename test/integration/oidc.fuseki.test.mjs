@@ -1,6 +1,7 @@
 // Solid-OIDC sign-in against a REAL graph store: through a mock issuer (../mockIssuer.mjs), a new
 // WebID gets its person, account and verified email, and the session it starts authenticates the
-// next request; the same WebID signing in again reaches the same account.
+// next request; the same WebID signing in again reaches the same account; a native app's sign-in
+// (sealed pending record, app-claimed link, tokens in the body) reaches the same account too.
 //
 // Needs a Fuseki server (see fuseki.mjs). Runs against the BUILT package in lib/ (build first).
 import { test, before, after, mock } from 'node:test';
@@ -35,6 +36,7 @@ const { default: AuthBackendProvider } = await import(new URL('backend.js', libD
 const { Auth } = await import(new URL('utils/auth.js', libDir));
 
 const SIOC_ACCOUNT_OF = 'http://rdfs.org/sioc/ns#account_of';
+const NATIVE_LINK = 'test.app.native:/oidc/callback';
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
 
 useThrowawayDataset();
@@ -48,7 +50,7 @@ before(async () => {
   mock.method(console, 'warn', () => {});
   issuer = await startMockIssuer();
   Auth.webIdFor = (email) => issuer.webIdFor(email.trim().toLowerCase());
-  Auth.signinClient = { clientName: 'Test App' };
+  Auth.signinClient = { clientName: 'Test App', redirectUris: [NATIVE_LINK] };
   Auth.oidcSignin = {
     allowLocalhost: true,
     defaultIssuer: issuer.issuer,
@@ -61,6 +63,11 @@ before(async () => {
   app.post('/start', express.json(), async (req, res) => {
     res.json(await serving(provider, req).startOidcSignin(req.body));
   });
+  for (const method of ['startNativeOidcSignin', 'completeNativeOidcSignin']) {
+    app.post(`/${method}`, express.json(), async (req, res) => {
+      res.json(await serving(provider, req)[method](req.body));
+    });
+  }
   // who the access token cookie authenticates
   app.get('/me', (req, res) => res.json({ user: req.linkedAuth?.user?.id ?? null }));
   server = await new Promise((resolve) => {
@@ -137,5 +144,31 @@ test('signing in again with the same WebID reaches the same account', async () =
   await signIn(email);
   const second = await signIn(email);
   assert.equal(second.me.user, webId);
+  assert.equal(await countSubjectsWith(SIOC_ACCOUNT_OF, webId), 1, 'one account');
+});
+
+test('a native sign-in reaches the same account, and its bearer token authenticates', async () => {
+  const email = newEmail();
+  const webId = issuer.webIdFor(email);
+  await signIn(email);
+  issuer.email = email;
+  const call = async (method, body) =>
+    (
+      await fetch(`${base}/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-linked-auth-transport': 'body' },
+        body: JSON.stringify(body),
+      })
+    ).json();
+  const started = await call('startNativeOidcSignin', { input: email, redirectUri: NATIVE_LINK });
+  assert.ok(started.pending, JSON.stringify(started));
+  const callbackUrl = (await fetch(started.url, { redirect: 'manual' })).headers.get('location');
+  const answer = await call('completeNativeOidcSignin', { callbackUrl, pending: started.pending });
+  assert.ok(answer.refreshToken, JSON.stringify(answer));
+  assert.equal(answer.outcome.isNewAccount, false);
+  const me = await (
+    await fetch(`${base}/me`, { headers: { authorization: `Bearer ${answer.accessToken}` } })
+  ).json();
+  assert.equal(me.user, webId);
   assert.equal(await countSubjectsWith(SIOC_ACCOUNT_OF, webId), 1, 'one account');
 });

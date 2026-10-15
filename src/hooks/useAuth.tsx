@@ -26,6 +26,11 @@ import {
   setRefreshHandler,
 } from '../utils/authClient.js';
 import type { RefreshTokenExpiry } from '../utils/token.js';
+import {
+  completeOidcSignin as completeNativeOidc,
+  startNativeOidcSignin as startNativeOidc,
+} from '../utils/nativeOidcSignin.js';
+import type { NativeOidcSigninWaiting } from '../utils/nativeOidcSignin.js';
 import { useAppContext } from '@_linked/server-utils/components/AppContext';
 import type {
   OAuthProvider,
@@ -35,6 +40,7 @@ import type {
   RemoveAccountProof,
   RemoveAccountResult,
   ResendEmailVerificationResult,
+  NativeOidcSigninAnswer,
   SigninCodeError,
   VerifyEmailResult,
 } from '../types/auth.js';
@@ -137,6 +143,23 @@ export const useAuth = <
    * `{error, action?, retryAfter?}` (`action: 'invalid_code'` for a wrong, expired or used code).
    */
   signinWithCode: (email: string, code: string) => Promise<AuthenticationResponse | SigninCodeError>;
+  /**
+   * Native apps: sign in through the user's Solid-OIDC issuer in the system browser (see
+   * `utils/nativeOidcSignin`). Resolves to the signed-in answer (with `outcome`) when the browser
+   * hands back the callback URL, to `{waiting: true, state}` when the app's URL listener will pass
+   * it to `completeOidcSignin`, or to `{error, action}`.
+   */
+  startNativeOidcSignin: (options: {
+    input: string;
+    redirectUri: string;
+    prompt?: 'none';
+    providerHint?: string;
+  }) => Promise<NativeOidcSigninAnswer | NativeOidcSigninWaiting>;
+  /**
+   * Native apps: finish a Solid-OIDC sign-in with the app-claimed link the issuer returned to.
+   * Resolves to the signed-in answer (with `outcome`) or to `{error, action, outcome?}`.
+   */
+  completeOidcSignin: (callbackUrl: string) => Promise<NativeOidcSigninAnswer>;
   /**
    * Sign in with a provider credential. Resolves to the signed-in auth response, or to
    * `{error, action?}` (e.g. `action: 'sign_in_to_link'`).
@@ -405,6 +428,30 @@ function useProvideAuth(signinRoute: string = '') {
       ...(response?.retryAfter ? { retryAfter: response.retryAfter } : {}),
     };
   };
+
+  /** Apply a native Solid-OIDC answer: on success, the session becomes this hook's state. */
+  const applyNativeOidc = <T extends NativeOidcSigninAnswer | NativeOidcSigninWaiting>(answer: T): T => {
+    if ('auth' in answer && answer.auth) {
+      updateAuth({
+        auth: answer.auth,
+        accessToken: answer.accessToken,
+        refreshToken: answer.refreshToken,
+        refreshTokenExpiresIn: answer.refreshTokenExpiresIn,
+        refreshTokenExpiresAt: answer.refreshTokenExpiresAt,
+      });
+    }
+    return answer;
+  };
+
+  const startNativeOidcSignin = async (options: {
+    input: string;
+    redirectUri: string;
+    prompt?: 'none';
+    providerHint?: string;
+  }) => applyNativeOidc(await startNativeOidc(options));
+
+  const completeOidcSignin = async (callbackUrl: string) =>
+    applyNativeOidc(await completeNativeOidc(callbackUrl));
 
   /**
    * Dev-mode webid.email signin. The frontend Signin page opens a /auth/dev
@@ -677,6 +724,8 @@ function useProvideAuth(signinRoute: string = '') {
     signinWithPassword,
     sendSigninCode,
     signinWithCode,
+    startNativeOidcSignin,
+    completeOidcSignin,
     signinDev,
     signinTemporary,
     createAccount,

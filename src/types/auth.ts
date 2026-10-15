@@ -3,6 +3,7 @@ import { Person as SchemaPerson } from '@_linked/schema/shapes/Person';
 import { UserAccount } from '@_linked/sioc/shapes/UserAccount';
 import { QResult } from '@_linked/core/queries/SelectQuery';
 import type { RefreshTokenExpiry } from '../utils/token.js';
+import type { OidcSigninOutcome } from '../utils/oidcSignin.js';
 
 /**
  * The payload of the auth token use on backend.
@@ -62,6 +63,30 @@ export type VerifyEmailResult =
  * expired or used code and `'rate_limited'` (with `retryAfter`, in seconds) when over a limit.
  */
 export type SigninCodeError = { error: string; action?: string; retryAfter?: number };
+
+/**
+ * The answer of `startNativeOidcSignin`: the issuer's authorization URL for the system browser, the
+ * sign-in's `state`, and `pending`, the sealed record the app holds on the device until the issuer
+ * sends the user back. Or an error, with `action` saying which.
+ */
+export type NativeOidcStartAnswer =
+  | { url: string; state: string; pending: string }
+  | { error: string; action: string; retryAfter?: number };
+
+/**
+ * The answer of `completeNativeOidcSignin`: the session's tokens (the refresh token in the body,
+ * for the app's token storage) and the `outcome`, or an error and the outcome saying why.
+ */
+export type NativeOidcSigninAnswer =
+  | (Extract<AuthenticationResult, { auth: AuthSession }> & {
+      outcome: Extract<OidcSigninOutcome, { ok: true }>;
+    })
+  | {
+      error: string;
+      action: string;
+      retryAfter?: number;
+      outcome?: Extract<OidcSigninOutcome, { ok: false }>;
+    };
 
 /** The result of `resendEmailVerification`. `{verified: true}`: already verified, nothing sent. */
 export type ResendEmailVerificationResult =
