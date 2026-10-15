@@ -519,6 +519,14 @@ reads, server and client side: `accessToken`, `refreshToken` (and its legacy `/`
 - Integration: two prefixes in one cookie jar; signing out of one leaves the other signed in.
 - `npm test` and `npm run test:integration` pass.
 
+**Consumers** (outside this repo; routed by master plan 065)
+- webid.email: set `AUTH_COOKIE_PREFIX=wie_` locally, and read the hint in
+  `src/oidc/provider.ts` with `sessionHintCookieName()` instead of the base `SESSION_HINT_COOKIE`
+  (which stays `linkedAuthSession` whatever the prefix).
+- CN: set `AUTH_COOKIE_PREFIX=cn_` locally, and inline it into the client bundle through
+  `createViteConfig({define})`.
+- 065 §Contracts 2 gets the two `AUTH_COOKIE_PREFIX` rows above.
+
 ---
 
 ## A4 — Native apps (Capacitor)

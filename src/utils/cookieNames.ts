@@ -6,9 +6,9 @@
  * `refreshToken`, `linkedAuthSession` and the session cookie: signing out of one signs out the
  * other. Give each app its own prefix:
  *
- * - `AUTH_COOKIE_PREFIX` in the environment, read once on first use; in the browser it is
- *   read from `process.env` like the token lifetimes, so the app inlines it into its bundle
- *   (Vite `define`);
+ * - `AUTH_COOKIE_PREFIX` in the environment, read once on first use. The browser bundle reads
+ *   `process.env.AUTH_COOKIE_PREFIX` too, which the app inlines into its client bundle (the
+ *   Linked CLI's `createViteConfig({define})`);
  * - or `Auth.cookiePrefix = 'cn_'` (server) / `setCookiePrefix('cn_')`, which wins over the
  *   environment.
  *
@@ -21,9 +21,14 @@ const VALID_PREFIX = /^[A-Za-z0-9_.-]*$/;
 let configured: string | undefined;
 let fromEnv: string | undefined;
 
-function readEnv(name: string): string | undefined {
+/**
+ * `AUTH_COOKIE_PREFIX`, written out as `process.env.AUTH_COOKIE_PREFIX` (never `process.env[name]`)
+ * so a bundler's `define` can inline it into the browser bundle. In a browser without it, the
+ * bundler maps it to undefined, or `process` does not exist (caught).
+ */
+function readPrefixFromEnv(): string | undefined {
   try {
-    return typeof process !== 'undefined' ? process.env?.[name] : undefined;
+    return process.env.AUTH_COOKIE_PREFIX;
   } catch {
     return undefined;
   }
@@ -42,7 +47,7 @@ function checked(prefix: string, source: string): string {
 export function getCookiePrefix(): string {
   if (configured !== undefined) return configured;
   if (fromEnv === undefined) {
-    fromEnv = checked(readEnv('AUTH_COOKIE_PREFIX') ?? '', 'AUTH_COOKIE_PREFIX');
+    fromEnv = checked(readPrefixFromEnv() ?? '', 'AUTH_COOKIE_PREFIX');
   }
   return fromEnv;
 }

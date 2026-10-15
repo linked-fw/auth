@@ -226,3 +226,9 @@ test('an invalid AUTH_COOKIE_PREFIX fails loudly', () => {
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /AUTH_COOKIE_PREFIX may only contain/);
 });
+
+test('the browser bundle can inline the prefix: the module reads process.env.AUTH_COOKIE_PREFIX literally', () => {
+  // a bundler's define (Vite, esbuild) replaces only this exact token, never process.env[name]
+  const source = fs.readFileSync(new URL('utils/cookieNames.js', libDir), 'utf8');
+  assert.match(source, /process\.env\.AUTH_COOKIE_PREFIX/);
+});

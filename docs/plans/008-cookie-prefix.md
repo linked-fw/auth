@@ -39,9 +39,10 @@ and stay unprefixed.
 2. **`Auth.cookiePrefix`** is a static accessor on `Auth` delegating to that module, so it reads
    and writes like the other statics without making the client import `utils/auth`.
 3. **The client learns the prefix the way it learns other auth config**: from
-   `process.env.AUTH_COOKIE_PREFIX` through the same guarded `readEnv` as the token lifetimes
-   (`src/utils/token.ts`), which a Linked app inlines into its browser bundle with Vite's
-   `define` (the Linked CLI's `createViteConfig({define})`). An app that sets only the server side
+   `process.env.AUTH_COOKIE_PREFIX`, like the token lifetimes (`src/utils/token.ts`), which a
+   Linked app inlines into its browser bundle with the Linked CLI's `createViteConfig({define})`.
+   Unlike `token.ts`'s `process.env?.[name]`, the variable is written out literally, because Vite
+   only inlines exact `process.env.X` tokens (found in review). An app that sets only the server side
    still works for server-rendered loads, but `hasSessionHint` would not see the hint; the readme
    says to set both.
 4. **Exported base constants stay** (`ACCESS_COOKIE`, `REFRESH_COOKIE`, `SESSION_HINT_COOKIE`,
@@ -88,3 +89,18 @@ and stay unprefixed.
 |---|---|
 | 1 | Done. `npx linked build && npm test`: 517/517 (507 existing unchanged + 10 in `test/cookie-prefix.test.mjs`) |
 | 2 | Done. `npm test` 517/517; `npm run test:integration` 42/42 (41 + the two-app test). A control run of the two-app test with both prefixes empty fails, as it should |
+
+## Review
+
+- **Medium, fixed:** the client read the prefix as `process.env?.[name]` (token.ts's pattern),
+  which no bundler `define` inlines, so a browser would never see it. Now
+  `process.env.AUTH_COOKIE_PREFIX` literally, in a try/catch; checked with
+  `esbuild --define:process.env.AUTH_COOKIE_PREFIX="cn_"` (emits `return "cn_"`) and guarded by a
+  unit test. Readme now names `createViteConfig({define})` (client environment only).
+- **Low, recorded:** webid.email reads the base `SESSION_HINT_COOKIE`; it must switch to
+  `sessionHintCookieName()` when it sets `wie_` (sub-plan A6 §Consumers). CN must set `cn_` and
+  inline it (same place). 065 §Contracts 2 needs the rows (cross-repo; same place).
+- No other cookie is set or read by auth (grep of `.cookie(`, `clearCookie`, `cookies.`,
+  `headers.cookie`, `document.cookie`).
+
+After the fix: `npm test` 518/518.
