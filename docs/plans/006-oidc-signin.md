@@ -144,3 +144,9 @@ Dependencies: 1 → 2 → 3 → 4, sequential (each builds on the previous modul
   `RefusedUrlError`). The fetch also checks every URL with `isFetchableUrl` (IP literals skip
   `lookup`) and never follows redirects. Validation: `node --test test/guarded-fetch.test.mjs
   test/issuer-discovery.test.mjs` → 53/53 (11 new).
+- **Phase 2 done.** `src/utils/oidcSignin.ts` (`createOidcRelyingParty` → `begin`/`complete`,
+  `sameIssuer`, `jwkThumbprint`, `OIDC_SIGNIN_SCOPE`); `complete` takes the callback's query
+  string and rebuilds the URL on `redirectUri`. `test/mockIssuer.mjs` (issuer + a profile host on
+  another origin; checks PKCE, the DPoP proof and `dpop_jkt`). Validation:
+  `node --test test/oidc-signin.test.mjs` → 21/21; each `invalid_token` case asserts its reason
+  (nonce, aud, iss, exp, signature) from the log line.
