@@ -18,9 +18,7 @@ the default issuer (webid.email) with the email as `login_hint`. The module is s
 (redirect and callback) is its first caller, and will also use `fetchOidcIssuers` for the ID token's
 issuer check.
 
-Step A1 of [plan 001](../plans/001-webid-signin-track.md). Working plan:
-[003](../plans/003-issuer-discovery.md) (left in place for the master plan's close-out).
-PR: see the tick in 001.
+Step A1 of [plan 001](../plans/001-webid-signin-track.md). PR: [#122](https://github.com/linked-fw/auth/pull/122).
 
 ## Files
 
@@ -169,8 +167,8 @@ in-flight lookup), and those were fixed too.
 
 - **DNS is not checked.** A public host name that resolves to a private address passes the guard,
   and so does DNS rebinding. Closing that needs resolve-then-pin (a custom `undici` dispatcher
-  with a `lookup` that checks addresses). The readme says so. This is a follow-up for A2, or for a
-  backlog item before production (CN's 089).
+  with a `lookup` that checks addresses). The readme says so. Recorded as a Pitfall under A2 in
+  [plan 001](../plans/001-webid-signin-track.md#a2--the-redirect-and-callback).
 - WebFinger requests to different emails on one slow domain are not shared before the first
   timeout lands in the domain cache.
 - A JSON-LD profile whose terms come only from a remote context yields no issuer. Solid servers

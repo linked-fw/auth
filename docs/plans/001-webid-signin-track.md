@@ -275,6 +275,15 @@ app that configures nothing is none.
 - **Configuration:** opt-in per app (default issuer, Client ID Document URL from A3, which claims
   are required); errors (`login_required`, a refused issuer check) returned to the app, not thrown.
 
+**Pitfalls**
+- **DNS-level SSRF is still open.** A1's URL guard (`isFetchableUrl` in
+  `src/utils/issuerDiscovery.ts`) refuses non-https URLs and private or loopback IP *literals*, but
+  it does not resolve host names. A public name that resolves to a private address passes, and so
+  does DNS rebinding. A2 adds the issuer's discovery, JWKS and token fetches on top. Close this with
+  resolve-then-pin: an `undici` dispatcher whose `lookup` checks every resolved address against the
+  same blocked ranges, passed to A1's discovery through its `fetch` option and used for A2's own
+  requests. See [report 007](../reports/007-issuer-discovery.md#known-limitations-and-follow-ups).
+
 **Verify**
 - Integration test with a mock Solid-OIDC issuer (local, with JWKS and a profile): full sign-in
   creates the session; a wrong `nonce`, a wrong `aud`, an issuer not in the WebID's profile, and a
@@ -471,7 +480,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 ## Progress
 
 - [x] A0 — [#119](https://github.com/linked-fw/auth/pull/119), report [005](../reports/005-webid-derivation-hmac.md)
-- [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), plan doc [003](003-issuer-discovery.md), report [007](../reports/007-issuer-discovery.md)
+- [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), report [007](../reports/007-issuer-discovery.md)
 - [ ] A2
 - [ ] A3
 - [ ] A5
