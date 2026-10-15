@@ -55,14 +55,17 @@ says so in its Outcome. A step reads the contracts it touches before its own sec
 
 ### 1. WebID derivation (A0 → webid.email W2, CN C2a)
 
-- `@_linked/auth`'s backend config gains `webIdFor?: (email: string) => string`. Default: today's
-  `emailToWebID` (UUID v5 under `https://webid.email/id/`, no `#me`), so existing apps keep their
-  WebIDs.
-- Exported from the package root: `hmacWebIdFor({secret, issuer}): (email) => string` and the
+- `@_linked/auth` gains a configurable derivation, `Auth.webIdFor: (email: string) => string`, a
+  static on `Auth` (`src/utils/auth.ts`) like `Auth.userType`; auth has no config object. Default:
+  today's `emailToWebID` (UUID v5 under `https://webid.email/id/`, no `#me`), so existing apps
+  keep their WebIDs. Every call site in auth goes through it, `markOAuthEmailVerified` included
+  (it compares a derived WebID with the Person IRI). CN's own two call sites (`/auth/dev`,
+  `/auth/derive-webid`) switch in C2a.
+- Exported from `@_linked/auth/utils/webID` (the root has no named exports): `hmacWebIdFor({secret, issuer}): (email) => string` and the
   plain function `hmacWebId(email, {secret, issuer})`. Normalisation: `trim(lowercase(email))`.
   Result: `{issuer}/id/{h}#me`, `h` = first 128 bits of `HMAC-SHA256(secret, normalised)` as 32
   lowercase hex characters. `issuer` carries no trailing slash.
-- Exported test vector `HMAC_WEBID_TEST_VECTOR = {email, secret, issuer, webId}` with
+- Exported from the same module, the test vector `HMAC_WEBID_TEST_VECTOR = {email, secret, issuer, webId}` with
   `secret = 'local-dev-webid-secret'`, `issuer = 'http://localhost:4050'` and an email with mixed
   case and surrounding spaces. W2 and C2a assert against it.
 - The dev secret value above is the one CN's `DEV_WEBID_SECRET` and webid.email's `WEBID_SECRET`
