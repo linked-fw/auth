@@ -128,6 +128,7 @@ describe('isFetchableUrl', () => {
   test('a trailing dot does not hide a loopback host', () => {
     assert.equal(isFetchableUrl('https://localhost./'), false);
     assert.equal(isFetchableUrl('https://app.localhost./'), false);
+    assert.equal(isFetchableUrl('https://localhost../'), false);
     assert.equal(isFetchableUrl('https://pod.example./'), true);
   });
 });
@@ -187,11 +188,17 @@ describe('readOidcIssuers', () => {
     const body = JSON.stringify({ '@id': webId, [`${SOLID}oidcIssuer`]: 'https://literal.example' });
     assert.deepEqual(readOidcIssuers(body, 'application/ld+json', doc, webId), []);
     const typed = JSON.stringify({
-      '@context': { oidcIssuer: { '@id': `${SOLID}oidcIssuer`, '@type': '@vocab' } },
+      '@context': { oidcIssuer: { '@id': `${SOLID}oidcIssuer`, '@type': '@id' } },
       '@id': webId,
       oidcIssuer: 'https://i.test',
     });
     assert.deepEqual(readOidcIssuers(typed, 'application/ld+json', doc, webId), ['https://i.test']);
+    const vocab = JSON.stringify({
+      '@context': { '@vocab': 'https://v.example/', iss: { '@id': `${SOLID}oidcIssuer`, '@type': '@vocab' } },
+      '@id': webId,
+      iss: 'x',
+    });
+    assert.deepEqual(readOidcIssuers(vocab, 'application/ld+json', doc, webId), []);
   });
 
   test('JSON-LD: with @base null a relative id is no IRI', () => {

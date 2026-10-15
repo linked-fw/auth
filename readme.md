@@ -481,7 +481,7 @@ await discovery.discover('https://pod.example/profile/card#me');
   inline contexts only; a remote `@context` is never fetched) and `solid:oidcIssuer` of that WebID
   is read. The reader may miss an issuer but never reads one the profile does not assert for that
   WebID: statements in named graphs, values under scoped contexts and plain JSON-LD strings not
-  coerced to IRIs are ignored, and a JSON-LD document too costly to read has no issuers. A WebID never falls back: no issuer gives `{ok: false, reason: 'no-issuer'}`, a profile
+  coerced with `@type: @id` are ignored, and a JSON-LD document too costly to read has no issuers. A WebID never falls back: no issuer gives `{ok: false, reason: 'no-issuer'}`, a profile
   that cannot be fetched `'unreachable'`, a URL that may not be fetched `'refused'`.
 - **An email**: `GET https://<domain>/.well-known/webfinger?resource=acct:<email>`. An issuer link
   (`http://openid.net/specs/connect/1.0/issuer`) gives `source: 'webfinger'`; a WebID link

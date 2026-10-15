@@ -208,3 +208,15 @@ Phase 4 done: gaps 1–12 fixed, one test each (11 new tests). Validation:
 shapes now return `[]` in under 1 s); `npm test` → `# tests 363`, `# pass 363`, `# fail 0`. Also
 fixed: the readme and the `timeoutMs` comment said "one deadline per lookup", but the deadline is
 per request, and an email whose WebFinger names a WebID makes two requests.
+
+## Review — iteration 2
+
+Re-review of phase 4: **no medium-or-higher findings**. All twelve fixes held when the reviewer ran
+their probes again (the 25.8 s JSON-LD payload now takes 17 ms). Three new low findings were fixed
+in the same pass:
+
+- a string under an `@type: @vocab` term resolved against `@base`, so only `@type: @id` coerces now;
+- only one trailing dot was stripped (`https://localhost../`), so all of them are now;
+- `clearCache()` did not clear the lookups already under way, and now it does.
+
+Validation: `npm test` → `# tests 363`, `# pass 363`, `# fail 0`.

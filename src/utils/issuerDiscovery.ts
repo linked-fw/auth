@@ -219,8 +219,8 @@ export const isFetchableUrl = (href: string, allowLocalhost = false): boolean =>
   if (url.username || url.password) {
     return false;
   }
-  // `localhost.` is `localhost`: drop the trailing dot of a fully qualified name before checking.
-  const hostname = url.hostname.endsWith('.') ? url.hostname.slice(0, -1) : url.hostname;
+  // `localhost.` is `localhost`: drop the trailing dots of a fully qualified name before checking.
+  const hostname = url.hostname.replace(/\.+$/, '');
   const host = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname;
   if (isLoopbackHost(host)) {
     return allowLocalhost;
@@ -485,7 +485,7 @@ const hasTypeScopedContext = (node: Record<string, unknown>, context: JsonLdCont
  * and compact IRIs, terms from inline contexts, `@vocab`, `@base`, `@graph` and nested nodes. It
  * may miss an issuer but never reads one the document does not assert: a remote `@context` is never
  * fetched (terms only it defines are not understood), values under a scoped context are skipped, a
- * plain string counts as an IRI only where its term is coerced to one, and a document that costs
+ * plain string counts as an IRI only where its term is coerced with `@type: @id`, and a document that costs
  * more than `JSON_LD_BUDGET` to read has no issuers.
  */
 const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): string[] => {
@@ -525,7 +525,7 @@ const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): st
         continue;
       }
       if (subject === webId && expandKey(key, context) === SOLID_OIDC_ISSUER) {
-        const coerced = ['@id', '@vocab'].includes(context.terms.get(key)?.type ?? '');
+        const coerced = context.terms.get(key)?.type === '@id';
         for (const item of Array.isArray(value) ? value : [value]) {
           const iri =
             typeof item === 'string'
@@ -842,5 +842,10 @@ export const createIssuerDiscovery = (options: IssuerDiscoveryOptions = {}): Iss
     return Promise.resolve(freeze({ ok: false, reason: 'invalid-input' }));
   };
 
-  return { discover, discoverFromEmail, discoverFromWebId, clearCache: () => cache.clear() };
+  const clearCache = () => {
+    cache.clear();
+    inFlight.clear();
+  };
+
+  return { discover, discoverFromEmail, discoverFromWebId, clearCache };
 };
