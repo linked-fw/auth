@@ -23,7 +23,7 @@ decisions 1–7, 9 and 10.
 its Rules apply (worktrees, a changeset per PR, PRs ending in an Outcome section, never "Claude" in
 commits or PRs), and its §Contracts is the cross-repo source of the [Contracts](#contracts) below.
 Each step agent works in its own plan doc (numbers assigned by 065: A0 → `002`, A1 → `003`,
-A3 → `004`, A5 → `005`, A2 → `006`; A4 gets its number when it starts). The issuer side is webid.email
+A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`). The issuer side is webid.email
 ([its plan](https://github.com/Semantu/webid-email/blob/main/docs/plans/001-webid-email-service.md)).
 
 **The steps.** A0 makes the email → WebID derivation configurable and exports the HMAC rule
@@ -488,6 +488,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 ## A4 — Native apps (Capacitor)
 
 **Depends on:** A2. Needed for Peace Game.
+**PR:** [#PRNUM](https://github.com/linked-fw/auth/pull/PRNUM), report [010](../reports/010-native-oidc-signin.md).
 
 **Scope** (RFC 8252)
 - In a native build, the start step opens the authorization URL in the system browser
@@ -509,8 +510,11 @@ sign in from the log line in dev, the readme documents them, and the release car
   in `Auth.signinClient.redirectUris`.
 
 **Verify**
-- A test app (or Peace Game's dev build) on an iOS simulator and an Android emulator signs in
-  through the system browser and returns signed in.
+- [x] Against the mock issuer, with synthetic callback URLs (Universal Link and custom scheme): see
+  report [010](../reports/010-native-oidc-signin.md).
+- [ ] A test app (or Peace Game's dev build) on an iOS simulator and an Android emulator signs in
+  through the system browser and returns signed in: **deferred to P1**, backlog
+  [006](../backlog/006-native-oidc-device-run.md).
 
 ---
 
@@ -521,4 +525,4 @@ sign in from the log line in dev, the readme documents them, and the release car
 - [x] A2 — [#127](https://github.com/linked-fw/auth/pull/127), report [009](../reports/009-oidc-signin.md)
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
-- [ ] A4
+- [x] A4 — [#PRNUM](https://github.com/linked-fw/auth/pull/PRNUM), report [010](../reports/010-native-oidc-signin.md)
