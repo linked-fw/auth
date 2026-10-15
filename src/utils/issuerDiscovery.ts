@@ -232,6 +232,23 @@ export const isFetchableUrl = (href: string, allowLocalhost = false): boolean =>
   return family === null || !privateAddresses.check(host, family);
 };
 
+/**
+ * Whether a resolved IP address must not be connected to: one in a private range, or a loopback
+ * address without `allowLocalhost`. Anything that is not an IP address is refused. This is the
+ * check `isFetchableUrl` makes on IP literals, for the addresses a host name resolves to (see
+ * `guardedFetch.ts`).
+ */
+export const isBlockedAddress = (address: string, allowLocalhost = false): boolean => {
+  const family = ipFamily(address);
+  if (family === null) {
+    return true;
+  }
+  if (loopbackAddresses.check(address, family)) {
+    return !allowLocalhost;
+  }
+  return privateAddresses.check(address, family);
+};
+
 // ---------------------------------------------------------------------------------------------
 // Fetching
 // ---------------------------------------------------------------------------------------------
