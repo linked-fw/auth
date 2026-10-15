@@ -1,5 +1,6 @@
-// SigninWithCodeForm in jsdom: the link in the email fills in the code and signs in on a press
-// (never on its own), and the typed flow sends a code, then signs in with it. Renders the BUILT component, with Server.call going over HTTP to a
+// SigninWithCodeForm in jsdom: the link in the email fills in the code, asks for the email and
+// signs in on a press (never on its own, never with the link's email), and the typed flow sends a
+// code, then signs in with it, showing the email. Renders the BUILT component, with Server.call going over HTTP to a
 // tiny fake backend.
 import './cssStub.mjs';
 import { test, beforeEach, afterEach, after } from 'node:test';
@@ -131,34 +132,41 @@ afterEach(async () => {
 });
 after(() => server.close());
 
-test('the link fills in the code and signs in only when Sign in is pressed', async () => {
+test('the link fills in the code, asks for the email, and signs in only on a press', async () => {
   await render('/auth/signin-code?email=ada%40example.test&code=12345678');
   const codeInput = await waitFor(
     () => document.querySelector('input[autocomplete=one-time-code]'),
     'the code field'
   );
   assert.equal(codeInput.value, '12345678');
+  // the email from the link is not filled in: the user types their own
+  const emailInput = document.querySelector('input[type=email]');
+  assert.equal(emailInput.value, '');
+  assert.equal(emailInput.readOnly, false);
   // a mail scanner that opens the link uses nothing up
   await act(async () => new Promise((r) => setTimeout(r, 100)));
   assert.equal(calls.signinWithCode.length, 0);
+  // without an email, pressing Sign in sends nothing
+  await submit(document.querySelector('form'));
+  await waitFor(() => document.querySelector('[role=alert]'), 'the missing email to show');
+  assert.equal(calls.signinWithCode.length, 0);
 
+  await type(emailInput, 'ada@example.test');
   await submit(document.querySelector('form'));
   await waitFor(() => loggedIn.length === 1, 'the sign-in');
   assert.equal(calls.signinWithCode.length, 1);
   assert.ok(calls.signinWithCode[0].includes('ada@example.test'));
   assert.ok(calls.signinWithCode[0].includes('12345678'));
   assert.match(document.body.textContent, /You are signed in/);
+});
 
-  // a new link on the same route shows the new code
-  await act(async () => navigate('/auth/signin-code?email=ada%40example.test&code=99999999'));
-  const next = await waitFor(
-    () => document.querySelector('input[autocomplete=one-time-code]'),
-    'the code field for the new link'
-  );
-  assert.equal(next.value, '99999999');
+test('a link made from someone else\'s email signs in with the email the user types', async () => {
+  await render('/auth/signin-code?email=mallory%40example.test&code=12345678');
+  const emailInput = await waitFor(() => document.querySelector('input[type=email]'), 'the email');
+  await type(emailInput, 'ada@example.test');
   await submit(document.querySelector('form'));
-  await waitFor(() => document.querySelector('[role=alert]'), 'the refusal to show');
-  assert.match(document.querySelector('[role=alert]').textContent, /invalid or has expired/);
+  await waitFor(() => calls.signinWithCode.length === 1, 'the sign-in call');
+  assert.ok(!calls.signinWithCode[0].includes('mallory'), 'the email from the link was used');
 });
 
 test('typing an email sends a code, and typing the code signs in', async () => {
@@ -174,6 +182,9 @@ test('typing an email sends a code, and typing the code signs in', async () => {
     'the code field'
   );
   assert.match(document.body.textContent, /We sent a sign-in code to ada@example\.test/);
+  const shown = document.querySelector('input[type=email]');
+  assert.equal(shown.value, 'ada@example.test');
+  assert.equal(shown.readOnly, true);
   await type(codeInput, '00000000');
   await submit(document.querySelector('form'));
   await waitFor(() => document.querySelector('[role=alert]'), 'the refusal to show');

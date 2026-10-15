@@ -39,7 +39,9 @@ const { default: AuthBackendProvider, INVALID_SIGNIN_CODE_MESSAGE } = await impo
 const { DEFAULT_SIGNIN_CODE_TTL, hashToken } = await import(
   new URL('helpers/credentialToken.js', libDir)
 );
+const { signinCodeEmailKey } = await import(new URL('helpers/signinCode.js', libDir));
 const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
+const sessions = await import(new URL('utils/sessions.js', libDir));
 const { UserAccount } = await import('@_linked/sioc/shapes/UserAccount');
 const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 
@@ -51,6 +53,7 @@ const REFUSED = { error: INVALID_SIGNIN_CODE_MESSAGE, action: 'invalid_code' };
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
 
 let credentials;
+let sessionStore;
 let people;
 let accounts;
 let sentEmails;
@@ -68,6 +71,16 @@ beforeEach(() => {
     { id: 'https://app.test/account/ada', email: EMAIL, accountOf: { id: PERSON_ID } },
   ]);
   mock.method(UserAccount, 'select', () => accounts.select());
+  sessionStore = new sessions.MemoryRefreshSessionStore();
+  sessions.setRefreshSessionStore(sessionStore);
+  // a session Ada's account already has
+  sessionStore.records.set('earlier', {
+    tokenHash: 'earlier',
+    sessionId: 's1',
+    accountId: 'https://app.test/account/ada',
+    createdAt: new Date(),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  });
   sentEmails = [];
   mock.method(LinkedEmail, 'send', async (options) => {
     sentEmails.push(options);
@@ -96,10 +109,17 @@ afterEach(() => {
   delete process.env.DEV_AUTH;
 });
 
-/** Ada's password credential. */
-function adaHasPassword() {
-  return credentials.insert({ credentialOf: { id: PERSON_ID }, email: EMAIL, passwordHash: 'h' });
+/** Ada's password credential; her email is verified unless `verified` is false. */
+function adaHasPassword({ verified = true } = {}) {
+  return credentials.insert({
+    credentialOf: { id: PERSON_ID },
+    email: EMAIL,
+    passwordHash: 'h',
+    ...(verified ? { emailVerifiedAt: new Date('2026-01-01').toISOString() } : {}),
+  });
 }
+
+const earlierSessionRevoked = () => Boolean(sessionStore.records.get('earlier').revokedAt);
 
 /** Request a code for `email` and return the code and link from the email sent. */
 async function requestCode(email = EMAIL) {
@@ -120,7 +140,7 @@ const rowsOf = (personId) =>
   [...credentials.rows.values()].filter((row) => row.credentialOf?.id === personId);
 
 test('a code signs in to the account of its email and marks the email verified', async () => {
-  adaHasPassword();
+  adaHasPassword({ verified: false });
   const { code, link } = await requestCode();
   assert.equal(new URL(link).searchParams.get('email'), EMAIL);
   assert.equal(new URL(link).pathname, '/auth/signin-code');
@@ -134,7 +154,38 @@ test('a code signs in to the account of its email and marks the email verified',
   const [credential] = rowsOf(PERSON_ID);
   assert.ok(credential.emailVerifiedAt, 'emailVerifiedAt was not set');
   assert.equal(credential.signinCode, undefined, 'the code is still stored');
-  assert.equal(credential.passwordHash, 'h', 'the password was touched');
+});
+
+test('the first proof of an email removes unverified passwords and ends earlier sessions', async () => {
+  // someone else may have signed up with this email and a password of their own
+  adaHasPassword({ verified: false });
+  const { code } = await requestCode();
+  assert.equal((await provider.signinWithCode(EMAIL, code)).signedIn, PERSON_ID);
+  assert.equal(rowsOf(PERSON_ID)[0].passwordHash, undefined, 'the unverified password survived');
+  assert.ok(earlierSessionRevoked(), 'the earlier session was not revoked');
+});
+
+test('a person whose email is already verified keeps the password and sessions', async () => {
+  adaHasPassword();
+  const { code } = await requestCode();
+  assert.equal((await provider.signinWithCode(EMAIL, code)).signedIn, PERSON_ID);
+  assert.equal(rowsOf(PERSON_ID)[0].passwordHash, 'h');
+  assert.equal(earlierSessionRevoked(), false);
+});
+
+test('codes are keyed with the server secret: the stored hash alone does not give a code away', async () => {
+  adaHasPassword();
+  const { code } = await requestCode();
+  const stored = rowsOf(PERSON_ID)[0].signinCode;
+  assert.notEqual(stored, hashToken(`${EMAIL}\n${code}`));
+  const secret = process.env.JWT_SECRET;
+  process.env.JWT_SECRET = 'another-secret-another-secret-another';
+  try {
+    assert.deepEqual(await provider.signinWithCode(EMAIL, code), REFUSED);
+  } finally {
+    process.env.JWT_SECRET = secret;
+  }
+  assert.equal((await provider.signinWithCode(EMAIL, code)).signedIn, PERSON_ID);
 });
 
 test('the email and code are matched loosely: case, spaces and dashes', async () => {
@@ -201,7 +252,8 @@ test('an email with no account gets the same answer, and its code creates the ac
   const { code } = await requestCode(NEW_EMAIL);
   // the code is held by a pending credential that no lookup by email finds
   const [pending] = [...credentials.rows.values()];
-  assert.equal(pending.signinCodeEmailHash, hashToken(NEW_EMAIL));
+  assert.equal(pending.signinCodeEmailHash, signinCodeEmailKey(NEW_EMAIL));
+  assert.notEqual(pending.signinCodeEmailHash, hashToken(NEW_EMAIL), 'the email hash is not keyed');
   assert.ok(!JSON.stringify(pending).includes(NEW_EMAIL), 'the email is stored in plain text');
   assert.equal(pending.email, undefined);
   assert.equal(pending.credentialOf, undefined);

@@ -327,18 +327,29 @@ if ('error' in result) showError(result.error); // action: 'invalid_code' | 'rat
   expired or already used code, or a code for another email, all answer `{error: 'This sign-in
   code is invalid or has expired.', action: 'invalid_code'}`. A wrong code, or one tried with
   another email, leaves the right one working; an expired one is used up.
-- The code works once, for `AUTH_SIGNIN_CODE_TTL` seconds (default 15 minutes). Only a hash of
-  the email and code together is stored, on the person's `AuthCredential`. An email with no
-  account keeps its code on a pending credential, which has no person and stores only a hash of
-  the email (`signinCodeEmailHash`), so signup, password sign-in, reset and OAuth never see it;
-  the first sign-in attaches it to the person: one that has the email by then, or a new one.
-  Pending credentials of codes that were never used are not removed yet.
+- The code works once, for `AUTH_SIGNIN_CODE_TTL` seconds (default 15 minutes). The person's
+  `AuthCredential` stores only a hash of an HMAC of the email and code, keyed with a key derived
+  from `JWT_SECRET`, so a copy of the store does not give the codes away (a new `JWT_SECRET` ends
+  outstanding codes). An email with no account keeps its code on a pending credential, which has
+  no person and stores only the keyed hash of the email (`signinCodeEmailHash`), so signup,
+  password sign-in, reset and OAuth never see it; the first sign-in attaches it to the person:
+  one that has the email by then, or a new one. Pending credentials of codes that were never used
+  are not removed yet ([backlog 004](docs/backlog/004-signin-code-hardening.md)).
+- **The first proof of an email ends unproven access.** Sign-up does not verify the email, so
+  someone may have registered the owner's email with a password of their own, waiting for the
+  owner. When a code sign-in reaches a person whose email was not verified yet, that person's
+  password hashes are removed and every session of their accounts is revoked, before the new
+  session starts. The owner can set a password through a reset link.
 - Eight digits are guessable without a limit: `signinWithCode` allows 5 attempts per email per 15
   minutes (`signinCode`), from any number of addresses, and `sendSigninCode` 3 requests per email
-  per hour (`signinCodeRequest`). See *Rate limits*.
+  per hour (`signinCodeRequest`). A wrong guess does not end the code, so the per-email limit is
+  the only bound on guessing: **do not turn `signinCode`'s account limit off**
+  (`AUTH_RATE_LIMIT_SIGNIN_CODE_ACCOUNT`) without first ending codes after a few wrong guesses.
+  See *Rate limits*.
 - The link is `${SITE_ROOT}/auth/signin-code?email=…&code=…`. Render `SigninWithCodeForm` at that
-  route (see *Setup sign-in by code*): it shows the code filled in and signs in when the user
-  presses Sign in, and elsewhere it is the form that asks for the email and then the code.
+  route (see *Setup sign-in by code*): it shows the code filled in, asks the user to type their
+  email, and signs in when they press Sign in. Elsewhere it is the form that asks for the email
+  and then the code, showing the email the code was sent to.
 
 ### Email verification
 
@@ -706,7 +717,7 @@ backend code that calls these while serving a request counts against that reques
 | Variable | Meaning |
 |---|---|
 | `AUTH_RATE_LIMIT` | `off` (or `false`/`0`) turns every limit off, e.g. for a test run |
-| `AUTH_RATE_LIMIT_<RULE>_<IP\|ACCOUNT>` | one limit as `<max>/<windowSeconds>`, or `off`. The rule in upper snake case: `AUTH_RATE_LIMIT_SIGNIN_IP=20/60`, `AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_ACCOUNT=5/3600`, `AUTH_RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_ACCOUNT=5/3600`, `AUTH_RATE_LIMIT_SIGNIN_CODE_ACCOUNT=5/900` |
+| `AUTH_RATE_LIMIT_<RULE>_<IP\|ACCOUNT>` | one limit as `<max>/<windowSeconds>`, or `off`. The rule in upper snake case: `AUTH_RATE_LIMIT_SIGNIN_IP=20/60`, `AUTH_RATE_LIMIT_PASSWORD_RESET_REQUEST_ACCOUNT=5/3600`, `AUTH_RATE_LIMIT_EMAIL_VERIFICATION_REQUEST_ACCOUNT=5/3600`, `AUTH_RATE_LIMIT_SIGNIN_CODE_ACCOUNT=5/900` (never `off`: it is the only per-email bound on guessing a sign-in code) |
 
 In code, `configureRateLimits({signin: {ip: {max: 20, windowSeconds: 60}}})` from
 `@_linked/auth/utils/rateLimit` does the same (the environment wins), and `resetRateLimits()`
@@ -776,9 +787,11 @@ reset_password_callback: {
 ## Setup sign-in by code
 
 The sign-in code email links to `${SITE_ROOT}/auth/signin-code?email=…&code=…`. Define a route
-there that renders `SigninWithCodeForm`; with both values in the URL it shows the code filled in
-and signs in when the user presses Sign in. It never signs in on its own, because mail scanners
-open links and would use the code up. Use the same component wherever the user should start a code sign-in. It reads the URL with
+there that renders `SigninWithCodeForm`; with both values in the URL it shows the code filled in,
+asks the user to type their email, and signs in when they press Sign in. It never signs in on its
+own, because mail scanners open links and would use the code up, and it never takes the email
+from the link on trust, because a link someone made from their own email and code would sign the
+user in to that other account. Use the same component wherever the user should start a code sign-in. It reads the URL with
 React Router's `useSearchParams`, and calls `onLoggedIn(authResponse)` once signed in.
 
 ```tsx

@@ -114,8 +114,8 @@ export class AuthCredential extends Shape {
   }
 
   /**
-   * The SHA-256 hash (base64url) of the outstanding emailed sign-in code together with the email
-   * it was sent to, if there is one. Requesting a new code replaces it, and signing in with it
+   * The SHA-256 hash (base64url) of the outstanding emailed sign-in code's token, a keyed hash of
+   * the code and the email it was sent to (`signinCodeSecret`), if there is one. Requesting a new code replaces it, and signing in with it
    * removes it.
    */
   @literalProperty({
@@ -147,8 +147,8 @@ export class AuthCredential extends Shape {
 
   /**
    * Set only on a pending credential: one that holds sign-in codes for an email no person has
-   * yet, so it has no `credentialOf` and no `email`. The SHA-256 hash (base64url) of the
-   * normalized email, so the store keeps no address of someone who never signed in, and apart
+   * yet, so it has no `credentialOf` and no `email`. A keyed hash of the normalized email
+   * (`signinCodeEmailKey`), so the store keeps no address of someone who never signed in, and apart
    * from `email`, so no lookup of an account or credential by email (signup, password, reset,
    * OAuth) ever finds it: anyone can request a code for any email. The first sign-in with a code
    * attaches it to the person and sets `email`.

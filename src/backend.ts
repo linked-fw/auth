@@ -68,13 +68,13 @@ import {
   clearUnsentToken,
   consumeCredentialToken,
   consumeCredentialTokenRecord,
-  hashToken,
   TOKEN_KINDS,
 } from './helpers/credentialToken.js';
 import {
   generateSigninCode,
   normalizeSigninCode,
   normalizeSigninEmail,
+  signinCodeEmailKey,
   signinCodeFields,
   signinCodeSecret,
 } from './helpers/signinCode.js';
@@ -460,7 +460,7 @@ async function storeSigninCode(
     return personId;
   }
 
-  const emailHash = hashToken(email);
+  const emailHash = signinCodeEmailKey(email);
   const pending = await AuthCredential.select((c) => [c.signinCodeEmailHash])
     .where((c) => c.signinCodeEmailHash.equals(emailHash))
     .one();
@@ -470,6 +470,31 @@ async function storeSigninCode(
     await AuthCredential.create({ signinCodeEmailHash: emailHash, ...fields });
   }
   return undefined;
+}
+
+/**
+ * Before a code sign-in proves the person's email for the first time: an unverified account may
+ * have been registered by someone else who typed in this email and set a password (signup does not
+ * verify the email), waiting for the owner to arrive. So the unverified password hashes are
+ * removed and every session of the person's accounts is revoked; the owner signs in with the code
+ * and can set a password through a reset link. A person whose email is already verified keeps both.
+ */
+async function dropUnprovenAccess(provider: AuthBackendProvider, personId: string): Promise<void> {
+  if (await personEmailVerified(personId)) return;
+  const credentials = await AuthCredential.select((cred) => [cred.passwordHash]).where((cred) =>
+    cred.credentialOf.equals({ id: personId })
+  );
+  for (const credential of credentials || []) {
+    if (credential.passwordHash) {
+      await AuthCredential.update({ passwordHash: null }).for({ id: credential.id });
+    }
+  }
+  const accounts = await provider.accountShape
+    .select((a) => [a.accountOf])
+    .where((a) => a.accountOf.equals({ id: personId }));
+  for (const account of accounts || []) {
+    await revokeAllSessionsForAccount(account.id);
+  }
 }
 
 /** The person of the account whose email is `email`, if there is one. */
@@ -490,7 +515,7 @@ function signinCodeMessage(
   const minutes = Math.round(TOKEN_KINDS.signinCode.ttl / 60);
   return {
     to: [{ email_address: { address: email, name: email } }],
-    subject: `Your ${process.env.APP_NAME} sign-in code: ${code}`,
+    subject: `Your ${process.env.APP_NAME} sign-in code`,
     htmlbody: `
           <table role='presentation' border='0' cellpadding='0' cellspacing='0' class='body' style='border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #fff; width: 100%;' width='100%' bgcolor='#fff'>
             <tr>
@@ -1431,6 +1456,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     const person = await this.userShape.select((p) => [p.givenName]).for(personId);
     if (person) {
+      await dropUnprovenAccess(this, personId);
       await markEmailVerified(personId, normalizedEmail);
       const account = await this.getOrCreateAccount({ id: personId });
       return Auth.onSigninSuccessful(this, { id: personId } as UserData, account as UserAccountData);

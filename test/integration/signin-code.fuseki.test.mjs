@@ -88,7 +88,7 @@ test('a code for a new email creates the person, account and session, and works 
   assert.equal(again.auth.userAccount.id, signin.auth.userAccount.id);
 });
 
-test('a code signs in to a password account and verifies its email', async () => {
+test('a code verifies a password account and ends access its email never proved', async () => {
   const email = newEmail();
   const created = await provider().createAccount({
     firstName: 'Ada',
@@ -104,9 +104,15 @@ test('a code signs in to a password account and verifies its email', async () =>
   assert.equal(signin.auth.user.id, personId);
   assert.equal(signin.auth.userAccount.id, created.auth.userAccount.id);
   assert.equal((await credentialValues(personId, 'emailVerifiedAt')).length, 1);
-  // the password still works
+  // the password was set before the email was proven: it is gone, and so is the signup's session
+  assert.deepEqual(await credentialValues(personId, 'passwordHash'), []);
   const password = await provider().signinWithPassword(email, 'first-Passw0rd!');
-  assert.equal(password.error, undefined, password.error);
+  assert.ok(password.error, 'the unproven password still signs in');
+  const refreshed = await provider().validateToken(created.refreshToken);
+  assert.ok(!refreshed?.auth, 'the signup session still refreshes');
+  // a verified account keeps its sessions: the code session refreshes
+  const again = await provider().validateToken(signin.refreshToken);
+  assert.ok(again?.auth, 'the code session does not refresh');
 });
 
 test('of concurrent sign-ins with one code, exactly one succeeds', async () => {

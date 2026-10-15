@@ -20,8 +20,10 @@ interface SigninWithCodeFormProps {
  * Sign in with a code sent by email: asks for the email, sends the code, then asks for the code.
  *
  * It is also the page behind the link in that email (`/auth/signin-code?email=…&code=…`): with
- * both in the URL it shows the code filled in, and signs in when the user presses Sign in. It
- * never signs in on its own: mail scanners open links, and would use the code up.
+ * both in the URL it shows the code filled in, asks the user to type their email, and signs in when
+ * they press Sign in. It never signs in on its own: mail scanners open links, and would use the
+ * code up. And the email in a link is never taken on trust: a link someone else made from their
+ * own email and code would sign the user in to that other account.
  */
 export default function SigninWithCodeForm({
   onLoggedIn,
@@ -35,11 +37,12 @@ export default function SigninWithCodeForm({
   const { t } = useTranslate();
   const prefix = 'signinCode';
 
-  const [email, setEmail] = useState(linkEmail || initialEmail || '');
-  const [code, setCode] = useState(linkEmail && linkCode ? linkCode : '');
-  const [step, setStep] = useState<'email' | 'code' | 'signedIn'>(
-    linkEmail && linkCode ? 'code' : 'email'
-  );
+  const fromLink = Boolean(linkEmail && linkCode);
+  const [email, setEmail] = useState(fromLink ? '' : initialEmail || '');
+  const [code, setCode] = useState(fromLink && linkCode ? linkCode : '');
+  const [step, setStep] = useState<'email' | 'code' | 'signedIn'>(fromLink ? 'code' : 'email');
+  // on the code step: whether the email is typed there (a link) or shown (the code was just sent)
+  const [typeEmail, setTypeEmail] = useState(fromLink);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [helperText, setHelperText] = useState('');
@@ -67,8 +70,9 @@ export default function SigninWithCodeForm({
   // a route reused for another link shows that link's email and code
   useEffect(() => {
     if (!linkEmail || !linkCode) return;
-    setEmail(linkEmail);
+    setEmail('');
     setCode(linkCode);
+    setTypeEmail(true);
     setStep('code');
     setError('');
   }, [linkEmail, linkCode]);
@@ -86,6 +90,7 @@ export default function SigninWithCodeForm({
       const result = await auth.sendSigninCode(email);
       if (result === true) {
         setStep('code');
+        setTypeEmail(false);
         setCode('');
         setHelperText(
           t(prefix + '.codeSent', 'We sent a sign-in code to {email}.', { email: email.trim() })
@@ -103,6 +108,10 @@ export default function SigninWithCodeForm({
 
   const submitCode = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      setError(t(prefix + '.invalidEmailError', 'Please type your valid email'));
+      return;
+    }
     if (!code.trim()) {
       setError(t(prefix + '.codeRequired', 'Please type the code from the email'));
       return;
@@ -145,12 +154,31 @@ export default function SigninWithCodeForm({
   return (
     <form className={cl(style.root, className)} onSubmit={submitCode}>
       {helperText && <p className={style.HelperText}>{helperText}</p>}
+      {typeEmail ? (
+        <Input
+          type="email"
+          className={style.input}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder={t(prefix + '.confirmEmailPlaceholder', 'Type the email the code was sent to')}
+          autoComplete="email"
+          aria-label={t(prefix + '.email', 'Email')}
+        />
+      ) : (
+        <Input
+          type="email"
+          className={style.input}
+          value={email.trim()}
+          readOnly
+          aria-label={t(prefix + '.email', 'Email')}
+        />
+      )}
       <Input
         type="text"
         className={style.codeInput}
         value={code}
         onChange={(e) => setCode(e.target.value)}
-        placeholder={t(prefix + '.codePlaceholder', '123456')}
+        placeholder={t(prefix + '.codePlaceholder', '12345678')}
         inputMode="numeric"
         autoComplete="one-time-code"
         aria-label={t(prefix + '.code', 'Sign-in code')}
@@ -173,6 +201,7 @@ export default function SigninWithCodeForm({
           disabled={busy}
           onClick={() => {
             setStep('email');
+            setTypeEmail(false);
             setError('');
             setHelperText('');
           }}
