@@ -158,11 +158,16 @@ export async function completeOidcSignin(callbackUrl: string): Promise<NativeOid
   }
   await removeAuthToken(OIDC_PENDING_STORAGE_KEY);
 
-  const answer: NativeOidcSigninAnswer | undefined = await Server.call(
-    packageName,
-    'completeNativeOidcSignin',
-    { callbackUrl, pending: stored.pending }
-  );
+  let answer: NativeOidcSigninAnswer | undefined;
+  try {
+    answer = await Server.call(packageName, 'completeNativeOidcSignin', {
+      callbackUrl,
+      pending: stored.pending,
+    });
+  } catch (error) {
+    // the record was used: the user starts again
+    return failure('failed', (error as Error)?.message || 'The sign-in did not complete');
+  }
   if (!answer) return failure('failed', 'The sign-in did not complete');
   if ('auth' in answer && answer.auth) {
     await storeAuthTokens({

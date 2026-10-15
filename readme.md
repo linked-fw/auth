@@ -760,7 +760,10 @@ const answer = await auth.startNativeOidcSignin({
    Failures are `{error, action, outcome}`, `action` being the callback's error codes.
    `onEmailMismatch` applies; `onResult` is not called, since nothing is redirected.
 
-The server opens the record only when it is intact and younger than 10 minutes, when the callback
+Both RPCs answer `not_native` to a caller that does not send `x-linked-auth-transport: body`
+(the header a client with registered token storage sends): a web page cannot send it to another
+site, so it cannot sign its visitor in to an account it chose (login CSRF). The server opens the
+record only when it is intact and younger than 10 minutes, when the callback
 URL is the record's redirect URI (scheme, host and path) with its `state`, and while that redirect
 URI is still configured. Start errors add `invalid_redirect_uri` to the web start's list: the
 `redirectUri` must be one of `Auth.signinClient.redirectUris`, written as a URL parser writes it

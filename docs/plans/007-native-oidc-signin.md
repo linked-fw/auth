@@ -131,3 +131,21 @@ Phase 2 needs phase 1's RPC methods; phase 3 documents both. Sequential, one com
 - [ ] Mock-issuer sign-in through the native path with a synthetic callback URL (phases 1–2).
 - [ ] Simulator (iOS) and emulator (Android) sign-in through the system browser — **deferred to
   P1** (Peace Game's migration), which picks the plugin and runs it on devices.
+
+## Review
+
+1. **Medium — login CSRF through the native RPCs from a web page.** `completeNativeOidcSignin`
+   answered any caller and its token delivery also sets the auth cookies, so a page could sign its
+   visitor in to an account it chose, with a record and a code it obtained itself. The web flow
+   prevents this by binding the record to the browser session. Fixed in scope: both native methods
+   answer `not_native` unless the request carries `x-linked-auth-transport: body`, which a client
+   with registered token storage sends and a cross-site page cannot send without CORS consent.
+   Test: no header → `not_native`, no cookie, no token request.
+2. **Low — stale docs.** `onResult`'s doc now says it is not called for native sign-ins. Fixed.
+3. **Low — a failed completion call threw.** `completeOidcSignin` now answers `failed` when the
+   call itself fails (the record is spent; the user starts again). Fixed.
+4. **Low, left:** `useAuth`'s wrappers store the tokens a second time through `updateAuth` (the
+   same values; idempotent). A replayed sealed record within its 10 minutes reaches the issuer's
+   token endpoint, where the code's single use refuses it, as A2 relies on for concurrent callbacks.
+
+Validation after the fixes: `npm test` 507/507; `npm run test:integration` 41/41.

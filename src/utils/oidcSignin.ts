@@ -498,7 +498,8 @@ export interface OidcSigninConfig {
   onEmailMismatch?: (mismatch: OidcEmailMismatch) => 'signin' | 'refuse' | Promise<'signin' | 'refuse'>;
   /**
    * Where the browser goes after the callback. Default: the start's `returnTo` (or `/`) on success,
-   * `/signin?oidc_error=<error>` otherwise. Return `undefined` to keep the default.
+   * `/signin?oidc_error=<error>` otherwise. Return `undefined` to keep the default. Not called for a
+   * native app's sign-in (`completeNativeOidcSignin`), which answers with the outcome instead.
    */
   onResult?: (outcome: OidcSigninOutcome) => string | undefined | Promise<string | undefined>;
 }

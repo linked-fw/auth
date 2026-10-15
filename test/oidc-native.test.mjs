@@ -372,3 +372,24 @@ test('the web start still keeps its record in the session, and needs one', async
   assert.equal(new URL(body.url).searchParams.get('redirect_uri'), 'https://app.test/auth/oidc/callback');
   assert.equal(body.pending, undefined, 'the web start hands out no record');
 });
+
+test('a caller that is not a native client is refused: no login CSRF from a web page', async () => {
+  const app = await startApp();
+  const started = await app.start({ input: ADA, redirectUri: UNIVERSAL_LINK });
+  const callbackUrl = await browse(started.url);
+  // what a cross-site page could send: no custom header
+  const plain = async (method, body) =>
+    (
+      await fetch(`${app.base}/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    );
+  const start = await plain('startNativeOidcSignin', { input: ADA, redirectUri: UNIVERSAL_LINK });
+  assert.equal((await start.json()).action, 'not_native');
+  const complete = await plain('completeNativeOidcSignin', { callbackUrl, pending: started.pending });
+  assert.equal((await complete.json()).action, 'not_native');
+  assert.deepEqual(complete.headers.getSetCookie(), [], 'no session cookie');
+  assert.equal(issuer.tokenRequests.length, 0);
+});

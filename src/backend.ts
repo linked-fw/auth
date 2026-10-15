@@ -41,7 +41,7 @@ import {
   startSessionCleanup,
   stopSessionCleanup,
 } from './utils/sessions.js';
-import { clearAuthCookies, deliverTokens } from './utils/cookies.js';
+import { clearAuthCookies, deliverTokens, wantsTokensInBody } from './utils/cookies.js';
 import { assertAuthSecrets, FatalConfigError, getJwtSecret } from './utils/secrets.js';
 import {
   buildClientIdDocument,
@@ -915,6 +915,16 @@ function nativeRedirectUri(redirectUri: unknown): string | undefined {
   }
   return redirectUri;
 }
+
+/**
+ * The answer of the native sign-in methods to a caller that is not a native client: one sends
+ * `x-linked-auth-transport: body` (it registered its token storage), which a cross-site web page
+ * cannot send without the server's CORS consent.
+ */
+const NOT_NATIVE = {
+  error: 'Native sign-in needs a native client (setAuthTokenStorageMethods)',
+  action: 'not_native',
+} as const;
 
 /** Whether `callbackUrl` is `redirectUri` with a query: the same scheme, host and path. */
 function isCallbackFor(callbackUrl: URL, redirectUri: string): boolean {
@@ -1924,6 +1934,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
     const config = Auth.oidcSignin;
     if (!config) return { error: 'WebID sign-in is not available', action: 'not_configured' };
+    if (!wantsTokensInBody(this.request)) return NOT_NATIVE;
 
     const input = typeof options?.input === 'string' ? options.input.trim() : '';
     if (!input || input.length > OIDC_INPUT_MAX_LENGTH) {
@@ -2009,6 +2020,9 @@ export default class AuthBackendProvider extends BackendProvider {
     }
     const config = Auth.oidcSignin;
     if (!config) return refused('not_configured');
+    // a web page cannot send this header to another site without CORS, so a page cannot sign its
+    // visitor in to an account of its choosing (login CSRF) with a record it started itself
+    if (!wantsTokensInBody(this.request)) return NOT_NATIVE;
 
     const invalidState = () => refused('invalid_state', { ok: false, error: 'invalid_state' });
     const pending = openPendingOidc(options?.pending, getJwtSecret());
