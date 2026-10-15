@@ -8,6 +8,7 @@ import './shapes/index.js';
 import './components/RequireAuth.js';
 import './components/RemoveAccountButton.js';
 import './components/SigninWithPasswordForm.js';
+import './components/SigninWithCodeForm.js';
 import './components/CreateAccountForm.js';
 import './components/ForgotPasswordForm.js';
 import './components/ForgotPasswordCallback.js';

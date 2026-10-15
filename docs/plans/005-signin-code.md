@@ -114,6 +114,9 @@ Tasks
 Validation
 - `npx linked build && node --test test/signin-code-form.test.mjs test/useAuth.test.mjs` pass.
 
+**Done.** `node --test test/signin-code-form.test.mjs test/useAuth.test.mjs` pass; `npm test`:
+`# tests 344 # pass 344 # fail 0`. The result type `SigninCodeError` is in `src/types/auth.ts`.
+
 ### Phase 3 — Integration test, readme, changeset, Verify
 
 Tasks
