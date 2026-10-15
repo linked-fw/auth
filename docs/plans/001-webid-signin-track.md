@@ -470,7 +470,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 
 ## Progress
 
-- [ ] A0
+- [x] A0 — [#119](https://github.com/linked-fw/auth/pull/119), plan [002](002-webid-derivation-hmac.md)
 - [ ] A1
 - [ ] A2
 - [ ] A3

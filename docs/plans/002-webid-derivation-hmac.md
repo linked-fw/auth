@@ -4,7 +4,7 @@ summary: >
   default today's `emailToWebID`) that every call site in backend.ts goes through, and the shared
   HMAC derivation (`hmacWebId`, `hmacWebIdFor`, `HMAC_WEBID_TEST_VECTOR`) exported from
   `@_linked/auth/utils/webID` for webid.email and CN's dev mode.
-status: Implementation
+status: Review
 ---
 
 # 002 — Configurable WebID derivation and the shared HMAC function
