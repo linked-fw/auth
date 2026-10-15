@@ -287,7 +287,7 @@ test('review: redirect URIs with a scheme that runs code or reads local data are
 });
 
 test('review: SITE_ROOT with a query or fragment is refused; a blank client name too', () => {
-  for (const root of ['https://a.example/?x=1', 'https://a.example/#f', 'https://a.example/app?x=1#f']) {
+  for (const root of ['https://a.example/?x=1', 'https://a.example/#f', 'https://a.example/app?x=1#f', 'https://a.example?', 'https://a.example#']) {
     assert.throws(() => buildClientIdDocument({ clientName: 'App' }, root), /SITE_ROOT/, root);
   }
   assert.throws(() => buildClientIdDocument({ clientName: '   ' }, 'https://a.example'), /clientName/);

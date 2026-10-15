@@ -4,7 +4,7 @@ summary: >
   {SITE_ROOT}/.well-known/linked-client.jsonld, built from configuration, and define the sign-in
   theme extension once (types, JSON Schema, font allow-list, validateClientTheme) for webid.email
   to import.
-status: Tasks
+status: Implementation
 ---
 
 # 004 — The Client ID Document

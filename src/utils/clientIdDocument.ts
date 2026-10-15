@@ -343,7 +343,7 @@ export const buildClientIdDocument = (
   siteRoot: string
 ): { document: ClientIdDocument; problems: ThemeProblem[] } => {
   const root = typeof siteRoot === 'string' ? siteRoot.replace(/\/$/, '') : '';
-  if (!isAllowedWebUrl(root) || new URL(root).search || new URL(root).hash) {
+  if (!isAllowedWebUrl(root) || /[?#]/.test(root)) {
     throw new Error(
       `Client ID Document: SITE_ROOT must be an https: URL (http: only on localhost) without a query or fragment, got ${JSON.stringify(siteRoot)}`
     );
