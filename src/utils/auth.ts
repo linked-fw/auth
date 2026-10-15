@@ -21,6 +21,7 @@ import { setQueryContext } from '@_linked/core/queries/QueryContext';
 import { personEmailVerified } from '../helpers/emailVerification.js';
 import { emailToWebID } from './webID.js';
 import type { SigninClientConfig } from './clientIdDocument.js';
+import type { OidcSigninConfig } from './oidcSignin.js';
 
 export class Auth {
   // define the default user and account types
@@ -45,6 +46,15 @@ export class Auth {
    * `setupBeforeControllers` runs, e.g. `Auth.signinClient = {clientName: 'Create.Now', theme}`.
    */
   static signinClient?: SigninClientConfig;
+
+  /**
+   * Opt-in to signing in through Solid-OIDC issuers (webid.email, or the issuer a user's WebID
+   * or email domain names). When set, the backend serves the callback at
+   * `{SITE_ROOT}/auth/oidc/callback` and `startOidcSignin` returns an issuer's authorization URL;
+   * when not, neither exists. Set it once in the backend setup, before `setupBeforeControllers`
+   * runs, e.g. `Auth.oidcSignin = {}` next to `Auth.signinClient`.
+   */
+  static oidcSignin?: OidcSigninConfig;
 
   /**
    * Login method

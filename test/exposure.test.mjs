@@ -61,6 +61,7 @@ const SURFACE = {
       sendResetPasswordLink: 'public',
       sendSigninCode: 'public',
       signinWithCode: 'public',
+      startOidcSignin: 'public',
       resetPassword: 'public',
       verifyEmail: 'public',
       validateToken: 'public',

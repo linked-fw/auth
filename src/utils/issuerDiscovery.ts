@@ -187,6 +187,10 @@ privateAddresses.addSubnet('fc00::', 7, 'ipv6');
 privateAddresses.addSubnet('fe80::', 10, 'ipv6');
 privateAddresses.addSubnet('fec0::', 10, 'ipv6');
 privateAddresses.addSubnet('ff00::', 8, 'ipv6');
+// Teredo (carries an IPv4 address), discard-only and documentation
+privateAddresses.addSubnet('2001::', 32, 'ipv6');
+privateAddresses.addSubnet('100::', 64, 'ipv6');
+privateAddresses.addSubnet('2001:db8::', 32, 'ipv6');
 
 const ipFamily = (host: string): 'ipv4' | 'ipv6' | null => {
   const version = net.isIP(host);
@@ -230,6 +234,23 @@ export const isFetchableUrl = (href: string, allowLocalhost = false): boolean =>
   }
   const family = ipFamily(host);
   return family === null || !privateAddresses.check(host, family);
+};
+
+/**
+ * Whether a resolved IP address must not be connected to: one in a private range, or a loopback
+ * address without `allowLocalhost`. Anything that is not an IP address is refused. This is the
+ * check `isFetchableUrl` makes on IP literals, for the addresses a host name resolves to (see
+ * `guardedFetch.ts`).
+ */
+export const isBlockedAddress = (address: string, allowLocalhost = false): boolean => {
+  const family = ipFamily(address);
+  if (family === null) {
+    return true;
+  }
+  if (loopbackAddresses.check(address, family)) {
+    return !allowLocalhost;
+  }
+  return privateAddresses.check(address, family);
 };
 
 // ---------------------------------------------------------------------------------------------

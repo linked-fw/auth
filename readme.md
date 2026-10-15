@@ -557,9 +557,10 @@ Options (all optional; the module reads no environment variables):
 
 The URLs come from user input, so only `https://` is fetched, IP literals in private, link-local,
 unique-local, multicast and IPv4-carrying IPv6 ranges (NAT64, 6to4) are refused, redirects (at most 3) are checked hop by hop, and issuer or
-WebID links that fail these checks are ignored. Host names are not resolved first, so a public name
-that resolves to a private address is not caught; run the server with egress rules if that
-matters. `fetchOidcIssuers(webId, options)` reads a profile's issuers without the cache, and
+WebID links that fail these checks are ignored. The module does not resolve host names itself;
+pass `fetch: createGuardedFetch({allowLocalhost})` from `@_linked/auth/utils/guardedFetch` (as the
+Solid-OIDC sign-in below does) so a public name that resolves, or rebinds, to a private address is
+refused before a connection. `fetchOidcIssuers(webId, options)` reads a profile's issuers without the cache, and
 `readOidcIssuers(body, contentType, documentUrl, webId)` reads them from a document already
 fetched.
 
@@ -615,6 +616,109 @@ it: the `SigninTheme` type, `SIGNIN_THEME_JSON_SCHEMA`, `SIGNIN_THEME_FONTS`, an
 throws. `buildClientIdDocument(config, siteRoot)` builds the document itself. The module imports
 neither Express nor Node built-ins.
 
+### Sign in through a Solid-OIDC issuer
+
+An app can sign users in with their WebID: the user types an email or a WebID, the browser goes to
+their issuer (webid.email by default, or the one their WebID or email domain names), and comes back
+signed in. It is a method next to the others, ending in the same step: the verified WebID is the
+Person's IRI, which gets a `UserAccount` and a session. The issuer's tokens are not kept.
+Opt in with `Auth.oidcSignin`, next to `Auth.signinClient` (the Client ID Document above):
+
+```ts
+import { Auth } from '@_linked/auth/utils/auth';
+
+Auth.signinClient = { clientName: 'Create.Now' };
+Auth.oidcSignin = {
+  // all optional:
+  defaultIssuer: 'https://webid.email', // for emails whose domain names no issuer
+  allowLocalhost: false, // true for a local issuer such as http://localhost:4050
+  requireEmail: false, // refuse issuers that send no email claim
+  onEmailMismatch: async ({ hinted, returned, hasAccount }) =>
+    (await hasAccount(hinted)) && !(await hasAccount(returned)) ? 'refuse' : 'signin',
+  onResult: (outcome) => (outcome.ok ? '/dashboard' : undefined),
+};
+```
+
+**Start.** The client calls `startOidcSignin({input, prompt?, providerHint?, returnTo?})`
+(`Server.call('@_linked/auth', 'startOidcSignin', …)`) and navigates to the `url` it returns.
+
+- `input` is an email or a WebID. A WebID's profile names its issuer. For an email, its domain's
+  WebFinger answer does, else the default issuer gets the email as `login_hint` (see Issuer
+  discovery).
+- An issuer must be an `https:` URL with no query, no fragment and no `/.well-known/` (a
+  profile or WebFinger answer naming anything else gets `invalid_issuer`), and its metadata must
+  name exactly that issuer.
+- `prompt: 'none'` asks for a silent sign-in. `providerHint` (letters, digits, `-`, `_`) is sent as
+  `provider_hint`, e.g. `google`. `returnTo` is a path on this site (`/…`; anything else is
+  ignored).
+- The request uses the code flow with PKCE (`S256`), `state` and `nonce`. A fresh DPoP key's
+  thumbprint is sent as `dpop_jkt`, and the scope is `openid webid email`. The `client_id` is
+  `{SITE_ROOT}/.well-known/linked-client.jsonld`, or `clientId` when set.
+- The pending sign-in (PKCE verifier, nonce, DPoP key, hinted email, `returnTo`) is kept in the
+  browser's server-side session (express-session), keyed by `state`: at most 5 at once, for
+  10 minutes.
+- Failures come back as `{error, action}`, with `action` one of:
+  - `not_configured`;
+  - `invalid_input`;
+  - `issuer_not_found` (a WebID whose profile names no usable issuer);
+  - `invalid_issuer`;
+  - `issuer_unreachable`;
+  - `no_session`;
+  - `rate_limited`.
+
+**Callback.** The issuer sends the browser to `GET {SITE_ROOT}/auth/oidc/callback`:
+
+1. The pending sign-in is taken from the browser's session by `state`, once. A callback opened in
+   another browser, replayed, or older than 10 minutes ends in `invalid_state`.
+2. The code is exchanged with a DPoP proof. The ID token's signature is checked against the
+   issuer's JWKS, and its `iss`, `aud`, `exp`, `iat` and `nonce` are checked; `iss` must be the
+   issuer the user was sent to.
+3. `webid` and `auth_time` are required, and so is `email` with `requireEmail`.
+4. The issuer check: `iss` must be a `solid:oidcIssuer` in the `webid`'s profile (one trailing
+   slash is ignored). The profile is not fetched when the issuer is the root of the WebID's origin
+   (`https://webid.email` for `https://webid.email/id/…`); an issuer with a path is always checked.
+5. When the user typed one email and the token carries another, `onEmailMismatch` decides:
+   `'signin'` (the default: the returned email wins) or `'refuse'`. Its `hasAccount(email)` looks
+   accounts up inside the callback; it is never callable.
+6. The person at the WebID and its account are found or created, and a session starts as for the
+   other methods (cookies). The token's email is trusted only when it proves the WebID: the issuer
+   verified it and it is the email this WebID derives from (`Auth.webIdFor`). Only then is it
+   stored on a new account and marked verified, since any issuer can claim any email for its own
+   WebIDs. A sign-in to a person with a password but no verified email removes that password and
+   its sessions, as a code sign-in does.
+7. The browser is redirected to `onResult(outcome)`'s answer. The default is the start's
+   `returnTo` (or `/`), or `/signin?oidc_error=<error>` on failure. No email goes into the URL.
+   `outcome` is `{ok: true, webId, issuer, email?, emailProven, isNewAccount, returnTo?, mismatch?}`
+   or `{ok: false, error, returnTo?, mismatch?}`, where `mismatch` is `{hinted, returned}` and
+   `email` is what the issuer claims (trust it only with `emailProven`).
+
+The callback's error codes:
+
+| `error` | Meaning |
+|---|---|
+| `login_required`, `interaction_required` | A silent sign-in that needs the user |
+| `access_denied` | The user or the issuer refused |
+| `issuer_unreachable` | The issuer's metadata, keys or token endpoint could not be reached |
+| `issuer_refused` | The WebID's profile does not name the token's issuer, or cannot be read |
+| `invalid_token` | A check on the ID token failed |
+| `missing_claim` | No `webid`, no `auth_time`, or no `email` with `requireEmail` |
+| `invalid_state` | No pending sign-in for this browser and `state` |
+| `email_mismatch` | `onEmailMismatch` refused |
+| `rate_limited` | Too many callbacks from this IP |
+| `failed` | Anything else |
+
+Every request to an issuer, a profile or a WebFinger endpoint goes through `createGuardedFetch`.
+It allows only `https:` (`http:` and loopback with `allowLocalhost`). Host names are resolved and
+refused when any address is private; the connection goes to the addresses that were checked; and
+redirects are not followed. Every response body is capped (`maxResponseBytes`, 1 MB) and the whole
+response must arrive in time (`responseTimeoutMs`, 10 s). At startup the server stops (`FatalConfigError`) without a `client_id`
+(neither `Auth.signinClient` nor `clientId`) or when `SITE_ROOT` is not `https:` (`http:` only on
+localhost).
+
+The exchange itself is `createOidcRelyingParty({clientId, redirectUri, …})` from
+`@_linked/auth/utils/oidcSignin`, with `begin` and `complete`. It is free of Express and the
+store, and its results are returned, never thrown.
+
 ## RPC surface
 
 auth declares which of its provider methods the server may dispatch over HTTP
@@ -627,7 +731,7 @@ methods**, and in `warn` mode nothing of auth's is logged as undeclared.
 
 | Level | Methods | What the server does |
 |---|---|---|
-| `public` | `AuthBackendProvider`: `signinWithPassword`, `createAccount`, `signinOAuth`, `createOAuthNonce`, `signinTemporary`, `signinDev`, `sendResetPasswordLink`, `sendSigninCode`, `signinWithCode`, `resetPassword`, `verifyEmail`, `validateToken`, `signout` | runs, signed in or not |
+| `public` | `AuthBackendProvider`: `signinWithPassword`, `createAccount`, `signinOAuth`, `createOAuthNonce`, `signinTemporary`, `signinDev`, `sendResetPasswordLink`, `sendSigninCode`, `signinWithCode`, `startOidcSignin`, `resetPassword`, `verifyEmail`, `validateToken`, `signout` | runs, signed in or not |
 | `user` | `AuthBackendProvider`: `linkOAuthIdentity`, `resendEmailVerification`, `getReauthenticationMethods`, `removeAccount`; `AuthCredentialProvider`: `userHasAuthCredential`, `userHasPassword` | 401 without a session, before the method runs |
 | internal | `AuthBackendProvider`: `upgradePasswordHash`, `getPasswordForUser`, `getOrCreateAccount`, `loadAccountForSession`, `loadUserForSession`, `checkSignin`, `validateRequestToken`, `refreshSession`, `getTokenFromRequest`, `getTokenCandidates`, `getRefreshTokenFromRequest`; `AuthCredentialProvider`: `createNewCredential`, `hasAuthCredential` | 501 over HTTP in every mode; backend code can still call them |
 
@@ -707,6 +811,8 @@ does not reveal whether it does.
 | `signinCodeRequest` | `sendSigninCode` (sends an email) | 10 / hour | 3 / hour (by email) |
 | `signinCode` | `signinWithCode` (guessing an eight-digit code) | 10 / minute | 5 / 15 minutes (by email) |
 | `reauthenticate` | `removeAccount` when it checks a password or ID token | 10 / minute | 5 / 15 minutes (signed-in account) |
+| `oidcSignin` | `startOidcSignin` (may fetch WebFinger, a profile and issuer metadata) | 20 / minute | |
+| `oidcCallback` | `GET /auth/oidc/callback` (calls the issuer's token endpoint); a limited callback redirects with `oidc_error=rate_limited` | 20 / minute | |
 
 A limited call answers `{error: 'Too many attempts. Please wait a moment and try again.', action:
 'rate_limited', retryAfter}` (seconds) with a `Retry-After` header, in place of its usual result.

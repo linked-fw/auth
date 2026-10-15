@@ -56,8 +56,10 @@
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^4.0.0",
     "n3": "^2.13.12",
+    "openid-client": "^6.8.8",
     "react-hook-form": "^7.47.0",
     "ulid": "^3.0.1",
+    "undici": "^8.12.1",
     "uuid": "^14.0.0"
   },
   "peerDependencies": {

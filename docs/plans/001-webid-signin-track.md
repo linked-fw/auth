@@ -23,7 +23,7 @@ decisions 1–7, 9 and 10.
 its Rules apply (worktrees, a changeset per PR, PRs ending in an Outcome section, never "Claude" in
 commits or PRs), and its §Contracts is the cross-repo source of the [Contracts](#contracts) below.
 Each step agent works in its own plan doc (numbers assigned by 065: A0 → `002`, A1 → `003`,
-A3 → `004`, A5 → `005`; A2 and A4 get theirs when they start). The issuer side is webid.email
+A3 → `004`, A5 → `005`, A2 → `006`; A4 gets its number when it starts). The issuer side is webid.email
 ([its plan](https://github.com/Semantu/webid-email/blob/main/docs/plans/001-webid-email-service.md)).
 
 **The steps.** A0 makes the email → WebID derivation configurable and exports the HMAC rule
@@ -121,8 +121,19 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
 - ID token claims: `iss`, `aud`, `exp`, `iat`, `nonce`, `webid` (required), `auth_time`
   (required); `email`, `email_verified` (webid.email always; others optional).
 - The relying party checks that `iss` is a `solid:oidcIssuer` of `webid`'s profile, skipping the
-  fetch when `webid` is on the issuer's origin. `login_required` and a refused issuer check are
-  returned to the app, not thrown.
+  fetch only when the issuer is the root of `webid`'s origin (`https://webid.email` for
+  `https://webid.email/id/…`); an issuer with a path is always checked (A2 review: on a shared
+  origin a path may belong to one user). An issuer identifier has no query, fragment or
+  `/.well-known/`, and its metadata must name exactly it. The origin-root skip also skips
+  confirming that the WebID dereferences at all: a webid.email WebID is trusted from the issuer's
+  word alone. `login_required` and a refused issuer check are returned to the app, not thrown.
+- The token's `email` is trusted (stored on the account, marked verified) only when it **proves
+  the WebID**: `email_verified` is true and `Auth.webIdFor(email) === webid`. Any issuer can claim
+  any email for its own WebIDs, so an app that resolves anything by email (CN's invitations, C2b)
+  uses the email only when the callback's outcome says `emailProven`. In practice only
+  webid.email-derived WebIDs carry a proven email (with CN's HMAC derivation), so email-based
+  invitations will not match users of third-party issuers: a product limitation, which the invite
+  UI's "grant a WebID directly" covers.
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
   a shared artifact; C1 is the first test across the two real processes.
@@ -265,6 +276,7 @@ app that configures nothing is none.
 ## A2 — The redirect and callback
 
 **Depends on:** A1. Tested against a mock issuer until webid.email's W3 exists, then against it.
+**PR:** [#127](https://github.com/linked-fw/auth/pull/127), report [009](../reports/009-oidc-signin.md).
 
 **Scope** (on panva's `openid-client`)
 - **Start:** a provider method that, for an email or WebID, discovers the issuer (A1) and returns
@@ -479,6 +491,16 @@ sign in from the log line in dev, the readme documents them, and the release car
   app) and stores tokens with auth's existing native token storage.
 - Documentation: the associated-domains / asset-links setup and the Client ID Document entries.
 
+**Pitfalls** (from A2, [report 009](../reports/009-oidc-signin.md))
+- A2 keeps the pending sign-in in the browser's express-session (cookie `linked.auth`) and
+  completes it in the `GET /auth/oidc/callback` route, ending in a redirect with cookies. The
+  system browser and the app share no cookies, so a native build needs its own completion: an RPC
+  that takes the returned callback query and finds the pending record another way (bound to the
+  app's request, not a browser cookie), answering with tokens in the body. Reuse
+  `createOidcRelyingParty().complete(pending, query)` and `signInVerifiedWebId`'s rules (email
+  trusted only when it proves the WebID); the redirect URI is the app-claimed link, which must be
+  in `Auth.signinClient.redirectUris`.
+
 **Verify**
 - A test app (or Peace Game's dev build) on an iOS simulator and an Android emulator signs in
   through the system browser and returns signed in.
@@ -489,7 +511,7 @@ sign in from the log line in dev, the readme documents them, and the release car
 
 - [x] A0 — [#119](https://github.com/linked-fw/auth/pull/119), report [005](../reports/005-webid-derivation-hmac.md)
 - [x] A1 — [#122](https://github.com/linked-fw/auth/pull/122), report [007](../reports/007-issuer-discovery.md)
-- [ ] A2
+- [x] A2 — [#127](https://github.com/linked-fw/auth/pull/127), report [009](../reports/009-oidc-signin.md)
 - [x] A3 — [#121](https://github.com/linked-fw/auth/pull/121), report [006](../reports/006-client-id-document.md)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [ ] A4

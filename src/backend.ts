@@ -43,7 +43,28 @@ import {
 } from './utils/sessions.js';
 import { clearAuthCookies, deliverTokens } from './utils/cookies.js';
 import { assertAuthSecrets, FatalConfigError } from './utils/secrets.js';
-import { buildClientIdDocument, CLIENT_ID_DOCUMENT_PATH } from './utils/clientIdDocument.js';
+import {
+  buildClientIdDocument,
+  CLIENT_ID_DOCUMENT_PATH,
+  isAllowedWebUrl,
+  OIDC_CALLBACK_PATH,
+} from './utils/clientIdDocument.js';
+import { createIssuerDiscovery } from './utils/issuerDiscovery.js';
+import type { IssuerDiscovery } from './utils/issuerDiscovery.js';
+import { createGuardedFetch } from './utils/guardedFetch.js';
+import {
+  createOidcRelyingParty,
+  defaultOidcResultLocation,
+  safeReturnTo,
+} from './utils/oidcSignin.js';
+import type {
+  OidcCallbackError,
+  OidcRelyingParty,
+  OidcSigninConfig,
+  OidcSigninOutcome,
+  VerifiedOidcIdentity,
+} from './utils/oidcSignin.js';
+import { rememberPendingOidc, takePendingOidc } from './helpers/oidcPending.js';
 import { refreshTokenExpiryFields } from './utils/token.js';
 import {
   emitAccountWillBeRemovedEvent,
@@ -632,6 +653,255 @@ function clientIdDocumentBody(): string | undefined {
   return JSON.stringify(built.document);
 }
 
+/** The longest email or WebID `startOidcSignin` accepts. */
+const OIDC_INPUT_MAX_LENGTH = 2048;
+
+type OidcRuntime = {
+  config: OidcSigninConfig;
+  siteRoot: string;
+  relyingParty: OidcRelyingParty;
+  discovery: IssuerDiscovery;
+};
+
+let oidcRuntime: OidcRuntime | undefined;
+
+/**
+ * The relying party and issuer discovery for `Auth.oidcSignin`, built on first use and rebuilt when
+ * the configuration object or `SITE_ROOT` changes. Throws when the configuration cannot work: no
+ * `client_id` (neither `clientId` nor `Auth.signinClient`), or a `SITE_ROOT` an issuer would
+ * refuse as a redirect URI.
+ */
+function oidcRuntimeFor(config: OidcSigninConfig): OidcRuntime {
+  const siteRoot = (process.env.SITE_ROOT ?? '').replace(/\/$/, '');
+  if (oidcRuntime && oidcRuntime.config === config && oidcRuntime.siteRoot === siteRoot) {
+    return oidcRuntime;
+  }
+  if (!isAllowedWebUrl(siteRoot) || /[?#]/.test(siteRoot)) {
+    throw new Error(
+      `WebID sign-in: SITE_ROOT must be an https: URL (http: only on localhost), got ${JSON.stringify(process.env.SITE_ROOT)}`
+    );
+  }
+  if (!config.clientId && !Auth.signinClient) {
+    throw new Error(
+      'WebID sign-in: set Auth.signinClient (the Client ID Document) or Auth.oidcSignin.clientId'
+    );
+  }
+  if (config.clientId !== undefined && !isAllowedWebUrl(config.clientId)) {
+    throw new Error(
+      `WebID sign-in: clientId must be an https: URL (http: only on localhost), got ${JSON.stringify(config.clientId)}`
+    );
+  }
+  const allowLocalhost = config.allowLocalhost ?? false;
+  const fetch = createGuardedFetch({ allowLocalhost });
+  const timeoutMs = config.timeoutMs ?? 5000;
+  oidcRuntime = {
+    config,
+    siteRoot,
+    relyingParty: createOidcRelyingParty({
+      clientId: config.clientId ?? `${siteRoot}${CLIENT_ID_DOCUMENT_PATH}`,
+      redirectUri: `${siteRoot}${OIDC_CALLBACK_PATH}`,
+      allowLocalhost,
+      requireEmail: config.requireEmail ?? false,
+      timeoutMs,
+      fetch,
+    }),
+    discovery: createIssuerDiscovery({
+      ...config.discovery,
+      ...(config.defaultIssuer ? { defaultIssuer: config.defaultIssuer } : {}),
+      allowLocalhost,
+      timeoutMs: Math.min(timeoutMs, 3000),
+      fetch,
+    }),
+  };
+  return oidcRuntime;
+}
+
+/**
+ * Whether the app has an account for `email`: an account with that email, or a person at the WebID
+ * `Auth.webIdFor` derives from it. Only for the mismatch hook, inside the callback.
+ */
+async function hasAccountForEmail(provider: AuthBackendProvider, email: string): Promise<boolean> {
+  if (typeof email !== 'string' || !email) return false;
+  const normalized = normalizeSigninEmail(email);
+  try {
+    if (await personOfAccountEmail(normalized)) return true;
+    const person = await provider.userShape
+      .select((p) => [p.givenName])
+      .for(Auth.webIdFor(normalized));
+    return Boolean(person);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a person has a password while its email was never verified (see `dropUnprovenAccess`). */
+async function hasUnprovenPassword(personId: string): Promise<boolean> {
+  if (await personEmailVerified(personId)) return false;
+  const credentials = await AuthCredential.select((cred) => [cred.passwordHash]).where((cred) =>
+    cred.credentialOf.equals({ id: personId })
+  );
+  return (credentials || []).some((credential) => Boolean(credential.passwordHash));
+}
+
+/**
+ * The last step of a Solid-OIDC sign-in: the person whose IRI is the verified WebID, its account,
+ * and a session, as the other methods end. The issuer's tokens are not kept.
+ *
+ * The token's email is trusted only when it proves the WebID: the issuer verified it and it is the
+ * email the WebID derives from (`Auth.webIdFor`), as for OAuth. Any issuer can claim any email for
+ * its own WebIDs, and the email is how the other methods find an account, so an email that does
+ * not prove the WebID is neither stored on the account nor marked verified. A sign-in that proves
+ * the person (always the WebID, and the email when it does) ends access nobody proved, as a code
+ * sign-in does: unverified passwords and their sessions (see `dropUnprovenAccess`).
+ */
+async function signInVerifiedWebId(
+  provider: AuthBackendProvider,
+  identity: VerifiedOidcIdentity
+): Promise<{ isNewAccount: boolean; emailProven: boolean }> {
+  const webId = identity.webId;
+  const email = identity.email ? normalizeSigninEmail(identity.email) : undefined;
+  let emailProvesWebId = false;
+  if (email && identity.emailVerified === true) {
+    try {
+      emailProvesWebId = Auth.webIdFor(email) === webId;
+    } catch {
+      emailProvesWebId = false;
+    }
+  }
+
+  const person = await provider.userShape.select((p) => [p.givenName]).for(webId);
+  if (person) {
+    if (emailProvesWebId) {
+      await dropUnprovenAccess(provider, webId);
+      await markEmailVerified(webId, email);
+    } else if (await hasUnprovenPassword(webId)) {
+      // checked first, so later sign-ins without an email proof do not end each other's sessions
+      await dropUnprovenAccess(provider, webId);
+    }
+    const account = await provider.getOrCreateAccount({ id: webId });
+    await Auth.onSigninSuccessful(provider, { id: webId } as UserData, account as UserAccountData);
+    return { isNewAccount: false, emailProven: emailProvesWebId };
+  }
+
+  await Auth.login(
+    provider,
+    async () => null,
+    async () => {
+      const user = await (provider.userShape as any)
+        .create({ __id: webId, givenName: '', familyName: '', telephone: '' })
+        .catch((err) => {
+          console.error(`Error creating user ${webId}:`, err);
+          throw new Error(`Could not create user ${webId}`);
+        });
+      if (emailProvesWebId) await markEmailVerified(user.id, email);
+      const account = await provider.accountShape
+        .create({ accountOf: user, ...(emailProvesWebId ? { email } : {}) })
+        .catch((err) => {
+          console.error(`Error creating account for user ${user.id}:`, err);
+          throw new Error(`Could not create account for user ${user.id}`);
+        });
+      console.log(`new user ${user.id} from a Solid-OIDC sign-in, account ${account.id}`);
+      return { account, person: user };
+    },
+    'oidc'
+  );
+  return { isNewAccount: true, emailProven: emailProvesWebId };
+}
+
+/**
+ * `GET {SITE_ROOT}/auth/oidc/callback`: the issuer sends the browser back here. The pending sign-in
+ * is taken from this browser's session by `state`, the code is exchanged and checked, a mismatch
+ * between the hinted and the returned email goes to `onEmailMismatch`, and a session is created.
+ * The browser is then redirected: to `onResult`'s location, or by default to the start's
+ * `returnTo` (`/`), or `/signin?oidc_error=<error>` on failure. Nothing is thrown at the app.
+ */
+async function handleOidcCallback(provider: AuthBackendProvider, req: any, res: any): Promise<void> {
+  const config = Auth.oidcSignin;
+  res.set?.('Cache-Control', 'no-store');
+  if (!config) {
+    res.status(404).end();
+    return;
+  }
+
+  const finish = async (outcome: OidcSigninOutcome) => {
+    let location: string | undefined;
+    try {
+      location = await config.onResult?.(outcome);
+    } catch (error) {
+      console.error('[auth] OIDC sign-in: onResult failed', error);
+    }
+    res.redirect(302, location || defaultOidcResultLocation(outcome));
+  };
+  const fail = (
+    error: OidcCallbackError,
+    extra: { returnTo?: string; mismatch?: { hinted: string; returned: string } } = {}
+  ) =>
+    finish({
+      ok: false,
+      error,
+      ...(extra.returnTo ? { returnTo: extra.returnTo } : {}),
+      ...(extra.mismatch ? { mismatch: extra.mismatch } : {}),
+    });
+
+  if (await limitRequest('oidcCallback', req, res)) return fail('rate_limited');
+
+  const pending = takePendingOidc(req.session, req.query?.state);
+  if (!pending) return fail('invalid_state');
+  const returnTo = pending.returnTo;
+
+  const query = new URL(req.originalUrl ?? req.url ?? '', 'http://callback.invalid').search;
+  let runtime: OidcRuntime;
+  try {
+    runtime = oidcRuntimeFor(config);
+  } catch (error) {
+    console.error(`[auth] ${(error as Error).message}`);
+    return fail('failed', { returnTo });
+  }
+  const result = await runtime.relyingParty.complete(pending, query);
+  if (result.ok === false) return fail(result.error, { returnTo });
+  const identity = result.identity;
+
+  let mismatch: { hinted: string; returned: string } | undefined;
+  const returned = identity.email ? normalizeSigninEmail(identity.email) : undefined;
+  if (pending.loginHint && returned && returned !== pending.loginHint) {
+    mismatch = { hinted: pending.loginHint, returned };
+    let decision: 'signin' | 'refuse' = 'signin';
+    if (config.onEmailMismatch) {
+      try {
+        decision = await config.onEmailMismatch({
+          ...mismatch,
+          webId: identity.webId,
+          issuer: identity.issuer,
+          hasAccount: (email) => hasAccountForEmail(provider, email),
+        });
+      } catch (error) {
+        console.error('[auth] OIDC sign-in: onEmailMismatch failed', error);
+        decision = 'refuse';
+      }
+    }
+    if (decision !== 'signin') return fail('email_mismatch', { returnTo, mismatch });
+  }
+
+  let isNewAccount: boolean;
+  let emailProven: boolean;
+  try {
+    ({ isNewAccount, emailProven } = await signInVerifiedWebId(provider, identity));
+  } catch (error) {
+    console.error('[auth] OIDC sign-in: could not create the session', error);
+    return fail('failed', { returnTo, mismatch });
+  }
+  return finish({
+    ok: true,
+    webId: identity.webId,
+    issuer: identity.issuer,
+    ...(returned ? { email: returned } : {}),
+    emailProven,
+    isNewAccount,
+    ...(returnTo ? { returnTo } : {}),
+    ...(mismatch ? { mismatch } : {}),
+  });
+}
+
 export default class AuthBackendProvider extends BackendProvider {
   public accountShape: typeof UserAccount = UserAccount;
   public userShape: typeof SchemaPerson = SchemaPerson;
@@ -734,6 +1004,17 @@ export default class AuthBackendProvider extends BackendProvider {
         }),
       })
     );
+
+    // Solid-OIDC sign-in, when the app opted in. After the session middleware: the pending
+    // sign-ins live in the browser's session.
+    if (Auth.oidcSignin) {
+      try {
+        oidcRuntimeFor(Auth.oidcSignin);
+      } catch (err) {
+        throw new FatalConfigError((err as Error).message);
+      }
+      this.registerRoute('get', OIDC_CALLBACK_PATH, (req, res) => handleOidcCallback(this, req, res));
+    }
   }
 
   async dispose() {
@@ -1484,6 +1765,78 @@ export default class AuthBackendProvider extends BackendProvider {
       },
       'signinWithCode'
     );
+  }
+
+  /**
+   * Start a sign-in through the user's Solid-OIDC issuer, when the app set `Auth.oidcSignin`.
+   *
+   * The issuer is found from what the user typed (issuer discovery: a WebID's profile, the email
+   * domain's WebFinger, else the default issuer, webid.email). The answer is the issuer's
+   * authorization URL, for the browser to navigate to; the issuer sends it back to
+   * `{SITE_ROOT}/auth/oidc/callback`, which completes the sign-in. The pending sign-in (PKCE
+   * verifier, nonce, DPoP key, hinted email) stays in this browser's server-side session.
+   *
+   * @param options.input - An email or a WebID
+   * @param options.prompt - `'none'` for a silent sign-in (the callback ends in `login_required`
+   *   when the user has no session at the issuer)
+   * @param options.providerHint - Passed on as `provider_hint`, e.g. `'google'`
+   * @param options.returnTo - A path on this site to return to after signing in
+   * @returns `{url}`, or `{error, action}` with `action` one of `not_configured`, `invalid_input`,
+   *   `issuer_not_found` (a WebID without a usable issuer), `invalid_issuer`, `issuer_unreachable`,
+   *   `no_session`, or the rate-limited result
+   */
+  async startOidcSignin(options: {
+    input: string;
+    prompt?: 'none';
+    providerHint?: string;
+    returnTo?: string;
+  }): Promise<{ url: string } | { error: string; action: string; retryAfter?: number }> {
+    const limited = await limitRequest('oidcSignin', this.request, this.response);
+    if (limited) return limited;
+
+    const config = Auth.oidcSignin;
+    if (!config) return { error: 'WebID sign-in is not available', action: 'not_configured' };
+
+    const input = typeof options?.input === 'string' ? options.input.trim() : '';
+    if (!input || input.length > OIDC_INPUT_MAX_LENGTH) {
+      return { error: 'Enter an email or a WebID', action: 'invalid_input' };
+    }
+    const prompt = options?.prompt === 'none' ? 'none' : undefined;
+    const providerHint =
+      typeof options?.providerHint === 'string' && /^[a-z0-9_-]{1,32}$/i.test(options.providerHint)
+        ? options.providerHint
+        : undefined;
+    const session = (this.request as any)?.session;
+    if (!session) return { error: 'Sign-in needs a browser session', action: 'no_session' };
+
+    let runtime: OidcRuntime;
+    try {
+      runtime = oidcRuntimeFor(config);
+    } catch (error) {
+      console.error(`[auth] ${(error as Error).message}`);
+      return { error: 'WebID sign-in is not available', action: 'not_configured' };
+    }
+    const found = await runtime.discovery.discover(input);
+    if (found.ok === false) {
+      if (found.reason === 'invalid-input') {
+        return { error: 'Enter an email or a WebID', action: 'invalid_input' };
+      }
+      return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
+    }
+
+    const begun = await runtime.relyingParty.begin({
+      issuer: found.issuer,
+      ...('loginHint' in found ? { loginHint: found.loginHint } : {}),
+      ...(prompt ? { prompt } : {}),
+      ...(providerHint ? { providerHint } : {}),
+    });
+    if (begun.ok === false) {
+      return { error: 'The sign-in service could not be reached', action: begun.error };
+    }
+
+    const returnTo = safeReturnTo(options?.returnTo);
+    rememberPendingOidc(session, { ...begun.pending, ...(returnTo ? { returnTo } : {}) });
+    return { url: begun.url };
   }
 
   /**
@@ -2240,6 +2593,7 @@ declareCallable(AuthBackendProvider, {
   sendResetPasswordLink: 'public',
   sendSigninCode: 'public',
   signinWithCode: 'public',
+  startOidcSignin: 'public',
   resetPassword: 'public',
   verifyEmail: 'public',
   validateToken: 'public',
