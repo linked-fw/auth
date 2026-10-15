@@ -29,38 +29,49 @@ function redact(text: string, secrets: string[]): string {
   return secrets.filter(Boolean).reduce((out, secret) => out.split(secret).join('[redacted]'), text);
 }
 
-/** The `token` query parameter of a link, if it has one. */
-function linkToken(url: string): string {
+/** The secret query parameters of a link (`token`, `code`), those it has. */
+function linkSecrets(url: string): string[] {
   try {
-    return new URL(url).searchParams.get('token') ?? '';
+    const params = new URL(url).searchParams;
+    return ['token', 'code'].map((name) => params.get(name) ?? '').filter(Boolean);
   } catch {
-    return '';
+    return [];
   }
 }
 
+/** What an auth email is for: a password reset, an email verification or a sign-in code. */
+export type AuthEmailPurpose = 'reset' | 'verify' | 'signin-code';
+
 /**
- * Send an auth email (a reset or verification link). Never throws: `LinkedEmail.send` throws
- * synchronously when no provider is registered, and a provider may reject.
+ * Send an auth email (a reset or verification link, or a sign-in code and link). Never throws:
+ * `LinkedEmail.send` throws synchronously when no provider is registered, and a provider may
+ * reject.
  *
- * With DEV_AUTH on and no provider registered, the link is printed to the server log instead
- * and the outcome is `'logged'`. A failure is logged without the address or the link.
+ * With DEV_AUTH on and no provider registered, the link (and the code, if there is one) is
+ * printed to the server log instead and the outcome is `'logged'`. A failure is logged without
+ * the address, the link or its secrets.
  */
 export async function sendAuthEmail(
   options: EmailOptions,
-  devLink: { purpose: 'reset' | 'verify'; url: string }
+  devLink: { purpose: AuthEmailPurpose; url: string; code?: string }
 ): Promise<AuthEmailOutcome> {
   if (devAuthEnabled() && !LinkedEmail.hasDefaultProvider()) {
-    console.info(`[@_linked/auth] dev: ${devLink.purpose} link: ${devLink.url}`);
+    const code = devLink.code ? ` (code ${devLink.code})` : '';
+    console.info(`[@_linked/auth] dev: ${devLink.purpose} link: ${devLink.url}${code}`);
     return 'logged';
   }
   try {
     await LinkedEmail.send(options);
     return 'sent';
   } catch (error) {
+    const addresses = options.to.flatMap((to) => [to.email_address?.address, to.email_address?.name]);
     const secrets = [
       devLink.url,
-      linkToken(devLink.url),
-      ...options.to.flatMap((to) => [to.email_address?.address, to.email_address?.name]),
+      ...linkSecrets(devLink.url),
+      devLink.code ?? '',
+      ...addresses,
+      // a link may carry the address too, encoded
+      ...addresses.map((address) => (address ? encodeURIComponent(address) : '')),
     ];
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[@_linked/auth] could not send the ${devLink.purpose} email: ${redact(message, secrets)}`);

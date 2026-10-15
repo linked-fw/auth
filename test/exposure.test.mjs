@@ -59,6 +59,8 @@ const SURFACE = {
       signinTemporary: 'public',
       signinDev: 'public',
       sendResetPasswordLink: 'public',
+      sendSigninCode: 'public',
+      signinWithCode: 'public',
       resetPassword: 'public',
       verifyEmail: 'public',
       validateToken: 'public',

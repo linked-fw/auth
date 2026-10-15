@@ -46,6 +46,8 @@ export type RateLimitRuleName =
   | 'credentialLookup'
   | 'emailVerificationRequest'
   | 'emailVerify'
+  | 'signinCodeRequest'
+  | 'signinCode'
   | 'reauthenticate';
 
 const MINUTE = 60;
@@ -87,6 +89,16 @@ export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitRuleName, RateLimitRu
   },
   /** `verifyEmail`: guessing a verification token. */
   emailVerify: { ip: { max: 10, windowSeconds: MINUTE } },
+  /** `sendSigninCode`: each one sends an email. By IP, and by the email asked for. */
+  signinCodeRequest: {
+    ip: { max: 10, windowSeconds: HOUR },
+    account: { max: 3, windowSeconds: HOUR },
+  },
+  /** `signinWithCode`: guessing a six-digit code. By IP, and by the email it was sent to. */
+  signinCode: {
+    ip: { max: 10, windowSeconds: MINUTE },
+    account: { max: 5, windowSeconds: 15 * MINUTE },
+  },
   /** `removeAccount` when it checks a password or ID token. By the signed-in account. */
   reauthenticate: {
     ip: { max: 10, windowSeconds: MINUTE },

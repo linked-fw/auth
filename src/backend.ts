@@ -64,7 +64,19 @@ import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
 import path, { dirname, basename } from 'path';
 import { escapeHtml, sendAuthEmail } from './utils/email.js';
-import { clearUnsentToken, consumeCredentialToken } from './helpers/credentialToken.js';
+import {
+  clearUnsentToken,
+  consumeCredentialToken,
+  consumeCredentialTokenRecord,
+  TOKEN_KINDS,
+} from './helpers/credentialToken.js';
+import {
+  generateSigninCode,
+  normalizeSigninCode,
+  normalizeSigninEmail,
+  signinCodeFields,
+  signinCodeSecret,
+} from './helpers/signinCode.js';
 import {
   markEmailVerified,
   personEmailVerified,
@@ -411,6 +423,90 @@ async function markOAuthEmailVerified(identity: VerifiedOAuthIdentity, personId:
   } catch (error) {
     console.error(`${identity.provider} sign-in: could not mark the email verified`, error);
   }
+}
+
+/** What every refused code sign-in answers: wrong, expired, used, or for another email. */
+export const INVALID_SIGNIN_CODE_MESSAGE = 'This sign-in code is invalid or has expired.';
+
+/**
+ * Store `fields` (a new sign-in code) on the credential that holds codes for `email`, replacing
+ * any earlier code: the credential of the person at `webID`, else of the person whose account has
+ * the email, else the pending credential for the email (see `AuthCredential.signinCodeEmail`),
+ * created when there is none yet.
+ *
+ * @returns the id of the person the code signs in to, if the email has one yet
+ */
+async function storeSigninCode(
+  provider: AuthBackendProvider,
+  email: string,
+  webID: string,
+  fields: ReturnType<typeof signinCodeFields>
+): Promise<string | undefined> {
+  const byWebID = await provider.getPasswordForUser({ id: webID });
+  if (byWebID) {
+    await AuthCredential.update(fields).for({ id: byWebID.id });
+    return webID;
+  }
+
+  const account = await UserAccount.select((ua) => [ua.email, ua.accountOf])
+    .where((ua) => ua.email.equals(email))
+    .one();
+  const personId = account?.accountOf?.id;
+  if (personId) {
+    const ofPerson = await provider.getPasswordForUser({ id: personId });
+    if (ofPerson) {
+      await AuthCredential.update(fields).for({ id: ofPerson.id });
+    } else {
+      await AuthCredential.create({ credentialOf: { id: personId }, email, ...fields });
+    }
+    return personId;
+  }
+
+  const pending = await AuthCredential.select((c) => [c.signinCodeEmail])
+    .where((c) => c.signinCodeEmail.equals(email))
+    .one();
+  if (pending) {
+    await AuthCredential.update(fields).for({ id: pending.id });
+  } else {
+    await AuthCredential.create({ signinCodeEmail: email, ...fields });
+  }
+  return undefined;
+}
+
+/** The email with a sign-in code and the link that carries it. */
+function signinCodeEmail(
+  email: string,
+  givenName: string | undefined,
+  code: string,
+  signinUrl: string
+) {
+  const minutes = Math.round(TOKEN_KINDS.signinCode.ttl / 60);
+  return {
+    to: [{ email_address: { address: email, name: email } }],
+    subject: `Your ${process.env.APP_NAME} sign-in code: ${code}`,
+    htmlbody: `
+          <table role='presentation' border='0' cellpadding='0' cellspacing='0' class='body' style='border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #fff; width: 100%;' width='100%' bgcolor='#fff'>
+            <tr>
+              <td>
+                <p>Hey${givenName ? ` ${escapeHtml(givenName)}` : ''} 👋</p>
+                <p>Click the button below to sign in to ${escapeHtml(process.env.APP_NAME)}:</p>
+                <a href='${escapeHtml(signinUrl)}' target='_blank' style='border: solid 1px #3498db; border-radius: 5px; box-sizing: border-box; cursor: pointer; display: inline-block; font-size: 14px; font-weight: bold; margin: 0; padding: 12px 25px; text-decoration: none; text-transform: capitalize; background-color: #3498db; border-color: #3498db; color: #ffffff;'>Sign in</a>
+                <p>Or type this code where you asked for it:</p>
+                <p style='font-size: 24px; font-weight: bold; letter-spacing: 4px;'>${escapeHtml(code)}</p>
+                <p>The code and the link work once, for ${minutes} minutes. If you did not ask to sign in, you can ignore this email.</p>
+                <p>Cheers,</p>
+                <p>${escapeHtml(process.env.APP_NAME)} Team</p>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <p style='font-size: 12px; color: #999;'>Alternatively, you can also copy and paste the link into your browser:</p>
+                <a href='${escapeHtml(signinUrl)}' target='_blank' style='font-size: 12px;'>${escapeHtml(signinUrl)}</a>
+              </td>
+            </tr>
+          </table>
+        `,
+  };
 }
 
 const REAUTH_MISSING_MESSAGE = 'Confirm it is you to delete this account.';
@@ -1233,6 +1329,128 @@ export default class AuthBackendProvider extends BackendProvider {
   }
 
   /**
+   * Email a sign-in code to `email`: a six-digit code and a link that carries it
+   * (`{SITE_ROOT}/auth/signin-code?email=…&code=…`), for `signinWithCode`. The code works once,
+   * until it expires (`AUTH_SIGNIN_CODE_TTL`), and a new request replaces it. An email with no
+   * account gets a code too, held by a pending credential: signing in with it creates the
+   * account.
+   *
+   * Answers `true` for every well-formed email, whether or not an account exists for it and
+   * whether or not the email could be sent, so the answer never tells which emails have an
+   * account. When the email is not sent, the stored code is removed again. With DEV_AUTH on and
+   * no email provider, the code and link go to the server log.
+   *
+   * @param email - The email address
+   * @returns true, or an error for a malformed email or a rate-limited request
+   */
+  async sendSigninCode(email: string) {
+    // every request sends an email; counted by the address asked for, existing or not
+    const limited = await limitRequest('signinCodeRequest', this.request, this.response, email);
+    if (limited) return limited;
+
+    if (typeof email !== 'string') return { error: 'Invalid email format' };
+    const normalizedEmail = normalizeSigninEmail(email);
+    let webID: string;
+    try {
+      webID = Auth.webIdFor(normalizedEmail);
+    } catch (error) {
+      console.error('Invalid email format during a sign-in code request');
+      return { error: 'Invalid email format' };
+    }
+
+    const code = generateSigninCode();
+    // only the hash of the email and code is stored, with an expiry
+    const fields = signinCodeFields(normalizedEmail, code);
+    const personId = await storeSigninCode(this, normalizedEmail, webID, fields);
+
+    const signinUrl =
+      `${process.env.SITE_ROOT}/auth/signin-code` +
+      `?email=${encodeURIComponent(normalizedEmail)}&code=${code}`;
+    const givenName = personId ? await givenNameOf(this, personId) : undefined;
+    const outcome = await sendAuthEmail(
+      signinCodeEmail(normalizedEmail, givenName, code, signinUrl),
+      { purpose: 'signin-code', url: signinUrl, code }
+    );
+    if (outcome === 'failed') {
+      await clearUnsentToken('signinCode', fields.signinCode);
+    }
+    return true;
+  }
+
+  /**
+   * Sign in with a code from `sendSigninCode`, typed in or carried by its link. The code works
+   * once, until it expires, and only with the email it was sent to; every other code is refused
+   * with the same answer. Signing in proves control of the email, so it is marked verified. An
+   * email without an account gets one: the person at the WebID `Auth.webIdFor` derives from it,
+   * and its account.
+   *
+   * @param email - The email the code was sent to
+   * @param code - The code (spaces and dashes are ignored)
+   */
+  async signinWithCode(email: string, code: string): Promise<AuthenticationResult> {
+    // before anything is looked up; by the email, so a code cannot be guessed from many addresses
+    const limited = await limitRequest('signinCode', this.request, this.response, email);
+    if (limited) return limited;
+
+    const refused = { error: INVALID_SIGNIN_CODE_MESSAGE, action: 'invalid_code' };
+    if (typeof email !== 'string' || !normalizeSigninCode(code)) return refused;
+    const normalizedEmail = normalizeSigninEmail(email);
+    let webID: string;
+    try {
+      webID = Auth.webIdFor(normalizedEmail);
+    } catch (error) {
+      return refused;
+    }
+
+    const consumed = await consumeCredentialTokenRecord(
+      'signinCode',
+      signinCodeSecret(normalizedEmail, code)
+    );
+    if (!consumed) return refused;
+
+    // a pending credential held the code for an email that had no account yet: it becomes the
+    // person's credential, with the email it was sent to
+    const personId = consumed.person?.id ?? webID;
+    if (!consumed.person?.id) {
+      await AuthCredential.update({
+        credentialOf: { id: personId },
+        email: normalizedEmail,
+        signinCodeEmail: null,
+      }).for({ id: consumed.credentialId });
+    }
+
+    const person = await this.userShape.select((p) => [p.givenName]).for(personId);
+    if (person) {
+      await markEmailVerified(personId, normalizedEmail);
+      const account = await this.getOrCreateAccount({ id: personId });
+      return Auth.onSigninSuccessful(this, { id: personId } as UserData, account as UserAccountData);
+    }
+
+    return Auth.login(
+      this,
+      async () => null,
+      async () => {
+        const user = await (this.userShape as any)
+          .create({ __id: personId, givenName: '', familyName: '', telephone: '' })
+          .catch((err) => {
+            console.error(`Error creating user ${personId}:`, err);
+            throw new Error(`Could not create user ${personId}`);
+          });
+        await markEmailVerified(user.id, normalizedEmail);
+        const account = await this.accountShape
+          .create({ accountOf: user, email: normalizedEmail })
+          .catch((err) => {
+            console.error(`Error creating account for user ${user.id}:`, err);
+            throw new Error(`Could not create account for user ${user.id}`);
+          });
+        console.log(`new user ${user.id} from a sign-in code, account ${account.id}`);
+        return { account, person: user };
+      },
+      'signinWithCode'
+    );
+  }
+
+  /**
    * Sign in with an OAuth provider.
    *
    * Only providers whose credential this server verifies itself are accepted (see
@@ -1984,6 +2202,8 @@ declareCallable(AuthBackendProvider, {
   signinTemporary: 'public',
   signinDev: 'public',
   sendResetPasswordLink: 'public',
+  sendSigninCode: 'public',
+  signinWithCode: 'public',
   resetPassword: 'public',
   verifyEmail: 'public',
   validateToken: 'public',

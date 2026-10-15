@@ -55,7 +55,8 @@ export class AuthCredential extends Shape {
 
   /**
    * When the person proved control of `email`, by opening a verification or reset link sent to
-   * it, or by signing in with a provider that verified it. A person counts as verified when any
+   * it, by signing in with a code emailed to it, or by signing in with a provider that verified
+   * it. A person counts as verified when any
    * of their credentials has it.
    */
   @literalProperty({
@@ -109,6 +110,53 @@ export class AuthCredential extends Shape {
     maxCount: 1,
   })
   get emailVerificationConsumeMarker(): string {
+    return '';
+  }
+
+  /**
+   * The SHA-256 hash (base64url) of the outstanding emailed sign-in code together with the email
+   * it was sent to, if there is one. Requesting a new code replaces it, and signing in with it
+   * removes it.
+   */
+  @literalProperty({
+    path: auth.signinCode,
+    maxCount: 1,
+  })
+  get signinCode(): string {
+    return '';
+  }
+
+  /** When the outstanding sign-in code stops working. */
+  @literalProperty({
+    path: auth.signinCodeExpiresAt,
+    datatype: xsd.dateTime,
+    maxCount: 1,
+  })
+  get signinCodeExpiresAt(): Date {
+    return undefined as any;
+  }
+
+  /** The same marker for a sign-in code consume. */
+  @literalProperty({
+    path: auth.signinCodeConsumeMarker,
+    maxCount: 1,
+  })
+  get signinCodeConsumeMarker(): string {
+    return '';
+  }
+
+  /**
+   * Set only on a pending credential: one that holds sign-in codes for an email no person has
+   * yet, so it has no `credentialOf` and no `email`. Kept apart from `email` so that no lookup of
+   * an account or credential by email (signup, password, reset, OAuth) ever finds it; anyone can
+   * request a code for any email. The first sign-in with a code attaches it to the new person
+   * and moves the email to `email`.
+   */
+  @literalProperty({
+    path: auth.signinCodeEmail,
+    maxCount: 1,
+  })
+  get signinCodeEmail(): string {
     return '';
   }
 
