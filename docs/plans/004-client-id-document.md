@@ -109,5 +109,5 @@ Validation: Verify output recorded below; full gate green.
 ## Progress
 
 - [x] Phase 1 — `npx linked build && node --test test/client-id-document.test.mjs`: 17 pass, 0 fail
-- [ ] Phase 2
+- [x] Phase 2 — `npx linked build && npm test`: 341 tests, 341 pass, 0 fail (321 before + 20 new). The exposure guard flagged a provider method, so the document is built by a module function and `setupBeforeControllers` only registers the route
 - [ ] Phase 3

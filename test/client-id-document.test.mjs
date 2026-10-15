@@ -1,9 +1,24 @@
 // The Client ID Document and the sign-in theme: building the document from configuration, and
 // validateClientTheme keeping valid theme values and dropping the rest.
 //
+// The serving tests run over real HTTP against an Express app with the provider's middleware.
 // Uses the BUILT package in lib/.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'client-id-test-secret-client-id-test-secret';
+process.env.SESSION_SECRET = 'client-id-test-session-secret';
+process.env.AUTH_SESSION_CLEANUP = 'false';
+
+const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-auth-client-id-test-'));
+fs.mkdirSync(path.join(workDir, 'data'));
+process.chdir(workDir);
+process.on('exit', () => fs.rmSync(workDir, { recursive: true, force: true }));
 
 const libDir = new URL('../lib/esm/', import.meta.url);
 const {
@@ -236,4 +251,80 @@ test('the font allow-list includes the platform font and has no duplicates', () 
   assert.ok(SIGNIN_THEME_FONTS.includes('system-ui'));
   assert.equal(new Set(SIGNIN_THEME_FONTS).size, SIGNIN_THEME_FONTS.length);
   assert.ok(Object.isFrozen(SIGNIN_THEME_FONTS));
+});
+
+// --- Serving -------------------------------------------------------------------------------
+
+const { default: express } = await import('express');
+const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
+const { Auth } = await import(new URL('utils/auth.js', libDir));
+
+const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
+const servers = [];
+after(() => servers.forEach((s) => s.close()));
+
+/** Starts an app with the provider set up, with `Auth.signinClient` and SITE_ROOT as given. */
+async function startApp({ signinClient, siteRoot }) {
+  Auth.signinClient = signinClient;
+  process.env.SITE_ROOT = siteRoot;
+  const app = express();
+  app.lazyrouter();
+  const provider = new AuthBackendProvider(app, fakeLincdServer);
+  await provider.setupBeforeControllers();
+  const server = await new Promise((resolve) => {
+    const s = http.createServer(app).listen(0, '127.0.0.1', () => resolve(s));
+  });
+  servers.push(server);
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+/** Runs `fn` with console.warn captured; returns what was warned. */
+async function captureWarnings(fn) {
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    await fn();
+  } finally {
+    console.warn = original;
+  }
+  return warnings;
+}
+
+test('a configured app serves its document as cacheable JSON-LD, without invalid theme values', async () => {
+  let url;
+  const warnings = await captureWarnings(async () => {
+    url = await startApp({
+      signinClient: { clientName: 'Create.Now', theme: { ...validTheme, font: 'Comic Sans MS' } },
+      siteRoot: 'https://create.now/',
+    });
+  });
+  assert.ok(
+    warnings.some((w) => w.includes('Client ID Document') && w.includes('font') && w.includes('Comic Sans MS')),
+    warnings.join('\n')
+  );
+
+  const res = await fetch(`${url}/.well-known/linked-client.jsonld`, { signal: AbortSignal.timeout(5000) });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /^application\/ld\+json/);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=600');
+  const document = await res.json();
+  assert.equal(document.client_id, 'https://create.now/.well-known/linked-client.jsonld');
+  assert.deepEqual(document.redirect_uris, ['https://create.now/auth/oidc/callback']);
+  const { font, ...rest } = validTheme;
+  assert.deepEqual(document[SIGNIN_THEME_KEY], rest);
+});
+
+test('an app without sign-in config serves nothing at the path', async () => {
+  const url = await startApp({ signinClient: undefined, siteRoot: 'https://app.example' });
+  const res = await fetch(`${url}/.well-known/linked-client.jsonld`, { signal: AbortSignal.timeout(5000) });
+  assert.equal(res.status, 404);
+});
+
+test('a SITE_ROOT the issuer would reject stops startup with a fatal error', async () => {
+  await assert.rejects(
+    startApp({ signinClient: { clientName: 'App' }, siteRoot: 'http://app.example' }),
+    (err) => err.name === 'FatalConfigError' && err.fatal === true && /SITE_ROOT/.test(err.message)
+  );
+  Auth.signinClient = undefined;
 });
