@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.5.1
+
+### Patch Changes
+
+- [#114](https://github.com/linked-fw/auth/pull/114) [`a97e35b`](https://github.com/linked-fw/auth/commit/a97e35bd0b8fb4cc05936ebf4eebfa221ac5baf4) Thanks [@abdipramana](https://github.com/abdipramana)! - Google and Apple sign-in now reuse an unambiguous OAuth-only account when its verified email is stored on `UserAccount` or `AuthCredential`, even if the Person uses a legacy non-email-derived WebID. If the email matches multiple people or accounts, sign-in fails closed with `action: "account_conflict"` instead of selecting an arbitrary account or creating another one. Password-protected accounts still require the owner to sign in before linking the provider.
+
 ## 3.5.0
 
 ### Minor Changes
