@@ -58,8 +58,8 @@ export var signinCode = ns('signinCode');
 export var signinCodeExpiresAt = ns('signinCodeExpiresAt');
 /** The same marker for a sign-in code consume. */
 export var signinCodeConsumeMarker = ns('signinCodeConsumeMarker');
-/** The email a pending credential (of nobody yet) holds sign-in codes for. */
-export var signinCodeEmail = ns('signinCodeEmail');
+/** The hash of the email a pending credential (of nobody yet) holds sign-in codes for. */
+export var signinCodeEmailHash = ns('signinCodeEmailHash');
 export var telephone = ns('telephone');
 export var hash = ns('hash');
 export var tokenHash = ns('tokenHash');
@@ -100,7 +100,7 @@ export const auth = {
   signinCode,
   signinCodeExpiresAt,
   signinCodeConsumeMarker,
-  signinCodeEmail,
+  signinCodeEmailHash,
   telephone,
   hash,
   tokenHash,

@@ -147,16 +147,17 @@ export class AuthCredential extends Shape {
 
   /**
    * Set only on a pending credential: one that holds sign-in codes for an email no person has
-   * yet, so it has no `credentialOf` and no `email`. Kept apart from `email` so that no lookup of
-   * an account or credential by email (signup, password, reset, OAuth) ever finds it; anyone can
-   * request a code for any email. The first sign-in with a code attaches it to the new person
-   * and moves the email to `email`.
+   * yet, so it has no `credentialOf` and no `email`. The SHA-256 hash (base64url) of the
+   * normalized email, so the store keeps no address of someone who never signed in, and apart
+   * from `email`, so no lookup of an account or credential by email (signup, password, reset,
+   * OAuth) ever finds it: anyone can request a code for any email. The first sign-in with a code
+   * attaches it to the person and sets `email`.
    */
   @literalProperty({
-    path: auth.signinCodeEmail,
+    path: auth.signinCodeEmailHash,
     maxCount: 1,
   })
-  get signinCodeEmail(): string {
+  get signinCodeEmailHash(): string {
     return '';
   }
 

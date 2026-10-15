@@ -94,7 +94,7 @@ export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitRuleName, RateLimitRu
     ip: { max: 10, windowSeconds: HOUR },
     account: { max: 3, windowSeconds: HOUR },
   },
-  /** `signinWithCode`: guessing a six-digit code. By IP, and by the email it was sent to. */
+  /** `signinWithCode`: guessing an eight-digit code. By IP, and by the email it was sent to. */
   signinCode: {
     ip: { max: 10, windowSeconds: MINUTE },
     account: { max: 5, windowSeconds: 15 * MINUTE },

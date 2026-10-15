@@ -304,7 +304,7 @@ It is rate limited to 10 per hour per IP (`signup`), which makes it a slow way t
 
 ### Sign in with an emailed code
 
-A passwordless method next to password: the user types their email, gets a six-digit code and a
+A passwordless method next to password: the user types their email, gets an eight-digit code and a
 link carrying it, and signs in with either. The code in the email lets a link opened on one device
 be typed on another. Signing in with a code proves control of the email, so it is marked verified,
 and an email without an account gets one (the person at the WebID `Auth.webIdFor` derives, and
@@ -325,18 +325,20 @@ if ('error' in result) showError(result.error); // action: 'invalid_code' | 'rat
 - `signinWithCode(email, code)` checks the code against the email it was sent to. Case and
   surrounding spaces in the email, and spaces or dashes in the code, are ignored. A wrong,
   expired or already used code, or a code for another email, all answer `{error: 'This sign-in
-  code is invalid or has expired.', action: 'invalid_code'}`. A refused code is not used up.
+  code is invalid or has expired.', action: 'invalid_code'}`. A wrong code, or one tried with
+  another email, leaves the right one working; an expired one is used up.
 - The code works once, for `AUTH_SIGNIN_CODE_TTL` seconds (default 15 minutes). Only a hash of
   the email and code together is stored, on the person's `AuthCredential`. An email with no
-  account keeps its code on a pending credential, which has no person and keeps the email out of
-  `email`, so signup, password sign-in, reset and OAuth never see it; the first sign-in attaches
-  it to the new person.
-- Six digits are guessable without a limit: `signinWithCode` allows 5 attempts per email per 15
+  account keeps its code on a pending credential, which has no person and stores only a hash of
+  the email (`signinCodeEmailHash`), so signup, password sign-in, reset and OAuth never see it;
+  the first sign-in attaches it to the person: one that has the email by then, or a new one.
+  Pending credentials of codes that were never used are not removed yet.
+- Eight digits are guessable without a limit: `signinWithCode` allows 5 attempts per email per 15
   minutes (`signinCode`), from any number of addresses, and `sendSigninCode` 3 requests per email
   per hour (`signinCodeRequest`). See *Rate limits*.
 - The link is `${SITE_ROOT}/auth/signin-code?email=…&code=…`. Render `SigninWithCodeForm` at that
-  route (see *Setup sign-in by code*): it signs in once from the URL, and elsewhere it is the form
-  that asks for the email and then the code.
+  route (see *Setup sign-in by code*): it shows the code filled in and signs in when the user
+  presses Sign in, and elsewhere it is the form that asks for the email and then the code.
 
 ### Email verification
 
@@ -692,7 +694,7 @@ does not reveal whether it does.
 | `emailVerificationRequest` | `resendEmailVerification` (sends an email) | 10 / hour | 3 / hour (signed-in account) |
 | `emailVerify` | `verifyEmail` | 10 / minute | |
 | `signinCodeRequest` | `sendSigninCode` (sends an email) | 10 / hour | 3 / hour (by email) |
-| `signinCode` | `signinWithCode` (guessing a six-digit code) | 10 / minute | 5 / 15 minutes (by email) |
+| `signinCode` | `signinWithCode` (guessing an eight-digit code) | 10 / minute | 5 / 15 minutes (by email) |
 | `reauthenticate` | `removeAccount` when it checks a password or ID token | 10 / minute | 5 / 15 minutes (signed-in account) |
 
 A limited call answers `{error: 'Too many attempts. Please wait a moment and try again.', action:
@@ -749,7 +751,7 @@ sign-in can be tested without mail:
 ```
 [@_linked/auth] dev: verify link: https://app.test/auth/verify-email?token=…
 [@_linked/auth] dev: reset link: https://app.test/auth/reset-password?token=…
-[@_linked/auth] dev: signin-code link: https://app.test/auth/signin-code?email=ada%40example.test&code=123456 (code 123456)
+[@_linked/auth] dev: signin-code link: https://app.test/auth/signin-code?email=ada%40example.test&code=12345678 (code 12345678)
 ```
 
 The sign-in code line is the one place a code is logged on purpose; a test or a local issuer reads
@@ -774,8 +776,9 @@ reset_password_callback: {
 ## Setup sign-in by code
 
 The sign-in code email links to `${SITE_ROOT}/auth/signin-code?email=…&code=…`. Define a route
-there that renders `SigninWithCodeForm`; with both values in the URL it signs in once, without
-asking. Use the same component wherever the user should start a code sign-in. It reads the URL with
+there that renders `SigninWithCodeForm`; with both values in the URL it shows the code filled in
+and signs in when the user presses Sign in. It never signs in on its own, because mail scanners
+open links and would use the code up. Use the same component wherever the user should start a code sign-in. It reads the URL with
 React Router's `useSearchParams`, and calls `onLoggedIn(authResponse)` once signed in.
 
 ```tsx

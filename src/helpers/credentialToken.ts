@@ -48,7 +48,7 @@ export type CredentialTokenKind = keyof typeof TOKEN_KINDS;
 
 /**
  * The value a single-use token is stored and looked up by: SHA-256, base64url. For links a plain
- * hash is enough, because the token is 160 random bits, not a password. A sign-in code is six
+ * hash is enough, because the token is 160 random bits, not a password. A sign-in code is eight
  * digits: its hash binds it to an email, and what stops guessing is the per-email rate limit on
  * `signinWithCode` and the code's short lifetime, not the hash.
  */

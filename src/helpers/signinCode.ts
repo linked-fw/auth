@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { hashToken, tokenExpiresAt } from './credentialToken.js';
 
 /** How many digits an emailed sign-in code has. */
-export const SIGNIN_CODE_LENGTH = 6;
+export const SIGNIN_CODE_LENGTH = 8;
 
 /** A new sign-in code: `SIGNIN_CODE_LENGTH` random digits. */
 export function generateSigninCode(): string {
@@ -22,7 +22,7 @@ export function normalizeSigninEmail(email: string): string {
 /**
  * The token a sign-in code is stored and consumed as: the email and the code together. Binding
  * the code to its email means a lookup by its hash finds only that email's code, and two people
- * holding the same six digits never meet.
+ * holding the same digits never meet.
  */
 export function signinCodeSecret(email: string, code: string): string {
   return `${normalizeSigninEmail(email)}\n${normalizeSigninCode(code)}`;

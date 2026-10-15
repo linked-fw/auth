@@ -1,5 +1,5 @@
-// SigninWithCodeForm in jsdom: the link in the email signs in once, and the typed flow sends a
-// code, then signs in with it. Renders the BUILT component, with Server.call going over HTTP to a
+// SigninWithCodeForm in jsdom: the link in the email fills in the code and signs in on a press
+// (never on its own), and the typed flow sends a code, then signs in with it. Renders the BUILT component, with Server.call going over HTTP to a
 // tiny fake backend.
 import './cssStub.mjs';
 import { test, beforeEach, afterEach, after } from 'node:test';
@@ -41,7 +41,7 @@ const server = http.createServer((req, res) => {
     }
     if (req.url.endsWith('/signinWithCode')) {
       calls.signinWithCode.push(body);
-      return body.includes('123456')
+      return body.includes('12345678')
         ? send(SIGNED_IN)
         : send({ error: 'This sign-in code is invalid or has expired.', action: 'invalid_code' });
     }
@@ -131,17 +131,32 @@ afterEach(async () => {
 });
 after(() => server.close());
 
-test('the link signs in once, and a new link on the same route signs in again', async () => {
-  await render('/auth/signin-code?email=ada%40example.test&code=123456');
-  await waitFor(() => loggedIn.length === 1, 'the link to sign in');
+test('the link fills in the code and signs in only when Sign in is pressed', async () => {
+  await render('/auth/signin-code?email=ada%40example.test&code=12345678');
+  const codeInput = await waitFor(
+    () => document.querySelector('input[autocomplete=one-time-code]'),
+    'the code field'
+  );
+  assert.equal(codeInput.value, '12345678');
+  // a mail scanner that opens the link uses nothing up
+  await act(async () => new Promise((r) => setTimeout(r, 100)));
+  assert.equal(calls.signinWithCode.length, 0);
+
+  await submit(document.querySelector('form'));
+  await waitFor(() => loggedIn.length === 1, 'the sign-in');
   assert.equal(calls.signinWithCode.length, 1);
   assert.ok(calls.signinWithCode[0].includes('ada@example.test'));
-  // a re-render with the same link does not use the code again
-  await act(async () => navigate('/auth/signin-code?email=ada%40example.test&code=123456&again=1'));
-  await act(async () => new Promise((r) => setTimeout(r, 50)));
-  assert.equal(calls.signinWithCode.length, 1);
-  await act(async () => navigate('/auth/signin-code?email=ada%40example.test&code=999999'));
-  await waitFor(() => calls.signinWithCode.length === 2, 'the new link to be used');
+  assert.ok(calls.signinWithCode[0].includes('12345678'));
+  assert.match(document.body.textContent, /You are signed in/);
+
+  // a new link on the same route shows the new code
+  await act(async () => navigate('/auth/signin-code?email=ada%40example.test&code=99999999'));
+  const next = await waitFor(
+    () => document.querySelector('input[autocomplete=one-time-code]'),
+    'the code field for the new link'
+  );
+  assert.equal(next.value, '99999999');
+  await submit(document.querySelector('form'));
   await waitFor(() => document.querySelector('[role=alert]'), 'the refusal to show');
   assert.match(document.querySelector('[role=alert]').textContent, /invalid or has expired/);
 });
@@ -159,12 +174,12 @@ test('typing an email sends a code, and typing the code signs in', async () => {
     'the code field'
   );
   assert.match(document.body.textContent, /We sent a sign-in code to ada@example\.test/);
-  await type(codeInput, '000000');
+  await type(codeInput, '00000000');
   await submit(document.querySelector('form'));
   await waitFor(() => document.querySelector('[role=alert]'), 'the refusal to show');
   assert.equal(loggedIn.length, 0);
 
-  await type(document.querySelector('input[autocomplete=one-time-code]'), '123456');
+  await type(document.querySelector('input[autocomplete=one-time-code]'), '12345678');
   await submit(document.querySelector('form'));
   await waitFor(() => loggedIn.length === 1, 'the sign-in');
   assert.equal(calls.signinWithCode.length, 2);

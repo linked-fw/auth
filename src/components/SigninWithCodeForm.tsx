@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslate } from '@tolgee/react';
 import { Input } from '@_linked/primitives/components/Input';
@@ -20,7 +20,8 @@ interface SigninWithCodeFormProps {
  * Sign in with a code sent by email: asks for the email, sends the code, then asks for the code.
  *
  * It is also the page behind the link in that email (`/auth/signin-code?email=…&code=…`): with
- * both in the URL it signs in once, without asking.
+ * both in the URL it shows the code filled in, and signs in when the user presses Sign in. It
+ * never signs in on its own: mail scanners open links, and would use the code up.
  */
 export default function SigninWithCodeForm({
   onLoggedIn,
@@ -35,16 +36,13 @@ export default function SigninWithCodeForm({
   const prefix = 'signinCode';
 
   const [email, setEmail] = useState(linkEmail || initialEmail || '');
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(linkEmail && linkCode ? linkCode : '');
   const [step, setStep] = useState<'email' | 'code' | 'signedIn'>(
     linkEmail && linkCode ? 'code' : 'email'
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [helperText, setHelperText] = useState('');
-  // a code is single-use: a second call for the same link (StrictMode, a re-render) would be
-  // refused. Keyed on the link so a route reused for a new link still signs in.
-  const redeemed = useRef<string | undefined>(undefined);
 
   const signin = async (signinEmail: string, signinCode: string) => {
     setBusy(true);
@@ -66,15 +64,14 @@ export default function SigninWithCodeForm({
     }
   };
 
+  // a route reused for another link shows that link's email and code
   useEffect(() => {
-    if (!linkEmail || !linkCode || auth.validating) return;
-    const link = `${linkEmail}\n${linkCode}`;
-    if (redeemed.current === link) return;
-    redeemed.current = link;
+    if (!linkEmail || !linkCode) return;
     setEmail(linkEmail);
     setCode(linkCode);
-    signin(linkEmail, linkCode);
-  }, [linkEmail, linkCode, auth.validating]);
+    setStep('code');
+    setError('');
+  }, [linkEmail, linkCode]);
 
   const sendCode = async (event?: React.FormEvent) => {
     event?.preventDefault();

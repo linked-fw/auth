@@ -36,7 +36,9 @@ const { emailToWebID, hmacWebIdFor, HMAC_WEBID_TEST_VECTOR } = await import(
 const { default: AuthBackendProvider, INVALID_SIGNIN_CODE_MESSAGE } = await import(
   new URL('backend.js', libDir)
 );
-const { DEFAULT_SIGNIN_CODE_TTL } = await import(new URL('helpers/credentialToken.js', libDir));
+const { DEFAULT_SIGNIN_CODE_TTL, hashToken } = await import(
+  new URL('helpers/credentialToken.js', libDir)
+);
 const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
 const { UserAccount } = await import('@_linked/sioc/shapes/UserAccount');
 const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
@@ -109,7 +111,7 @@ async function requestCode(email = EMAIL) {
   const link = body.match(/href='([^']*signin-code[^']*)'/)?.[1]?.replace(/&amp;/g, '&');
   assert.ok(link, 'no sign-in link in the email');
   const code = new URL(link).searchParams.get('code');
-  assert.match(code, /^\d{6}$/);
+  assert.match(code, /^\d{8}$/);
   assert.ok(body.includes(`>${code}<`), 'the code is not in the email text');
   return { code, link };
 }
@@ -138,7 +140,7 @@ test('a code signs in to the account of its email and marks the email verified',
 test('the email and code are matched loosely: case, spaces and dashes', async () => {
   adaHasPassword();
   const { code } = await requestCode('  Ada@Example.test ');
-  const typed = ` ${code.slice(0, 3)}-${code.slice(3)} `;
+  const typed = ` ${code.slice(0, 4)}-${code.slice(4)} `;
   const result = await provider.signinWithCode('ADA@example.test', typed);
   assert.equal(result.signedIn, PERSON_ID);
 });
@@ -146,7 +148,7 @@ test('the email and code are matched loosely: case, spaces and dashes', async ()
 test('a wrong code, or the right code with another email, is refused', async () => {
   adaHasPassword();
   const { code } = await requestCode();
-  const wrong = code === '000000' ? '000001' : '000000';
+  const wrong = code === '00000000' ? '00000001' : '00000000';
   assert.deepEqual(await provider.signinWithCode(EMAIL, wrong), REFUSED);
   assert.deepEqual(await provider.signinWithCode(NEW_EMAIL, code), REFUSED);
   assert.deepEqual(await provider.signinWithCode(EMAIL, ''), REFUSED);
@@ -199,7 +201,8 @@ test('an email with no account gets the same answer, and its code creates the ac
   const { code } = await requestCode(NEW_EMAIL);
   // the code is held by a pending credential that no lookup by email finds
   const [pending] = [...credentials.rows.values()];
-  assert.equal(pending.signinCodeEmail, NEW_EMAIL);
+  assert.equal(pending.signinCodeEmailHash, hashToken(NEW_EMAIL));
+  assert.ok(!JSON.stringify(pending).includes(NEW_EMAIL), 'the email is stored in plain text');
   assert.equal(pending.email, undefined);
   assert.equal(pending.credentialOf, undefined);
 
@@ -216,7 +219,7 @@ test('an email with no account gets the same answer, and its code creates the ac
   const [credential] = rowsOf(NEW_PERSON_ID);
   assert.equal(credential.id, pending.id, 'the pending credential was not attached');
   assert.equal(credential.email, NEW_EMAIL);
-  assert.equal(credential.signinCodeEmail, undefined);
+  assert.equal(credential.signinCodeEmailHash, undefined);
   assert.ok(credential.emailVerifiedAt);
 });
 
@@ -239,6 +242,40 @@ test('a pending code does not block a password signup for the email', async () =
     password: 'long-enough',
   });
   assert.ok(result.created, `signup was refused: ${JSON.stringify(result)}`);
+});
+
+test('a pending code used after the email got an account elsewhere signs in to that account', async () => {
+  const { code } = await requestCode(NEW_EMAIL);
+  // meanwhile the email got a person and account that are not at its WebID (an older derivation)
+  const elsewhere = 'https://app.test/person/grace';
+  people.rows.push({ id: elsewhere, givenName: 'Grace' });
+  accounts.rows.push({
+    id: 'https://app.test/account/grace',
+    email: NEW_EMAIL,
+    accountOf: { id: elsewhere },
+  });
+  const result = await provider.signinWithCode(NEW_EMAIL, code);
+  assert.equal(result.signedIn, elsewhere);
+  assert.equal(result.account, 'https://app.test/account/grace');
+  assert.equal(people.created.length, 0, 'a second person was created');
+  assert.equal(rowsOf(elsewhere)[0].email, NEW_EMAIL);
+});
+
+test('a pending code used after the person was created at the WebID signs in to it', async () => {
+  const { code } = await requestCode(NEW_EMAIL);
+  people.rows.push({ id: NEW_PERSON_ID, givenName: 'Grace' });
+  const result = await provider.signinWithCode(NEW_EMAIL, code);
+  assert.equal(result.signedIn, NEW_PERSON_ID);
+  assert.equal(people.created.length, 0, 'a second person was created');
+});
+
+test('a failed send for an email with no account leaves no working code', async () => {
+  mock.method(LinkedEmail, 'send', async () => {
+    throw new Error('provider down');
+  });
+  assert.equal(await provider.sendSigninCode(NEW_EMAIL), true);
+  const [pending] = [...credentials.rows.values()];
+  assert.equal(pending.signinCode, undefined);
 });
 
 test('a person found by the account email gets the code (WebID from an older derivation)', async () => {
@@ -284,7 +321,7 @@ test('requests are rate-limited by email, with the same answer for unknown email
 test('checks are rate-limited by email, so a code cannot be guessed', async () => {
   adaHasPassword();
   const { code } = await requestCode();
-  const wrong = code === '000000' ? '000001' : '000000';
+  const wrong = code === '00000000' ? '00000001' : '00000000';
   for (let i = 0; i < 5; i++) {
     assert.deepEqual(await provider.signinWithCode(EMAIL, wrong), REFUSED);
   }
@@ -303,7 +340,7 @@ test('with DEV_AUTH and no email provider, the code and link go to the log', asy
   const line = infoLogs.find((l) => l.includes('signin-code link'));
   assert.ok(line, `no dev log line:\n${infoLogs.join('\n')}`);
   const match = line.match(
-    /^\[@_linked\/auth\] dev: signin-code link: (\S+) \(code (\d{6})\)$/
+    /^\[@_linked\/auth\] dev: signin-code link: (\S+) \(code (\d{8})\)$/
   );
   assert.ok(match, `unexpected dev log line: ${line}`);
   assert.equal(new URL(match[1]).searchParams.get('code'), match[2]);

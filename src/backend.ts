@@ -68,6 +68,7 @@ import {
   clearUnsentToken,
   consumeCredentialToken,
   consumeCredentialTokenRecord,
+  hashToken,
   TOKEN_KINDS,
 } from './helpers/credentialToken.js';
 import {
@@ -431,8 +432,8 @@ export const INVALID_SIGNIN_CODE_MESSAGE = 'This sign-in code is invalid or has 
 /**
  * Store `fields` (a new sign-in code) on the credential that holds codes for `email`, replacing
  * any earlier code: the credential of the person at `webID`, else of the person whose account has
- * the email, else the pending credential for the email (see `AuthCredential.signinCodeEmail`),
- * created when there is none yet.
+ * the email, else the pending credential for the email (see
+ * `AuthCredential.signinCodeEmailHash`), created when there is none yet.
  *
  * @returns the id of the person the code signs in to, if the email has one yet
  */
@@ -448,10 +449,7 @@ async function storeSigninCode(
     return webID;
   }
 
-  const account = await UserAccount.select((ua) => [ua.email, ua.accountOf])
-    .where((ua) => ua.email.equals(email))
-    .one();
-  const personId = account?.accountOf?.id;
+  const personId = await personOfAccountEmail(email);
   if (personId) {
     const ofPerson = await provider.getPasswordForUser({ id: personId });
     if (ofPerson) {
@@ -462,19 +460,28 @@ async function storeSigninCode(
     return personId;
   }
 
-  const pending = await AuthCredential.select((c) => [c.signinCodeEmail])
-    .where((c) => c.signinCodeEmail.equals(email))
+  const emailHash = hashToken(email);
+  const pending = await AuthCredential.select((c) => [c.signinCodeEmailHash])
+    .where((c) => c.signinCodeEmailHash.equals(emailHash))
     .one();
   if (pending) {
     await AuthCredential.update(fields).for({ id: pending.id });
   } else {
-    await AuthCredential.create({ signinCodeEmail: email, ...fields });
+    await AuthCredential.create({ signinCodeEmailHash: emailHash, ...fields });
   }
   return undefined;
 }
 
+/** The person of the account whose email is `email`, if there is one. */
+async function personOfAccountEmail(email: string): Promise<string | undefined> {
+  const account = await UserAccount.select((ua) => [ua.email, ua.accountOf])
+    .where((ua) => ua.email.equals(email))
+    .one();
+  return account?.accountOf?.id || undefined;
+}
+
 /** The email with a sign-in code and the link that carries it. */
-function signinCodeEmail(
+function signinCodeMessage(
   email: string,
   givenName: string | undefined,
   code: string,
@@ -1329,7 +1336,7 @@ export default class AuthBackendProvider extends BackendProvider {
   }
 
   /**
-   * Email a sign-in code to `email`: a six-digit code and a link that carries it
+   * Email a sign-in code to `email`: an eight-digit code and a link that carries it
    * (`{SITE_ROOT}/auth/signin-code?email=…&code=…`), for `signinWithCode`. The code works once,
    * until it expires (`AUTH_SIGNIN_CODE_TTL`), and a new request replaces it. An email with no
    * account gets a code too, held by a pending credential: signing in with it creates the
@@ -1368,7 +1375,7 @@ export default class AuthBackendProvider extends BackendProvider {
       `?email=${encodeURIComponent(normalizedEmail)}&code=${code}`;
     const givenName = personId ? await givenNameOf(this, personId) : undefined;
     const outcome = await sendAuthEmail(
-      signinCodeEmail(normalizedEmail, givenName, code, signinUrl),
+      signinCodeMessage(normalizedEmail, givenName, code, signinUrl),
       { purpose: 'signin-code', url: signinUrl, code }
     );
     if (outcome === 'failed') {
@@ -1408,14 +1415,17 @@ export default class AuthBackendProvider extends BackendProvider {
     );
     if (!consumed) return refused;
 
-    // a pending credential held the code for an email that had no account yet: it becomes the
-    // person's credential, with the email it was sent to
-    const personId = consumed.person?.id ?? webID;
-    if (!consumed.person?.id) {
+    let personId = consumed.person?.id;
+    if (!personId) {
+      // A pending credential held the code: the email had no person when it was sent. One may
+      // exist by now (a signup, an OAuth sign-in), found as `storeSigninCode` finds it; else the
+      // person is created at the WebID. The credential becomes that person's.
+      const atWebID = await this.userShape.select((p) => [p.givenName]).for(webID);
+      personId = atWebID ? webID : ((await personOfAccountEmail(normalizedEmail)) ?? webID);
       await AuthCredential.update({
         credentialOf: { id: personId },
         email: normalizedEmail,
-        signinCodeEmail: null,
+        signinCodeEmailHash: null,
       }).for({ id: consumed.credentialId });
     }
 

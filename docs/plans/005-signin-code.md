@@ -57,7 +57,7 @@ tasks-mode decisions and the phases.
    and signup would refuse the email; (b) a credential of nobody with `email` set — signup
    refuses an email any credential holds (an existing, tested rule). `consumeCredentialToken`
    gains a sibling that also returns the credential id, which attaching needs.
-4. **Code format:** six digits from `crypto.randomInt`; input is normalised by removing
+4. **Code format:** eight digits (six before review finding 1) from `crypto.randomInt`; input is normalised by removing
    whitespace and `-`.
 5. **Rate limits:** `signinCodeRequest` (as `passwordResetRequest`: 10/hour per IP, 3/hour per
    email) and `signinCode` (10/minute per IP, 5 per 15 minutes per email). Env overrides follow
@@ -68,8 +68,8 @@ tasks-mode decisions and the phases.
 7. **New user:** created through `Auth.login` with `givenName: ''` (as OAuth without a name), an
    account with the normalised email, and the email marked verified on the existing credential.
 8. **Client:** `SigninWithCodeForm` asks for the email, then the code; mounted at
-   `/auth/signin-code` it reads `email` and `code` from the URL and signs in once, so it is also
-   the link's page.
+   `/auth/signin-code` it reads `email` and `code` from the URL and shows them filled in, so it is
+   also the link's page. It signs in on a press only (review finding 4: mail scanners).
 
 ## Phases
 
@@ -138,3 +138,63 @@ shows "You are signed in." after a sign-in, for the link's route where no `onLog
 
 Phase 2 needs phase 1's server methods; phase 3's integration test needs phase 1. Phases 2 and 3
 touch different files and could run in parallel; they run in order here (one agent).
+
+## Review
+
+Independent review of `origin/main...HEAD` (3 commits). No critical findings; existing methods
+unchanged; no step labels in code.
+
+| # | Severity | Finding | Route |
+|---|---|---|---|
+| 1 | High | Wrong guesses never burn a code and anyone can keep a live code for any email: 5 checks per 15 min per email is 480 guesses/day against 10^6 codes (~0.05%/day per targeted email) | Within scope: 8 digits (decision 4 allowed 6–8 characters). Burning a code after N wrong guesses needs a new property and changes the method's contract: **follow-up** |
+| 2 | Medium | Pending credentials keep the plaintext email of non-users and are never removed | Within scope: store a hash of the email. Removing expired pending credentials (a sweep): **follow-up** |
+| 3 | Medium | A pending code used after the person was created another way (not at `Auth.webIdFor(email)`) creates a second person and account | Fix: when the consumed credential has no person, resolve the person as `storeSigninCode` does (person at the WebID, else the person of the account with the email) |
+| 4 | Medium | Mail link scanners that run JS open the link and use the code up before the user clicks | Fix (decision 8 is this step's): the link prefills the code; the user presses Sign in |
+| 5 | Low | `markEmailVerified` marks every credential of the person, as the spec's helper does | Left as is |
+| 6 | Low | Two concurrent first requests for a new email can create two pending credentials | Left as is: each code stays single use and expires |
+| 7 | Low (stale doc) | Readme says a refused code is not used up; an expired one is | Fix |
+| 8 | Low | The link's "sign in once" ref does not survive a remount | Goes away with 4 |
+| 9 | Low | `as any` casts copy `createAccount`'s pattern | Left as is |
+
+## Iteration 1 — Ideation
+
+### Gap 1 of 4: guessing (finding 1)
+Approaches: (a) 8 digits; (b) burn the code after N wrong guesses (new counter property, atomic
+increment, a wrong guess changes state); (c) tighter limits. (a) keeps the method's contract and
+storage, costs two more digits to type, and cuts the odds 100x (~0.0005%/day per targeted email).
+(b) is the stronger fix but a design change beyond contract 5 and the spec's rate-limit model.
+Chosen: (a) now; (b) reported as a follow-up.
+
+### Gap 2 of 4: plaintext emails of non-users (finding 2)
+The pending credential's email is only used to find it again; signing in takes the email from the
+request. Chosen: store `hashToken(email)` in `signinCodeEmailHash` (renamed from
+`signinCodeEmail`). Cleanup of expired pending credentials is a follow-up.
+
+### Gap 3 of 4: stale pending code after another signup (finding 3)
+Chosen: when the consumed credential has no person, take the person at `Auth.webIdFor(email)` if
+it exists, else the person of the `UserAccount` with the email, else create one at the WebID.
+
+### Gap 4 of 4: link scanners (finding 4)
+Approaches: auto sign-in (scanners spend the code) or a confirm click. Chosen: the link opens the
+code step with the email and code filled in; the user presses Sign in. The `redeemed` ref goes.
+
+## Iteration 1 — Plan
+
+- `src/helpers/signinCode.ts`: `SIGNIN_CODE_LENGTH = 8`.
+- `src/ontologies/auth.ts`, `src/shapes/AuthCredential.ts`: `signinCodeEmail` → `signinCodeEmailHash`.
+- `src/backend.ts`: `storeSigninCode` writes/finds the hash; `signinWithCode` resolves the person
+  for a pending credential through a shared helper.
+- `src/components/SigninWithCodeForm.tsx`: no auto sign-in.
+- Tests: 8 digits; a stale pending code after a signup elsewhere signs in to that person; a failed
+  send for a new email; the form test clicks Sign in.
+- `readme.md`: 8 digits, the hash, the click, the expired-code sentence.
+
+## Iteration 1 — Phases
+
+### Phase 4: review fixes
+Validation: `npx linked build && npm test` and `npm run test:integration` pass.
+
+**Done.** Code length 8; `signinCodeEmailHash` holds `hashToken(email)`; a pending code resolves
+the person at sign-in (3 new unit tests: an account elsewhere, a person at the WebID, a failed
+send for a new email); the form signs in on a press only. `npm test`: `# tests 347 # pass 347
+# fail 0`; `npm run test:integration`: `# tests 38 # pass 38 # fail 0`.

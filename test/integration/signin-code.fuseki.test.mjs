@@ -75,7 +75,7 @@ test('a code for a new email creates the person, account and session, and works 
   assert.equal(await countSubjectsWith(`${AUTH}credentialOf`, personId), 1);
   assert.equal((await credentialValues(personId, 'emailVerifiedAt')).length, 1);
   assert.deepEqual(await credentialValues(personId, 'email'), [email]);
-  assert.deepEqual(await credentialValues(personId, 'signinCodeEmail'), []);
+  assert.deepEqual(await credentialValues(personId, 'signinCodeEmailHash'), []);
   assert.deepEqual(await credentialValues(personId, 'signinCode'), []);
 
   assert.deepEqual(await provider().signinWithCode(email, code), {
