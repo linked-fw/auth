@@ -31,19 +31,18 @@ let fromEnv: string | undefined;
  * does not exist (caught).
  */
 function readEnv(): { AUTH_COOKIE_PREFIX?: string; APP_PREFIX?: string } {
-  let AUTH_COOKIE_PREFIX: string | undefined;
-  let APP_PREFIX: string | undefined;
+  return {
+    AUTH_COOKIE_PREFIX: orUndefined(() => process.env.AUTH_COOKIE_PREFIX),
+    APP_PREFIX: orUndefined(() => process.env.APP_PREFIX),
+  };
+}
+
+function orUndefined(read: () => string | undefined): string | undefined {
   try {
-    AUTH_COOKIE_PREFIX = process.env.AUTH_COOKIE_PREFIX;
+    return read();
   } catch {
-    AUTH_COOKIE_PREFIX = undefined;
+    return undefined;
   }
-  try {
-    APP_PREFIX = process.env.APP_PREFIX;
-  } catch {
-    APP_PREFIX = undefined;
-  }
-  return { AUTH_COOKIE_PREFIX, APP_PREFIX };
 }
 
 function checked(prefix: string, source: string): string {

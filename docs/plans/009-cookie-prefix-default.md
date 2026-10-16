@@ -67,3 +67,14 @@ including `ok 6 - two apps in one cookie jar: signing out of one leaves the othe
 ## Dependencies
 
 Phase 2 depends on phase 1. No parallel work.
+
+## Review
+
+- Medium, outside the step's scope (needs a choice in another repo): an app with `APP_PREFIX` set
+  and no client `define` gets `<app>_` cookies from the server while its bundle looks for the plain
+  `linkedAuthSession` hint, so a page load not server-rendered as signed in skips the refresh. The
+  readme, the changeset and A8's Consumers say to define the resolved prefix; the CLI defining
+  `process.env.APP_PREFIX` by default is a follow-up in A8's Consumers.
+- Low, fixed: `readEnv` simplified to one helper per token; the esbuild run still inlines both.
+- Low, left: a developer shell that exports `APP_PREFIX` would prefix the cookie names other unit
+  tests expect (CI and `npm test` from a plain shell don't).
