@@ -1,4 +1,4 @@
-// The cookie-name prefix (AUTH_COOKIE_PREFIX / Auth.cookiePrefix): every cookie this package sets
+// The cookie-name prefix (Auth.cookiePrefix / AUTH_COOKIE_PREFIX / APP_PREFIX): every cookie this package sets
 // and reads carries it, so two Linked apps on one host keep separate sessions. With no prefix the
 // names are the ones every other test in this directory checks.
 //
@@ -231,4 +231,109 @@ test('the browser bundle can inline the prefix: the module reads process.env.AUT
   // a bundler's define (Vite, esbuild) replaces only this exact token, never process.env[name]
   const source = fs.readFileSync(new URL('utils/cookieNames.js', libDir), 'utf8');
   assert.match(source, /process\.env\.AUTH_COOKIE_PREFIX/);
+});
+
+test("APP_PREFIX becomes a safe cookie-name token plus '_'", () => {
+  const cases = [
+    ['webid-email', 'webid-email_'],
+    ['cn', 'cn_'],
+    ['peace.game', 'peace.game_'],
+    ['My App!', 'My-App_'],
+    ['  spaced  out ', 'spaced-out_'],
+    ['a;b=c,d', 'a-b-c-d_'],
+    ['_cn_', 'cn_'],
+    ['-x.', 'x_'],
+    ['café', 'caf_'],
+    ['!!!', ''],
+    ['', ''],
+    [undefined, ''],
+  ];
+  for (const [appPrefix, expected] of cases) {
+    assert.equal(cookieNames.cookiePrefixFromAppPrefix(appPrefix), expected, String(appPrefix));
+  }
+});
+
+test('resolveCookiePrefix: AUTH_COOKIE_PREFIX, else APP_PREFIX, else none; blank counts as unset', () => {
+  const { resolveCookiePrefix } = cookieNames;
+  assert.equal(resolveCookiePrefix({ AUTH_COOKIE_PREFIX: 'cn_', APP_PREFIX: 'webid-email' }), 'cn_');
+  assert.equal(resolveCookiePrefix({ APP_PREFIX: 'webid-email' }), 'webid-email_');
+  assert.equal(resolveCookiePrefix({ AUTH_COOKIE_PREFIX: '', APP_PREFIX: 'webid-email' }), 'webid-email_');
+  assert.equal(resolveCookiePrefix({}), '');
+  assert.throws(() => resolveCookiePrefix({ AUTH_COOKIE_PREFIX: 'a b', APP_PREFIX: 'cn' }), /AUTH_COOKIE_PREFIX/);
+});
+
+test('precedence in a fresh process: AUTH_COOKIE_PREFIX > APP_PREFIX > none', () => {
+  const cases = [
+    [{ APP_PREFIX: 'webid-email' }, 'webid-email_'],
+    [{ APP_PREFIX: 'cn' }, 'cn_'],
+    [{ APP_PREFIX: 'webid-email', AUTH_COOKIE_PREFIX: '' }, 'webid-email_'],
+    [{ APP_PREFIX: 'webid-email', AUTH_COOKIE_PREFIX: 'wie_' }, 'wie_'],
+    [{ APP_PREFIX: '!!!' }, ''],
+    [{}, ''],
+  ];
+  for (const [env, prefix] of cases) {
+    const out = namesIn(env);
+    assert.equal(out.status, 0, out.stderr);
+    assert.deepEqual(
+      JSON.parse(out.stdout.trim().split('\n').pop()),
+      [`${prefix}accessToken`, `${prefix}refreshToken`, `${prefix}linkedAuthSession`],
+      JSON.stringify(env)
+    );
+  }
+});
+
+test('Auth.cookiePrefix wins over APP_PREFIX, and over AUTH_COOKIE_PREFIX', () => {
+  const authUrl = new URL('utils/auth.js', libDir).href;
+  const cookiesUrl = new URL('utils/cookies.js', libDir).href;
+  for (const env of [{ APP_PREFIX: 'webid-email' }, { APP_PREFIX: 'webid-email', AUTH_COOKIE_PREFIX: 'wie_' }]) {
+    const out = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const { Auth } = await import(${JSON.stringify(authUrl)});` +
+          `const c = await import(${JSON.stringify(cookiesUrl)});` +
+          "Auth.cookiePrefix = 'own_'; const a = c.accessCookieName();" +
+          "Auth.cookiePrefix = ''; const b = c.accessCookieName();" +
+          'console.log(JSON.stringify([a, b]))',
+      ],
+      { env: { PATH: process.env.PATH, NODE_ENV: 'test', ...env }, encoding: 'utf8' }
+    );
+    assert.equal(out.status, 0, out.stderr);
+    assert.deepEqual(JSON.parse(out.stdout.trim().split('\n').pop()), ['own_accessToken', 'accessToken']);
+  }
+});
+
+test('the browser bundle can inline APP_PREFIX too: a define of either token is honoured', () => {
+  const source = fs.readFileSync(new URL('utils/cookieNames.js', libDir), 'utf8');
+  assert.match(source, /process\.env\.APP_PREFIX/);
+  // what a bundler's define does: replace the exact tokens with literals (esbuild and Vite only
+  // match `process.env.NAME` written out)
+  const run = (define) => {
+    let code = source;
+    for (const [token, value] of Object.entries(define)) code = code.split(token).join(value);
+    const out = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const m = await import('data:text/javascript,' + encodeURIComponent(${JSON.stringify(code)}));` +
+          "process.stdout.write(m.authCookieName('linkedAuthSession'))",
+      ],
+      // neither variable in the environment: only the inlined literals can supply a prefix
+      { env: { PATH: process.env.PATH }, encoding: 'utf8' }
+    );
+    assert.equal(out.status, 0, out.stderr);
+    return out.stdout;
+  };
+  assert.equal(run({ 'process.env.APP_PREFIX': '"webid-email"' }), 'webid-email_linkedAuthSession');
+  assert.equal(
+    run({ 'process.env.APP_PREFIX': '"webid-email"', 'process.env.AUTH_COOKIE_PREFIX': '""' }),
+    'webid-email_linkedAuthSession'
+  );
+  assert.equal(
+    run({ 'process.env.APP_PREFIX': '"webid-email"', 'process.env.AUTH_COOKIE_PREFIX': '"wie_"' }),
+    'wie_linkedAuthSession'
+  );
+  assert.equal(run({}), 'linkedAuthSession');
 });
