@@ -32,4 +32,6 @@ first native app and its signing identities.
 ## Open questions
 
 - If the chosen plugin cannot resolve to the callback URL on iOS 17.3 and earlier with a
-  Universal Link, does Peace Game list a custom scheme as well?
+  Universal Link, does Peace Game list a custom scheme as well? A custom scheme lets another app on
+  the device take an attacker-started sign-in ([008 §1](008-signin-security-review.md)): settle
+  that first.
