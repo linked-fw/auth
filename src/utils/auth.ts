@@ -59,11 +59,13 @@ export class Auth {
 
   /**
    * The prefix of every cookie this package sets and reads (`accessToken`, `refreshToken`,
-   * `linkedAuthSession`, the session cookie `linked.auth`). Empty by default; the environment's
-   * `AUTH_COOKIE_PREFIX` sets it too, and a value set here wins. Needed when two Linked apps run
-   * on one host (browsers share cookies across ports), e.g. `Auth.cookiePrefix = 'cn_'`. Set it
-   * once in the backend setup, before `setupBeforeControllers` runs. The browser bundle reads
-   * `process.env.AUTH_COOKIE_PREFIX` (see utils/cookieNames.ts).
+   * `linkedAuthSession`, the session cookie `linked.auth`), so two Linked apps on one host
+   * (browsers share cookies across ports) keep separate sessions. A value set here wins over the
+   * environment's `AUTH_COOKIE_PREFIX`, which wins over the default: the app's `APP_PREFIX` plus
+   * `_` (`webid-email` → `webid-email_`), or none without one. `Auth.cookiePrefix = ''` opts out.
+   * Set it once in the backend setup, before `setupBeforeControllers` runs. The browser bundle
+   * reads `process.env.AUTH_COOKIE_PREFIX` and `process.env.APP_PREFIX` (see
+   * utils/cookieNames.ts).
    */
   static get cookiePrefix(): string {
     return getCookiePrefix();

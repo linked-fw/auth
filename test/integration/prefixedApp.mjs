@@ -1,6 +1,7 @@
 // One Linked app in its own process, for cookie-prefix.fuseki.test.mjs: the auth provider's
 // middleware, a server-rendered page and the RPC route, on the dataset the parent created. The
-// cookie prefix comes from AUTH_COOKIE_PREFIX, as in a real app. Prints its URL when listening.
+// cookie prefix comes from the environment (AUTH_COOKIE_PREFIX, else APP_PREFIX), as in a real
+// app. Prints its URL when listening.
 //
 // Runs against the BUILT package in lib/.
 import fs from 'node:fs';
