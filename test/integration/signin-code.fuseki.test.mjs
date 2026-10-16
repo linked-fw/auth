@@ -18,9 +18,8 @@ delete process.env.DEV_AUTH;
 
 const libDir = new URL('../../lib/esm/', import.meta.url);
 await import(new URL('shapes/index.js', libDir));
-const { default: AuthBackendProvider, INVALID_SIGNIN_CODE_MESSAGE } = await import(
-  new URL('backend.js', libDir)
-);
+const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
+const { INVALID_SIGNIN_CODE_MESSAGE } = await import(new URL('utils/signinCode.js', libDir));
 const { Auth } = await import(new URL('utils/auth.js', libDir));
 const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 

@@ -33,9 +33,8 @@ const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libD
 const { emailToWebID, hmacWebIdFor, HMAC_WEBID_TEST_VECTOR } = await import(
   new URL('utils/webID.js', libDir)
 );
-const { default: AuthBackendProvider, INVALID_SIGNIN_CODE_MESSAGE } = await import(
-  new URL('backend.js', libDir)
-);
+const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
+const { INVALID_SIGNIN_CODE_MESSAGE } = await import(new URL('utils/signinCode.js', libDir));
 const { DEFAULT_SIGNIN_CODE_TTL, hashToken } = await import(
   new URL('helpers/credentialToken.js', libDir)
 );

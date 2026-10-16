@@ -48,7 +48,8 @@ import {
   refreshCookieName,
   wantsTokensInBody,
 } from './utils/cookies.js';
-import { authCookieName } from './utils/cookieNames.js';
+import { sessionCookieName } from './utils/cookieNames.js';
+import { INVALID_SIGNIN_CODE_MESSAGE } from './utils/signinCode.js';
 import {
   assertAuthSecrets,
   FatalConfigError,
@@ -134,16 +135,6 @@ var SQLiteStore = connect_sqlite3(session);
  * included) is rejected: without verification its email would be the client's word.
  */
 const VERIFIED_OAUTH_PROVIDERS: readonly string[] = ['google', 'apple'];
-
-/**
- * The name of the express-session cookie. It used to be the package name, `@_linked/auth`, which
- * `cookie.serialize` rejects ("argument name is invalid"): every response that wrote
- * `req.session` threw while sending its headers and never finished.
- */
-export const SESSION_COOKIE_NAME = 'linked.auth';
-
-/** The express-session cookie's name under the cookie prefix (utils/cookieNames.ts). */
-export const sessionCookieName = () => authCookieName(SESSION_COOKIE_NAME);
 
 declare var process;
 
@@ -507,9 +498,6 @@ async function markOAuthEmailVerified(identity: VerifiedOAuthIdentity, personId:
     console.error(`${identity.provider} sign-in: could not mark the email verified`, error);
   }
 }
-
-/** What every refused code sign-in answers: wrong, expired, used, or for another email. */
-export const INVALID_SIGNIN_CODE_MESSAGE = 'This sign-in code is invalid or has expired.';
 
 /**
  * Store `fields` (a new sign-in code) on the credential that holds codes for `email`, replacing
