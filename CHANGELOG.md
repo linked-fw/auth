@@ -1,5 +1,16 @@
 # @\_linked/auth
 
+## 3.15.1
+
+### Patch Changes
+
+- [#140](https://github.com/linked-fw/auth/pull/140) [`0aa46e3`](https://github.com/linked-fw/auth/commit/0aa46e303c2f85e5bdb7dad58bcd60c05767fc0a) Thanks [@flyon](https://github.com/flyon)! - The backend entry (`@_linked/auth/backend`) now exports only `AuthBackendProvider` and `AuthCredentialProvider`. `@_linked/server` constructs every export of a backend entry, so the constants exported next to them failed at boot with `INVALID_SIGNIN_CODE_MESSAGE constructor failed: providerClass is not a constructor` (and the same for `SESSION_COOKIE_NAME`). They moved:
+  
+  - `SESSION_COOKIE_NAME` and `sessionCookieName` → `@_linked/auth/utils/cookieNames`
+  - `INVALID_SIGNIN_CODE_MESSAGE` → `@_linked/auth/utils/signinCode`
+  
+  Importing them from `@_linked/auth/backend` no longer works; import them from the new paths.
+
 ## 3.15.0
 
 ### Minor Changes
