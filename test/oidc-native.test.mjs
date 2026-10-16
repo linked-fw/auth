@@ -187,6 +187,18 @@ test('a native sign-in with a Universal Link: tokens in the body, person, accoun
   assert.equal(tokenRequest.error, null);
 });
 
+test('a native start with a provider hint and no typed email: the default issuer, no login_hint', async () => {
+  const app = await startApp();
+  const { started, answer } = await signIn(app, { providerHint: 'google', redirectUri: UNIVERSAL_LINK });
+  const url = new URL(started.url);
+  assert.equal(url.origin, issuer.issuer);
+  assert.equal(url.searchParams.get('provider_hint'), 'google');
+  assert.equal(url.searchParams.has('login_hint'), false);
+  assert.ok(answer.accessToken, JSON.stringify(answer));
+  assert.equal(answer.outcome.mismatch, undefined);
+  assert.equal((await app.start({ redirectUri: UNIVERSAL_LINK })).action, 'invalid_input');
+});
+
 test('a custom scheme works the same way', async () => {
   const app = await startApp();
   const { callbackUrl, answer } = await signIn(app, { input: ADA, redirectUri: CUSTOM_SCHEME });

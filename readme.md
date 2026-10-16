@@ -681,12 +681,15 @@ Auth.oidcSignin = {
 };
 ```
 
-**Start.** The client calls `startOidcSignin({input, prompt?, providerHint?, returnTo?})`
+**Start.** The client calls `startOidcSignin({input?, prompt?, providerHint?, returnTo?})`
 (`Server.call('@_linked/auth', 'startOidcSignin', …)`) and navigates to the `url` it returns.
 
 - `input` is an email or a WebID. A WebID's profile names its issuer. For an email, its domain's
   WebFinger answer does, else the default issuer gets the email as `login_hint` (see Issuer
   discovery).
+- `input` may be left out when a `providerHint` is given: a "Continue with Google" button needs no
+  email first. The sign-in starts at the default issuer with `provider_hint` and no `login_hint`,
+  and the provider decides the email (so no mismatch can be reported).
 - An issuer must be an `https:` URL with no query, no fragment and no `/.well-known/` (a
   profile or WebFinger answer naming anything else gets `invalid_issuer`), and its metadata must
   name exactly that issuer.
@@ -780,7 +783,7 @@ setOidcSigninBrowser(openSystemBrowser); // see the two recipes below
 // in a component
 const auth = useAuth();
 const answer = await auth.startNativeOidcSignin({
-  input: 'ada@example.com', // an email or a WebID
+  input: 'ada@example.com', // an email or a WebID; may be left out with a providerHint
   redirectUri: 'https://example.com/auth/oidc/native', // one of Auth.signinClient.redirectUris
   // prompt: 'none', providerHint: 'google'
 });

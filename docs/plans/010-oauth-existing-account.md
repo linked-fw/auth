@@ -91,5 +91,9 @@ Tasks:
 
 Validation: build; `npm test` and `npm run test:integration` pass.
 
+**Done.** Build ok; `npm test` 533/533 (+2 in `oidc-callback.test.mjs`, +1 in
+`oidc-native.test.mjs`); `npm run test:integration` 46/46. No existing test changed. Contract 4
+(plan 001) gains the hint-only start; 065 §Contracts 4 needs the same line (master plan).
+
 **Dependencies:** phase 2 is independent of phase 1 (different methods); done in order, one commit
 each.

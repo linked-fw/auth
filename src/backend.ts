@@ -56,7 +56,7 @@ import {
   isAllowedWebUrl,
   OIDC_CALLBACK_PATH,
 } from './utils/clientIdDocument.js';
-import { createIssuerDiscovery } from './utils/issuerDiscovery.js';
+import { createIssuerDiscovery, WEBID_EMAIL_ISSUER } from './utils/issuerDiscovery.js';
 import type { IssuerDiscovery } from './utils/issuerDiscovery.js';
 import { createGuardedFetch } from './utils/guardedFetch.js';
 import {
@@ -713,6 +713,8 @@ type OidcRuntime = {
   siteRoot: string;
   relyingParty: OidcRelyingParty;
   discovery: IssuerDiscovery;
+  /** Where a sign-in with a provider hint and nothing typed starts. */
+  defaultIssuer: string;
 };
 
 let oidcRuntime: OidcRuntime | undefined;
@@ -764,8 +766,38 @@ function oidcRuntimeFor(config: OidcSigninConfig): OidcRuntime {
       timeoutMs: Math.min(timeoutMs, 3000),
       fetch,
     }),
+    defaultIssuer: config.defaultIssuer ?? WEBID_EMAIL_ISSUER,
   };
   return oidcRuntime;
+}
+
+/** A `providerHint` as sent on: letters, digits, `-`, `_`; anything else is dropped. */
+function oidcProviderHint(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-z0-9_-]{1,32}$/i.test(value) ? value : undefined;
+}
+
+/** What a start sends the issuer: the issuer, and the email to hint when the user typed one. */
+type OidcStartTarget = { issuer: string; loginHint?: string };
+
+/**
+ * The issuer a sign-in starts at. What the user typed (an email or a WebID) goes through issuer
+ * discovery. Nothing typed is allowed with a provider hint ("Continue with Google"): the default
+ * issuer, with no `login_hint`, and the provider then decides the email.
+ */
+async function oidcStartTarget(
+  runtime: OidcRuntime,
+  input: string,
+  providerHint: string | undefined
+): Promise<OidcStartTarget | { error: string; action: string }> {
+  if (!input && providerHint) return { issuer: runtime.defaultIssuer };
+  const found = await runtime.discovery.discover(input);
+  if (found.ok === false) {
+    if (found.reason === 'invalid-input') {
+      return { error: 'Enter an email or a WebID', action: 'invalid_input' };
+    }
+    return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
+  }
+  return { issuer: found.issuer, ...('loginHint' in found ? { loginHint: found.loginHint } : {}) };
 }
 
 /**
@@ -1894,7 +1926,8 @@ export default class AuthBackendProvider extends BackendProvider {
    * `{SITE_ROOT}/auth/oidc/callback`, which completes the sign-in. The pending sign-in (PKCE
    * verifier, nonce, DPoP key, hinted email) stays in this browser's server-side session.
    *
-   * @param options.input - An email or a WebID
+   * @param options.input - An email or a WebID. May be left out with a `providerHint`: the
+   *   sign-in then starts at the default issuer with no `login_hint` ("Continue with Google")
    * @param options.prompt - `'none'` for a silent sign-in (the callback ends in `login_required`
    *   when the user has no session at the issuer)
    * @param options.providerHint - Passed on as `provider_hint`, e.g. `'google'`
@@ -1904,7 +1937,7 @@ export default class AuthBackendProvider extends BackendProvider {
    *   `no_session`, or the rate-limited result
    */
   async startOidcSignin(options: {
-    input: string;
+    input?: string;
     prompt?: 'none';
     providerHint?: string;
     returnTo?: string;
@@ -1916,14 +1949,11 @@ export default class AuthBackendProvider extends BackendProvider {
     if (!config) return { error: 'WebID sign-in is not available', action: 'not_configured' };
 
     const input = typeof options?.input === 'string' ? options.input.trim() : '';
-    if (!input || input.length > OIDC_INPUT_MAX_LENGTH) {
+    const providerHint = oidcProviderHint(options?.providerHint);
+    if ((!input && !providerHint) || input.length > OIDC_INPUT_MAX_LENGTH) {
       return { error: 'Enter an email or a WebID', action: 'invalid_input' };
     }
     const prompt = options?.prompt === 'none' ? 'none' : undefined;
-    const providerHint =
-      typeof options?.providerHint === 'string' && /^[a-z0-9_-]{1,32}$/i.test(options.providerHint)
-        ? options.providerHint
-        : undefined;
     const session = (this.request as any)?.session;
     if (!session) return { error: 'Sign-in needs a browser session', action: 'no_session' };
 
@@ -1934,17 +1964,11 @@ export default class AuthBackendProvider extends BackendProvider {
       console.error(`[auth] ${(error as Error).message}`);
       return { error: 'WebID sign-in is not available', action: 'not_configured' };
     }
-    const found = await runtime.discovery.discover(input);
-    if (found.ok === false) {
-      if (found.reason === 'invalid-input') {
-        return { error: 'Enter an email or a WebID', action: 'invalid_input' };
-      }
-      return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
-    }
+    const target = await oidcStartTarget(runtime, input, providerHint);
+    if ('error' in target) return target;
 
     const begun = await runtime.relyingParty.begin({
-      issuer: found.issuer,
-      ...('loginHint' in found ? { loginHint: found.loginHint } : {}),
+      ...target,
       ...(prompt ? { prompt } : {}),
       ...(providerHint ? { providerHint } : {}),
     });
@@ -1964,7 +1988,8 @@ export default class AuthBackendProvider extends BackendProvider {
    * sign-in is not kept here: the system browser the app opens shares no cookie with it. The answer
    * carries it sealed (`pending`), for the app to hold until it calls `completeNativeOidcSignin`.
    *
-   * @param options.input - An email or a WebID
+   * @param options.input - An email or a WebID; may be left out with a `providerHint`, as for
+   *   `startOidcSignin`
    * @param options.redirectUri - The app-claimed link (Universal Link, App Link or custom scheme)
    * @param options.prompt - `'none'` for a silent sign-in
    * @param options.providerHint - Passed on as `provider_hint`, e.g. `'google'`
@@ -1973,7 +1998,7 @@ export default class AuthBackendProvider extends BackendProvider {
    *   `issuer_unreachable`, or the rate-limited result
    */
   async startNativeOidcSignin(options: {
-    input: string;
+    input?: string;
     redirectUri: string;
     prompt?: 'none';
     providerHint?: string;
@@ -1986,7 +2011,8 @@ export default class AuthBackendProvider extends BackendProvider {
     if (!wantsTokensInBody(this.request)) return NOT_NATIVE;
 
     const input = typeof options?.input === 'string' ? options.input.trim() : '';
-    if (!input || input.length > OIDC_INPUT_MAX_LENGTH) {
+    const providerHint = oidcProviderHint(options?.providerHint);
+    if ((!input && !providerHint) || input.length > OIDC_INPUT_MAX_LENGTH) {
       return { error: 'Enter an email or a WebID', action: 'invalid_input' };
     }
     const redirectUri = nativeRedirectUri(options?.redirectUri);
@@ -1997,10 +2023,6 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
     const prompt = options?.prompt === 'none' ? 'none' : undefined;
-    const providerHint =
-      typeof options?.providerHint === 'string' && /^[a-z0-9_-]{1,32}$/i.test(options.providerHint)
-        ? options.providerHint
-        : undefined;
 
     let runtime: OidcRuntime;
     try {
@@ -2009,18 +2031,12 @@ export default class AuthBackendProvider extends BackendProvider {
       console.error(`[auth] ${(error as Error).message}`);
       return { error: 'WebID sign-in is not available', action: 'not_configured' };
     }
-    const found = await runtime.discovery.discover(input);
-    if (found.ok === false) {
-      if (found.reason === 'invalid-input') {
-        return { error: 'Enter an email or a WebID', action: 'invalid_input' };
-      }
-      return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
-    }
+    const target = await oidcStartTarget(runtime, input, providerHint);
+    if ('error' in target) return target;
 
     const begun = await runtime.relyingParty.begin({
-      issuer: found.issuer,
+      ...target,
       redirectUri,
-      ...('loginHint' in found ? { loginHint: found.loginHint } : {}),
       ...(prompt ? { prompt } : {}),
       ...(providerHint ? { providerHint } : {}),
     });

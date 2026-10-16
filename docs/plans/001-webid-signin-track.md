@@ -33,7 +33,9 @@ app's Client ID Document and defines its theme extension. A5 adds a passwordless
 emailed code, which webid.email's pages use. A4 makes the exchange work in native (Capacitor)
 builds. A6 prefixes auth's cookie names so two Linked apps on one host (CN and a local
 webid.email) keep separate sessions; A8 makes that prefix default to the app's `APP_PREFIX`, so
-no app has to set one. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
+no app has to set one. A7 lets a provider's verified email reach the existing account with that verified email
+(password or not), makes a changed provider email leave the old account, and lets a sign-in start
+with a provider hint and no typed email. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
 
 **A parallel track.** Every existing method — password, Google/Apple/Facebook OAuth, temporary,
 dev sign-in (`signinDev`) — keeps its behaviour, exposure, cookies and sessions. All methods end in
@@ -131,6 +133,8 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
 - Authorization code + PKCE, DPoP proof on the token request. Request parameters: `login_hint`
   (email), `prompt=none` for silent sign-in, and the provider hint `provider_hint=google` (not
   standard; other issuers ignore it).
+  A start with the provider hint and nothing typed (A7) goes to the default issuer with
+  `provider_hint` and no `login_hint`; the provider decides the email.
 - ID token claims: `iss`, `aud`, `exp`, `iat`, `nonce`, `webid` (required), `auth_time`
   (required); `email`, `email_verified` (webid.email always; others optional).
 - The relying party checks that `iss` is a `solid:oidcIssuer` of `webid`'s profile, skipping the
