@@ -99,3 +99,16 @@ export function setCookiePrefix(prefix: string | undefined): void {
 export function authCookieName(base: string): string {
   return getCookiePrefix() + base;
 }
+
+/**
+ * The name of the express-session cookie. It used to be the package name, `@_linked/auth`, which
+ * `cookie.serialize` rejects ("argument name is invalid"): every response that wrote
+ * `req.session` threw while sending its headers and never finished.
+ *
+ * It lives here, not in the backend entry: the server constructs every export of a backend entry
+ * as a provider, so a constant exported there fails to boot.
+ */
+export const SESSION_COOKIE_NAME = 'linked.auth';
+
+/** The express-session cookie's name under the cookie prefix. */
+export const sessionCookieName = () => authCookieName(SESSION_COOKIE_NAME);

@@ -106,10 +106,10 @@ test('the prefix comes from AUTH_COOKIE_PREFIX, and every cookie name carries it
   assert.equal(cookies.accessCookieName(), 'cn_accessToken');
   assert.equal(cookies.refreshCookieName(), 'cn_refreshToken');
   assert.equal(cookies.sessionHintCookieName(), 'cn_linkedAuthSession');
-  assert.equal(backend.sessionCookieName(), 'cn_linked.auth');
+  assert.equal(cookieNames.sessionCookieName(), 'cn_linked.auth');
   // the exported base names are unchanged
   assert.equal(cookies.ACCESS_COOKIE, 'accessToken');
-  assert.equal(backend.SESSION_COOKIE_NAME, 'linked.auth');
+  assert.equal(cookieNames.SESSION_COOKIE_NAME, 'linked.auth');
 });
 
 test('sign-in sets only prefixed cookies', async () => {

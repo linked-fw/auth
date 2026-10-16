@@ -24,7 +24,8 @@ process.on('exit', () => fs.rmSync(workDir, { recursive: true, force: true }));
 const libDir = new URL('../lib/esm/', import.meta.url);
 const { default: express } = await import('express');
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
-const { SESSION_COOKIE_NAME } = await import(new URL('backend.js', libDir));
+const backendEntry = await import(new URL('backend.js', libDir));
+const { SESSION_COOKIE_NAME } = await import(new URL('utils/cookieNames.js', libDir));
 const { serialize } = await import('cookie');
 
 const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
@@ -46,6 +47,16 @@ before(async () => {
   url = `http://127.0.0.1:${server.address().port}`;
 });
 after(() => server?.close());
+
+test('the backend entry exports only classes, which the server constructs as providers', () => {
+  // @_linked/server calls `new` on every export of a backend entry: a string or arrow function
+  // exported here failed at boot with "providerClass is not a constructor".
+  for (const [name, value] of Object.entries(backendEntry)) {
+    assert.equal(typeof value, 'function', `${name} is not a function`);
+    assert.ok(value.prototype, `${name} is not a constructor`);
+    assert.match(Function.prototype.toString.call(value), /^class\b/, `${name} is not a class`);
+  }
+});
 
 test('the session cookie name is one cookie.serialize accepts', () => {
   assert.equal(SESSION_COOKIE_NAME, 'linked.auth');
