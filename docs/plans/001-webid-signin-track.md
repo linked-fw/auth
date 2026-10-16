@@ -627,7 +627,7 @@ never an unverified one; the email decides, not the provider subject)
 
 ## A9 — Email proof by the default issuer, and one account per WebID
 
-**Depends on:** A2, A7. **PR:** [#PR](PRLINK), report [014](../reports/014-email-proof-default-issuer.md). **Size:** small-to-medium, 2 phases. From CN's backlog 110 §1–2 (step C4):
+**Depends on:** A2, A7. **PR:** [#137](https://github.com/linked-fw/auth/pull/137), report [014](../reports/014-email-proof-default-issuer.md). **Size:** small-to-medium, 2 phases. From CN's backlog 110 §1–2 (step C4):
 in production no webid.email email proves its WebID to an app (webid.email's HMAC secret never
 leaves it, so `Auth.webIdFor` cannot derive), so email invitations never resolve; and a bypass
 (`signinDev`) sign-in followed by an issuer sign-in of the same WebID leaves two `UserAccount`s.
@@ -696,4 +696,4 @@ leaves it, so `Auth.webIdFor` cannot derive), so email invitations never resolve
 - [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)
 - [x] A7 — [#135](https://github.com/linked-fw/auth/pull/135), report [013](../reports/013-oauth-existing-account.md)
 - [x] A8 — [#133](https://github.com/linked-fw/auth/pull/133), report [012](../reports/012-cookie-prefix-default.md)
-- [x] A9 — [#PR](PRLINK), report [014](../reports/014-email-proof-default-issuer.md)
+- [x] A9 — [#137](https://github.com/linked-fw/auth/pull/137), report [014](../reports/014-email-proof-default-issuer.md)
