@@ -49,7 +49,12 @@ import {
   wantsTokensInBody,
 } from './utils/cookies.js';
 import { authCookieName } from './utils/cookieNames.js';
-import { assertAuthSecrets, FatalConfigError, getJwtSecret } from './utils/secrets.js';
+import {
+  assertAuthSecrets,
+  FatalConfigError,
+  getJwtSecret,
+  isDevelopmentLikeEnv,
+} from './utils/secrets.js';
 import {
   buildClientIdDocument,
   CLIENT_ID_DOCUMENT_PATH,
@@ -830,35 +835,73 @@ async function hasUnprovenPassword(personId: string): Promise<boolean> {
   return (credentials || []).some((credential) => Boolean(credential.passwordHash));
 }
 
+/** Whether `url`'s origin is `issuer`'s. */
+function onIssuerOrigin(url: string, issuer: string): boolean {
+  try {
+    return new URL(url).origin === new URL(issuer).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a Solid-OIDC token's `email` proves its WebID, so that the app may find the person by
+ * it. The issuer must have verified it (`email_verified`), and then one of:
+ *
+ * - it is the email the WebID derives from (`Auth.webIdFor`), as for OAuth;
+ * - the token comes from the app's default issuer and the WebID is on that issuer's origin: the
+ *   default issuer vouches for the emails of its own WebIDs (webid.email mints a WebID only for a
+ *   verified email, and an app cannot derive it without webid.email's secret);
+ * - `NODE_ENV` is `development` or `test`, where any issuer's verified email counts. Never in
+ *   production (nor `staging`, nor with `NODE_ENV` unset).
+ *
+ * Any other issuer can claim any email for its own WebIDs, so its email proves nothing.
+ */
+function emailProvesWebId(
+  identity: VerifiedOidcIdentity,
+  email: string | undefined,
+  defaultIssuer: string
+): boolean {
+  if (!email || identity.emailVerified !== true) return false;
+  try {
+    if (Auth.webIdFor(email) === identity.webId) return true;
+  } catch {
+    // an email the derivation refuses proves nothing by derivation; the rules below still apply
+  }
+  if (identity.issuer === defaultIssuer && onIssuerOrigin(identity.webId, defaultIssuer)) {
+    return true;
+  }
+  if (isDevelopmentLikeEnv()) {
+    console.warn(
+      `[auth] OIDC sign-in: the email from ${identity.issuer} counts as proof only because NODE_ENV=${process.env.NODE_ENV}`
+    );
+    return true;
+  }
+  return false;
+}
+
 /**
  * The last step of a Solid-OIDC sign-in: the person whose IRI is the verified WebID, its account,
  * and a session, as the other methods end. The issuer's tokens are not kept.
  *
- * The token's email is trusted only when it proves the WebID: the issuer verified it and it is the
- * email the WebID derives from (`Auth.webIdFor`), as for OAuth. Any issuer can claim any email for
- * its own WebIDs, and the email is how the other methods find an account, so an email that does
- * not prove the WebID is neither stored on the account nor marked verified. A sign-in that proves
- * the person (always the WebID, and the email when it does) ends access nobody proved, as a code
- * sign-in does: unverified passwords and their sessions (see `dropUnprovenAccess`).
+ * The token's email is trusted only when it proves the WebID (see `emailProvesWebId`). The email
+ * is how the other methods find an account, so an email that does not prove the WebID is neither
+ * stored on the account nor marked verified. A sign-in that proves the person (always the WebID,
+ * and the email when it does) ends access nobody proved, as a code sign-in does: unverified
+ * passwords and their sessions (see `dropUnprovenAccess`).
  */
 async function signInVerifiedWebId(
   provider: AuthBackendProvider,
-  identity: VerifiedOidcIdentity
+  identity: VerifiedOidcIdentity,
+  defaultIssuer: string
 ): Promise<{ isNewAccount: boolean; emailProven: boolean; authentication: AuthenticationResult }> {
   const webId = identity.webId;
   const email = identity.email ? normalizeSigninEmail(identity.email) : undefined;
-  let emailProvesWebId = false;
-  if (email && identity.emailVerified === true) {
-    try {
-      emailProvesWebId = Auth.webIdFor(email) === webId;
-    } catch {
-      emailProvesWebId = false;
-    }
-  }
+  const emailProven = emailProvesWebId(identity, email, defaultIssuer);
 
   const person = await provider.userShape.select((p) => [p.givenName]).for(webId);
   if (person) {
-    if (emailProvesWebId) {
+    if (emailProven) {
       await dropUnprovenAccess(provider, webId);
       await markEmailVerified(webId, email);
     } else if (await hasUnprovenPassword(webId)) {
@@ -871,7 +914,7 @@ async function signInVerifiedWebId(
       { id: webId } as UserData,
       account as UserAccountData
     );
-    return { isNewAccount: false, emailProven: emailProvesWebId, authentication };
+    return { isNewAccount: false, emailProven, authentication };
   }
 
   const authentication = await Auth.login(
@@ -884,9 +927,9 @@ async function signInVerifiedWebId(
           console.error(`Error creating user ${webId}:`, err);
           throw new Error(`Could not create user ${webId}`);
         });
-      if (emailProvesWebId) await markEmailVerified(user.id, email);
+      if (emailProven) await markEmailVerified(user.id, email);
       const account = await provider.accountShape
-        .create({ accountOf: user, ...(emailProvesWebId ? { email } : {}) })
+        .create({ accountOf: user, ...(emailProven ? { email } : {}) })
         .catch((err) => {
           console.error(`Error creating account for user ${user.id}:`, err);
           throw new Error(`Could not create account for user ${user.id}`);
@@ -896,7 +939,7 @@ async function signInVerifiedWebId(
     },
     'oidc'
   );
-  return { isNewAccount: true, emailProven: emailProvesWebId, authentication };
+  return { isNewAccount: true, emailProven, authentication };
 }
 
 /**
@@ -957,7 +1000,7 @@ async function completeOidcExchange(
 
   let signedIn: Awaited<ReturnType<typeof signInVerifiedWebId>>;
   try {
-    signedIn = await signInVerifiedWebId(provider, identity);
+    signedIn = await signInVerifiedWebId(provider, identity, runtime.defaultIssuer);
   } catch (error) {
     console.error('[auth] OIDC sign-in: could not create the session', error);
     return failed('failed', mismatch);

@@ -3,7 +3,7 @@ summary: >
   Step A9 of CN's master plan 065: a Solid-OIDC token's verified email also proves its WebID when
   the default issuer vouches for a WebID on its own origin, and (development and test only) from
   any issuer; and every sign-in method finds the one UserAccount of a WebID.
-status: Tasks
+status: Implementation
 ---
 
 # 011 — Email proof by the default issuer, and one account per WebID
@@ -54,17 +54,24 @@ Ideation and plan are done (the owner's decisions, in 001 §A9). From CN's backl
 
 ### Phase 1 — The email rule
 
-- [ ] `emailProvesWebId` in `backend.ts` (derivation, default issuer + origin, development/test),
+- [x] `emailProvesWebId` in `backend.ts` (derivation, default issuer + origin, development/test),
   wired through `completeOidcExchange` → `signInVerifiedWebId` (web and native).
-- [ ] Unit tests (`oidc-callback.test.mjs`): proven by derivation (existing test, under
+- [x] Unit tests (`oidc-callback.test.mjs`): proven by derivation (existing test, under
   `production`); proven by the default issuer for a WebID on its origin whose email does not
   derive it (`production`); not proven for a non-default issuer (`production`); a WebID off the
   default issuer's origin not proven (`production`, existing mallory test); any issuer proven under
   `test` and refused under `production`; `email_verified: false` never proven.
-- [ ] Readme: what "proven" means, the dev relaxation and its guard.
+- [x] Readme: what "proven" means, the dev relaxation and its guard.
 
 **Validation:** `npx linked build`; `npm test` passes (baseline 536); new tests fail without the
 change.
+
+**Done.** build ok; `npm test` 545/545; `npm run test:integration` 47/47. Without the `src/`
+change (stashed, rebuilt) 3 of the new tests fail (default issuer, `development`, `test`); the
+production-refusal tests pass either way, as they should. Dropped: a test of a default issuer
+with a path (the issuer check then fetches the WebID profile from the issuer origin, which the mock
+does not serve; the origin comparison is the same code).
+
 
 ### Phase 2 — One account per WebID
 
