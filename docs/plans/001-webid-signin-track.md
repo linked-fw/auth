@@ -579,7 +579,7 @@ to set unless you want a specific name. Contract 2: CN and webid.email set no pr
 
 ## A7 — OAuth into an existing account, and a provider start without an email
 
-**Depends on:** A5. Needed before Peace Game's migration (P1): every migrated Peace Game user has a
+**Depends on:** A5. Report [013](../reports/013-oauth-existing-account.md). Needed before Peace Game's migration (P1): every migrated Peace Game user has a
 password and may sign in with Google. **Size:** small-to-medium, 2 phases. From webid.email's
 backlog 008 (W5).
 
@@ -610,6 +610,12 @@ never an unverified one; the email decides, not the provider subject)
 - `startOidcSignin` with `providerHint` and no `input` builds a valid authorization URL (mock
   issuer test).
 - `npm test` and `npm run test:integration` pass.
+
+**Consumers** (outside this repo; routed by master plan 065)
+- 065 §Contracts 4: the hint-only start (contract 4 here has it).
+- CN: "Continue with Google" calls `startOidcSignin({providerHint: 'google'})` with no email.
+- webid.email backlog 008: items 1 and 2 are settled by this release.
+- Peace Game (P1): count the links without a recorded email first ([backlog 007](../backlog/007-oauth-email-rule-edges.md) §2).
 
 ---
 
