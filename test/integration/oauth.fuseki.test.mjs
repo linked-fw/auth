@@ -120,6 +120,102 @@ test('the owner of the password account can link Google from inside the session'
   assert.equal(signin.auth.userAccount.id, created.auth.userAccount.id);
 });
 
+/** Mark the email of a person verified, as a verification link or a code sign-in does. */
+async function verifyEmailOf(personId) {
+  const credentials = await AuthCredential.select((c) => [c.emailVerifiedAt]).where((c) =>
+    c.credentialOf.equals({ id: personId })
+  );
+  assert.ok(credentials.length, 'the person has a credential');
+  for (const credential of credentials) {
+    await AuthCredential.update({ emailVerifiedAt: new Date() }).for({ id: credential.id });
+  }
+}
+
+test('a verified Google email signs in to the password account whose email is verified', async () => {
+  const email = newEmail();
+  const sub = newSub();
+  const created = await provider().createAccount({ firstName: 'Ada', email, password: 'ada-Passw0rd!' });
+  assert.equal(created.error, undefined, created.error);
+  await verifyEmailOf(created.auth.user.id);
+
+  googleSays(email.toUpperCase(), sub);
+  const result = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(result.auth.userAccount.id, created.auth.userAccount.id);
+  assert.equal(result.auth.user.id, created.auth.user.id);
+  const [link] = await identityTokensFor(sub);
+  assert.equal(link.account, created.auth.userAccount.id);
+  assert.equal(link.email, email, 'the link records the normalised provider email');
+
+  // the password still works, and the same identity signs in again by its link
+  const again = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(again.auth.userAccount.id, created.auth.userAccount.id);
+});
+
+test('an unverified Google email does not reach a verified account', async () => {
+  const email = newEmail();
+  const created = await provider().createAccount({ firstName: 'Ada', email, password: 'ada-Passw0rd!' });
+  await verifyEmailOf(created.auth.user.id);
+  const sub = newSub();
+  mock.method(GoogleHelper, 'validateIdToken', async () => ({ sub, email, email_verified: false }));
+  const result = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(result.auth, undefined);
+  assert.ok(result.error);
+  assert.equal((await identityTokensFor(sub)).length, 0);
+});
+
+test('a different verified email gets its own account, never the existing one', async () => {
+  const email = newEmail();
+  const created = await provider().createAccount({ firstName: 'Ada', email, password: 'ada-Passw0rd!' });
+  await verifyEmailOf(created.auth.user.id);
+  googleSays(newEmail(), newSub());
+  const result = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(result.error, undefined, result.error);
+  assert.notEqual(result.auth.userAccount.id, created.auth.userAccount.id);
+  assert.notEqual(result.auth.user.id, created.auth.user.id);
+});
+
+test('a Google identity whose email changed signs in by its new email, not to the old account', async () => {
+  const oldEmail = newEmail();
+  const sub = newSub();
+  googleSays(oldEmail, sub);
+  const first = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(first.error, undefined, first.error);
+
+  const newAddress = newEmail();
+  googleSays(newAddress, sub);
+  const renamed = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(renamed.error, undefined, renamed.error);
+  assert.notEqual(renamed.auth.userAccount.id, first.auth.userAccount.id);
+
+  const tokens = await identityTokensFor(sub);
+  assert.equal(tokens.length, 1, 'the identity is linked to one account');
+  assert.equal(tokens[0].account, renamed.auth.userAccount.id);
+  assert.equal(tokens[0].email, newAddress);
+
+  // and it keeps signing in to the new account
+  const again = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(again.auth.userAccount.id, renamed.auth.userAccount.id);
+});
+
+test('a changed email whose new address is refused keeps the old link', async () => {
+  const sub = newSub();
+  googleSays(newEmail(), sub);
+  const first = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(first.error, undefined, first.error);
+
+  // the new address has a password account whose email is not verified: refused
+  const newAddress = newEmail();
+  await provider().createAccount({ firstName: 'Mallory', email: newAddress, password: 'attacker-Passw0rd!' });
+  googleSays(newAddress, sub);
+  const refused = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(refused.action, 'sign_in_to_link');
+
+  const tokens = await identityTokensFor(sub);
+  assert.equal(tokens.length, 1, 'the link was removed by a refused sign-in');
+  assert.equal(tokens[0].account, first.auth.userAccount.id);
+});
+
 test('a new OAuth user gets a link with its provider and no stored token', async () => {
   const email = newEmail();
   const sub = newSub();

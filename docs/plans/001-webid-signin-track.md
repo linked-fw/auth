@@ -33,7 +33,9 @@ app's Client ID Document and defines its theme extension. A5 adds a passwordless
 emailed code, which webid.email's pages use. A4 makes the exchange work in native (Capacitor)
 builds. A6 prefixes auth's cookie names so two Linked apps on one host (CN and a local
 webid.email) keep separate sessions; A8 makes that prefix default to the app's `APP_PREFIX`, so
-no app has to set one. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
+no app has to set one. A7 lets a provider's verified email reach the existing account with that verified email
+(password or not), makes a changed provider email leave the old account, and lets a sign-in start
+with a provider hint and no typed email. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
 
 **A parallel track.** Every existing method — password, Google/Apple/Facebook OAuth, temporary,
 dev sign-in (`signinDev`) — keeps its behaviour, exposure, cookies and sessions. All methods end in
@@ -131,6 +133,8 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
 - Authorization code + PKCE, DPoP proof on the token request. Request parameters: `login_hint`
   (email), `prompt=none` for silent sign-in, and the provider hint `provider_hint=google` (not
   standard; other issuers ignore it).
+  A start with the provider hint and nothing typed (A7) goes to the default issuer with
+  `provider_hint` and no `login_hint`; the provider decides the email.
 - ID token claims: `iss`, `aud`, `exp`, `iat`, `nonce`, `webid` (required), `auth_time`
   (required); `email`, `email_verified` (webid.email always; others optional).
 - The relying party checks that `iss` is a `solid:oidcIssuer` of `webid`'s profile, skipping the
@@ -573,6 +577,48 @@ to set unless you want a specific name. Contract 2: CN and webid.email set no pr
 
 ---
 
+## A7 — OAuth into an existing account, and a provider start without an email
+
+**Depends on:** A5. **PR:** [#135](https://github.com/linked-fw/auth/pull/135), report [013](../reports/013-oauth-existing-account.md). Needed before Peace Game's migration (P1): every migrated Peace Game user has a
+password and may sign in with Google. **Size:** small-to-medium, 2 phases. From webid.email's
+backlog 008 (W5).
+
+**Problem.** webid.email's Google sign-in goes through `signinOAuth`, whose rules refuse Google for
+any existing account with a password (`sign_in_to_link`), and follow a linked Google identity even
+after its email changed. Both disagree with arch-08 §One email, one persona: several sign-in
+methods for the same email reach the same account. And an app's "Continue with Google" needs a
+typed email first, because `startOidcSignin` requires an `input`.
+
+**Scope** (the owner's decision: same verified email = same account; never a different email,
+never an unverified one; the email decides, not the provider subject)
+- `signinOAuth` signs a provider identity into an existing account when the provider's email is
+  verified and equals the account's verified email, password or not. An account whose email is
+  not verified keeps today's refusal (pre-account hijacking).
+- A provider identity linked to an account whose provider email has since changed no longer signs
+  into the old account; it continues by its new email (that email's account under the rule above,
+  or a new account).
+- `startOidcSignin` (and the native start) accepts `providerHint` with no `input`: the sign-in
+  starts at the default issuer with `provider_hint` and no `login_hint`.
+- The rule in the readme; a changeset (minor).
+
+**Verify**
+- Unit and integration tests: password account + verified Google email → the same account;
+  unverified provider email → refused; a different email → a new account, never a takeover;
+  changed provider email → not the old account.
+- The existing OAuth tests pass unchanged except where this rule changes them (named in the
+  report).
+- `startOidcSignin` with `providerHint` and no `input` builds a valid authorization URL (mock
+  issuer test).
+- `npm test` and `npm run test:integration` pass.
+
+**Consumers** (outside this repo; routed by master plan 065)
+- 065 §Contracts 4: the hint-only start (contract 4 here has it).
+- CN: "Continue with Google" calls `startOidcSignin({providerHint: 'google'})` with no email.
+- webid.email backlog 008: items 1 and 2 are settled by this release.
+- Peace Game (P1): count the links without a recorded email first ([backlog 007](../backlog/007-oauth-email-rule-edges.md) §2).
+
+---
+
 ## A4 — Native apps (Capacitor)
 
 **Depends on:** A2. Needed for Peace Game.
@@ -615,4 +661,5 @@ to set unless you want a specific name. Contract 2: CN and webid.email set no pr
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [x] A4 — [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md)
 - [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)
+- [x] A7 — [#135](https://github.com/linked-fw/auth/pull/135), report [013](../reports/013-oauth-existing-account.md)
 - [x] A8 — [#133](https://github.com/linked-fw/auth/pull/133), report [012](../reports/012-cookie-prefix-default.md)

@@ -150,7 +150,7 @@ export const useAuth = <
    * it to `completeOidcSignin`, or to `{error, action}`.
    */
   startNativeOidcSignin: (options: {
-    input: string;
+    input?: string;
     redirectUri: string;
     prompt?: 'none';
     providerHint?: string;
@@ -444,7 +444,7 @@ function useProvideAuth(signinRoute: string = '') {
   };
 
   const startNativeOidcSignin = async (options: {
-    input: string;
+    input?: string;
     redirectUri: string;
     prompt?: 'none';
     providerHint?: string;

@@ -77,7 +77,8 @@ async function readPending(): Promise<StoredPending | undefined> {
  * Needs the app's token storage (`setAuthTokenStorageMethods`) and system browser
  * (`setOidcSigninBrowser`). A new sign-in replaces one still pending on the device.
  *
- * @param options.input - An email or a WebID
+ * @param options.input - An email or a WebID; may be left out with a `providerHint` (the sign-in
+ *   starts at the default issuer, the provider decides the email)
  * @param options.redirectUri - The app-claimed link the issuer returns to; one of the Client ID
  *   Document's `redirect_uris` (`Auth.signinClient.redirectUris` on the server)
  * @returns the completed sign-in when the browser resolved to the callback URL (see
@@ -86,7 +87,7 @@ async function readPending(): Promise<StoredPending | undefined> {
  *   cancelled), or the server's start errors
  */
 export async function startNativeOidcSignin(options: {
-  input: string;
+  input?: string;
   redirectUri: string;
   prompt?: 'none';
   providerHint?: string;

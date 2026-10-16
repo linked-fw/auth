@@ -217,9 +217,9 @@ const auth = useAuth();
 const result = await auth.signinOAuth('google', { authentication: { idToken } });
 if ('error' in result) {
   if (result.action === 'sign_in_to_link') {
-    // An account with this email already exists and the provider may not be attached to it on
-    // its own (it has a password, or another identity). Ask the user to sign in the way they did
-    // before, then connect the provider from inside that session:
+    // An account with this email already exists, its email is not verified, and the provider
+    // may not be attached to it on its own (it has a password, or another identity). Ask the user
+    // to sign in the way they did before, then connect the provider from inside that session:
     //   await auth.linkOAuthIdentity('google', { authentication: { idToken } });
   }
   showError(result.error);
@@ -229,21 +229,43 @@ if ('error' in result) {
 The server verifies the provider's token and finds the account from what the provider vouches
 for, never from what the client sent:
 
-1. An identity already linked to an account (provider + subject) signs in to that account.
+1. An identity already linked to an account (provider + subject) signs in to that account while
+   it keeps the email it was linked with. **The email decides, not the provider's subject:** when
+   the provider's verified email has changed (a renamed Google Workspace account, say), the
+   sign-in continues by the new email (steps 2–4) and never reaches the old account; the old link
+   is removed once the new email reaches or creates an account (a refused sign-in keeps it). A
+   token without a verified email (Apple sends none on some sign-ins) follows its link.
 2. Otherwise the verified email is resolved through the current email-derived WebID,
    `UserAccount.email`, and `AuthCredential.email`. The latter two keep accounts created with an
    older, application-specific Person WebID reachable after upgrading Auth. If those identifiers
    point to several people or accounts, sign-in fails closed with `action: 'account_conflict'`.
 3. One unambiguous account is reached only when the provider verifies the email (Google, Apple),
-   the account has **no password**, and it is not linked to a provider without verified emails or
-   to a different identity at the same provider. Anything else answers
-   `{error, action: 'sign_in_to_link'}`. A password account can be created before its email is
-   verified (see *Email verification*), so it may have been registered by someone else in
-   advance; attaching to it by email would hand them the user's sign-in.
+   and then:
+   - **always when the account's email is verified too** (a verification link, a sign-in code,
+     an earlier provider sign-in): one verified email is one account, whatever sign-in methods it
+     already has, a password included;
+   - otherwise only when the account has **no password** and is not linked to a provider without
+     verified emails or to a different identity at the same provider. A password account can be
+     created before its email is verified (see *Email verification*), so it may have been
+     registered by someone else in advance; attaching to it by email would hand them the user's
+     sign-in.
+
+   Anything else answers `{error, action: 'sign_in_to_link'}`. A different email never reaches
+   the account, and neither does an email the provider has not verified.
+
+   "Verified" is per person (any credential of the person with `emailVerifiedAt`), not per
+   address, because a person has one email. An app must therefore never write a different,
+   unverified address onto a verified person's `UserAccount.email` or `AuthCredential.email`:
+   that address would count as verified here.
 4. Otherwise a new account is created, without a password.
 
-Each sign-in that reaches an account stores a link (`IdentityToken` with `sub` and
-`identityProvider`). The provider's token itself is never stored. Links written before 3.0.7
+Each sign-in that reaches an account stores a link (`IdentityToken` with `sub`,
+`identityProvider` and the provider's verified `email`; `linkOAuthIdentity` stores the same, so a
+provider connected with another address, such as Apple's private relay, keeps signing in while
+the provider keeps that address). A link written before 3.14 has no `email`: it is followed while
+the provider's email still resolves to its account (step 2), and gets the email recorded; an email
+that resolves to no single account (no WebID, or a conflict) leaves the link deciding.
+The provider's token itself is never stored. Links written before 3.0.7
 carry no provider (they are Apple links) and may hold the raw Apple identity token; it is removed
 the next time that user signs in. To remove all of them at once:
 
@@ -665,12 +687,15 @@ Auth.oidcSignin = {
 };
 ```
 
-**Start.** The client calls `startOidcSignin({input, prompt?, providerHint?, returnTo?})`
+**Start.** The client calls `startOidcSignin({input?, prompt?, providerHint?, returnTo?})`
 (`Server.call('@_linked/auth', 'startOidcSignin', …)`) and navigates to the `url` it returns.
 
 - `input` is an email or a WebID. A WebID's profile names its issuer. For an email, its domain's
   WebFinger answer does, else the default issuer gets the email as `login_hint` (see Issuer
   discovery).
+- `input` may be left out when a `providerHint` is given: a "Continue with Google" button needs no
+  email first. The sign-in starts at the default issuer with `provider_hint` and no `login_hint`,
+  and the provider decides the email (so no mismatch can be reported).
 - An issuer must be an `https:` URL with no query, no fragment and no `/.well-known/` (a
   profile or WebFinger answer naming anything else gets `invalid_issuer`), and its metadata must
   name exactly that issuer.
@@ -764,7 +789,7 @@ setOidcSigninBrowser(openSystemBrowser); // see the two recipes below
 // in a component
 const auth = useAuth();
 const answer = await auth.startNativeOidcSignin({
-  input: 'ada@example.com', // an email or a WebID
+  input: 'ada@example.com', // an email or a WebID; may be left out with a providerHint
   redirectUri: 'https://example.com/auth/oidc/native', // one of Auth.signinClient.redirectUris
   // prompt: 'none', providerHint: 'google'
 });

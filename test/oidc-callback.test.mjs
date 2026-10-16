@@ -403,6 +403,36 @@ test('start: a provider hint is passed on only when it is a plain name', async (
   assert.equal(new URL(odd.url).searchParams.has('provider_hint'), false);
 });
 
+test('a provider hint with no typed email starts at the default issuer, with no login_hint', async () => {
+  issuer.email = GRACE;
+  const { base } = await startApp();
+  const { started, response } = await signIn(browser(base), { providerHint: 'google' });
+
+  const url = new URL(started.url);
+  assert.equal(url.origin, issuer.issuer);
+  assert.equal(url.searchParams.get('provider_hint'), 'google');
+  assert.equal(url.searchParams.has('login_hint'), false);
+  assert.equal(url.searchParams.get('response_type'), 'code');
+  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
+  assert.ok(url.searchParams.get('state') && url.searchParams.get('nonce'));
+  assert.equal(url.searchParams.get('client_id'), 'https://app.test/.well-known/linked-client.jsonld');
+  assert.equal(url.searchParams.get('redirect_uri'), 'https://app.test/auth/oidc/callback');
+
+  // the provider decided the email; nothing was hinted, so nothing mismatches
+  assert.equal(response.status, 302);
+  assert.equal(outcomes[0].ok, true);
+  assert.equal(outcomes[0].webId, issuer.webIdFor(GRACE));
+  assert.equal(outcomes[0].mismatch, undefined);
+});
+
+test('start: nothing typed needs a plain provider hint', async () => {
+  const { base } = await startApp();
+  const client = browser(base);
+  assert.equal((await client.start({})).action, 'invalid_input');
+  assert.equal((await client.start({ input: '  ', providerHint: 'goo gle' })).action, 'invalid_input');
+  assert.equal((await client.start({ input: '', prompt: 'none' })).action, 'invalid_input');
+});
+
 test('an app that did not opt in has no callback and refuses to start', async () => {
   delete Auth.oidcSignin;
   const { base } = await startApp();

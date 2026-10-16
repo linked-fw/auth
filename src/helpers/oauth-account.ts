@@ -17,6 +17,8 @@ export const LINK_REQUIRES_SIGN_IN_ACTION = 'sign_in_to_link';
 
 /** What `signinOAuth` knows about an existing account whose email matched. */
 export type EmailMatchedAccountFacts = {
+  /** The account's person has a verified email (`personEmailVerified`). */
+  emailVerified: boolean;
   /** The account's person has a stored password hash. */
   hasPassword: boolean;
   /** The providers that already have an identity linked to the account. */
@@ -27,15 +29,16 @@ export type EmailMatchedAccountFacts = {
  * Decide whether a verified provider identity that matched NO linked identity may be attached,
  * by email, to an account that already exists.
  *
- * Attaching by email is where account takeover happens, so it is only allowed when nothing
- * about the existing account could belong to someone else:
+ * The provider must vouch for the email (see {@link EMAIL_VERIFYING_PROVIDERS}). Then:
  *
- * - the provider must vouch for the email (see {@link EMAIL_VERIFYING_PROVIDERS});
- * - the account must have no password. Account creation does not verify email ownership, so a
- *   password account may have been registered by somebody who typed in this address in advance
- *   and is waiting for the owner to arrive (pre-account hijacking);
- * - the account must not be connected to a provider whose email is not verified (same
- *   reasoning), nor to a different identity at this same provider.
+ * - an account whose email is verified is the same person's: one verified email is one account
+ *   (one email, one WebID), so the identity is attached whatever else the account has, a password
+ *   or other sign-in methods;
+ * - an account whose email was never verified may have been registered by somebody who typed in
+ *   this address in advance and is waiting for the owner to arrive (pre-account hijacking: account
+ *   creation does not verify email ownership). It is attached only when nothing about it could
+ *   belong to someone else: no password, no identity at a provider whose email is not verified,
+ *   and no different identity at this same provider.
  *
  * Everything else fails closed with `action: 'sign_in_to_link'`.
  */
@@ -53,6 +56,9 @@ export function decideEmailMatchedAccount(input: {
 
   if (!input.emailVerified || !EMAIL_VERIFYING_PROVIDERS.includes(input.provider)) {
     return refuse('');
+  }
+  if (input.existing.emailVerified) {
+    return { link: true };
   }
   if (input.existing.hasPassword) {
     return refuse(' and has a password');

@@ -56,7 +56,7 @@ import {
   isAllowedWebUrl,
   OIDC_CALLBACK_PATH,
 } from './utils/clientIdDocument.js';
-import { createIssuerDiscovery } from './utils/issuerDiscovery.js';
+import { createIssuerDiscovery, WEBID_EMAIL_ISSUER } from './utils/issuerDiscovery.js';
 import type { IssuerDiscovery } from './utils/issuerDiscovery.js';
 import { createGuardedFetch } from './utils/guardedFetch.js';
 import {
@@ -90,7 +90,7 @@ import PasswordHelper, {
 } from './helpers/password.js';
 import { IdentityToken } from './shapes/IdentityToken.js';
 import { decideEmailMatchedAccount } from './helpers/oauth-account.js';
-import { OAuthIdentityStore } from './utils/oauthIdentities.js';
+import { OAuthIdentityStore, normalizeLinkEmail } from './utils/oauthIdentities.js';
 import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
 import path, { dirname, basename } from 'path';
@@ -377,6 +377,48 @@ async function findAccountForOAuthEmail(
     account: accountsById.values().next().value,
     personId: personIds.values().next().value,
   };
+}
+
+/**
+ * Whether a linked provider identity still has the email it was linked with, so it may sign in to
+ * the linked account:
+ *
+ * - `'same'`: the token's verified email is the link's recorded email or, for a link written
+ *   before links recorded one, an email that resolves to the linked account (as an email sign-in
+ *   would find it);
+ * - `'changed'`: the token's verified email is another one;
+ * - `'unknown'`: the token carries no verified email (Apple sends none on some sign-ins), or, for a
+ *   link that recorded none, the email resolves to no single account (no WebID, or a conflict),
+ *   so there is nothing to compare and the link decides.
+ *
+ * A link recorded with an address other than the account's own (an explicit `linkOAuthIdentity`,
+ * e.g. Apple's private relay) stays valid while the provider keeps that address.
+ */
+async function linkKeepsEmail(
+  provider: AuthBackendProvider,
+  identity: VerifiedOAuthIdentity,
+  links: OAuthIdentityLink[],
+  account: UserAccountData
+): Promise<'same' | 'changed' | 'unknown'> {
+  if (!identity.email || !identity.emailVerified) return 'unknown';
+  const email = normalizeLinkEmail(identity.email);
+  const recorded = links.map((link) => link.email).filter(Boolean);
+  if (recorded.length) return recorded.every((linked) => linked === email) ? 'same' : 'changed';
+
+  // an email that cannot be resolved cleanly (no WebID, several accounts) proves no change:
+  // the link decides, as before links recorded their email
+  let webID: string;
+  try {
+    webID = Auth.webIdFor(email);
+  } catch {
+    return 'unknown';
+  }
+  const found = await findAccountForOAuthEmail(provider, webID, identity.email, email);
+  if (found.conflict) return 'unknown';
+  const reachesAccount =
+    (found.account?.id !== undefined && found.account.id === account.id) ||
+    (!found.account && found.personId !== undefined && found.personId === account.accountOf?.id);
+  return reachesAccount ? 'same' : 'changed';
 }
 
 // The configured user shape (`Auth.userType`). Historically `SchemaPerson | FoafPerson`;
@@ -674,6 +716,8 @@ type OidcRuntime = {
   siteRoot: string;
   relyingParty: OidcRelyingParty;
   discovery: IssuerDiscovery;
+  /** Where a sign-in with a provider hint and nothing typed starts. */
+  defaultIssuer: string;
 };
 
 let oidcRuntime: OidcRuntime | undefined;
@@ -725,8 +769,38 @@ function oidcRuntimeFor(config: OidcSigninConfig): OidcRuntime {
       timeoutMs: Math.min(timeoutMs, 3000),
       fetch,
     }),
+    defaultIssuer: config.defaultIssuer ?? WEBID_EMAIL_ISSUER,
   };
   return oidcRuntime;
+}
+
+/** A `providerHint` as sent on: letters, digits, `-`, `_`; anything else is dropped. */
+function oidcProviderHint(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-z0-9_-]{1,32}$/i.test(value) ? value : undefined;
+}
+
+/** What a start sends the issuer: the issuer, and the email to hint when the user typed one. */
+type OidcStartTarget = { issuer: string; loginHint?: string };
+
+/**
+ * The issuer a sign-in starts at. What the user typed (an email or a WebID) goes through issuer
+ * discovery. Nothing typed is allowed with a provider hint ("Continue with Google"): the default
+ * issuer, with no `login_hint`, and the provider then decides the email.
+ */
+async function oidcStartTarget(
+  runtime: OidcRuntime,
+  input: string,
+  providerHint: string | undefined
+): Promise<OidcStartTarget | { error: string; action: string }> {
+  if (!input && providerHint) return { issuer: runtime.defaultIssuer };
+  const found = await runtime.discovery.discover(input);
+  if (found.ok === false) {
+    if (found.reason === 'invalid-input') {
+      return { error: 'Enter an email or a WebID', action: 'invalid_input' };
+    }
+    return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
+  }
+  return { issuer: found.issuer, ...('loginHint' in found ? { loginHint: found.loginHint } : {}) };
 }
 
 /**
@@ -1855,7 +1929,8 @@ export default class AuthBackendProvider extends BackendProvider {
    * `{SITE_ROOT}/auth/oidc/callback`, which completes the sign-in. The pending sign-in (PKCE
    * verifier, nonce, DPoP key, hinted email) stays in this browser's server-side session.
    *
-   * @param options.input - An email or a WebID
+   * @param options.input - An email or a WebID. May be left out with a `providerHint`: the
+   *   sign-in then starts at the default issuer with no `login_hint` ("Continue with Google")
    * @param options.prompt - `'none'` for a silent sign-in (the callback ends in `login_required`
    *   when the user has no session at the issuer)
    * @param options.providerHint - Passed on as `provider_hint`, e.g. `'google'`
@@ -1865,7 +1940,7 @@ export default class AuthBackendProvider extends BackendProvider {
    *   `no_session`, or the rate-limited result
    */
   async startOidcSignin(options: {
-    input: string;
+    input?: string;
     prompt?: 'none';
     providerHint?: string;
     returnTo?: string;
@@ -1877,14 +1952,11 @@ export default class AuthBackendProvider extends BackendProvider {
     if (!config) return { error: 'WebID sign-in is not available', action: 'not_configured' };
 
     const input = typeof options?.input === 'string' ? options.input.trim() : '';
-    if (!input || input.length > OIDC_INPUT_MAX_LENGTH) {
+    const providerHint = oidcProviderHint(options?.providerHint);
+    if ((!input && !providerHint) || input.length > OIDC_INPUT_MAX_LENGTH) {
       return { error: 'Enter an email or a WebID', action: 'invalid_input' };
     }
     const prompt = options?.prompt === 'none' ? 'none' : undefined;
-    const providerHint =
-      typeof options?.providerHint === 'string' && /^[a-z0-9_-]{1,32}$/i.test(options.providerHint)
-        ? options.providerHint
-        : undefined;
     const session = (this.request as any)?.session;
     if (!session) return { error: 'Sign-in needs a browser session', action: 'no_session' };
 
@@ -1895,17 +1967,11 @@ export default class AuthBackendProvider extends BackendProvider {
       console.error(`[auth] ${(error as Error).message}`);
       return { error: 'WebID sign-in is not available', action: 'not_configured' };
     }
-    const found = await runtime.discovery.discover(input);
-    if (found.ok === false) {
-      if (found.reason === 'invalid-input') {
-        return { error: 'Enter an email or a WebID', action: 'invalid_input' };
-      }
-      return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
-    }
+    const target = await oidcStartTarget(runtime, input, providerHint);
+    if ('error' in target) return target;
 
     const begun = await runtime.relyingParty.begin({
-      issuer: found.issuer,
-      ...('loginHint' in found ? { loginHint: found.loginHint } : {}),
+      ...target,
       ...(prompt ? { prompt } : {}),
       ...(providerHint ? { providerHint } : {}),
     });
@@ -1925,7 +1991,8 @@ export default class AuthBackendProvider extends BackendProvider {
    * sign-in is not kept here: the system browser the app opens shares no cookie with it. The answer
    * carries it sealed (`pending`), for the app to hold until it calls `completeNativeOidcSignin`.
    *
-   * @param options.input - An email or a WebID
+   * @param options.input - An email or a WebID; may be left out with a `providerHint`, as for
+   *   `startOidcSignin`
    * @param options.redirectUri - The app-claimed link (Universal Link, App Link or custom scheme)
    * @param options.prompt - `'none'` for a silent sign-in
    * @param options.providerHint - Passed on as `provider_hint`, e.g. `'google'`
@@ -1934,7 +2001,7 @@ export default class AuthBackendProvider extends BackendProvider {
    *   `issuer_unreachable`, or the rate-limited result
    */
   async startNativeOidcSignin(options: {
-    input: string;
+    input?: string;
     redirectUri: string;
     prompt?: 'none';
     providerHint?: string;
@@ -1947,7 +2014,8 @@ export default class AuthBackendProvider extends BackendProvider {
     if (!wantsTokensInBody(this.request)) return NOT_NATIVE;
 
     const input = typeof options?.input === 'string' ? options.input.trim() : '';
-    if (!input || input.length > OIDC_INPUT_MAX_LENGTH) {
+    const providerHint = oidcProviderHint(options?.providerHint);
+    if ((!input && !providerHint) || input.length > OIDC_INPUT_MAX_LENGTH) {
       return { error: 'Enter an email or a WebID', action: 'invalid_input' };
     }
     const redirectUri = nativeRedirectUri(options?.redirectUri);
@@ -1958,10 +2026,6 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
     const prompt = options?.prompt === 'none' ? 'none' : undefined;
-    const providerHint =
-      typeof options?.providerHint === 'string' && /^[a-z0-9_-]{1,32}$/i.test(options.providerHint)
-        ? options.providerHint
-        : undefined;
 
     let runtime: OidcRuntime;
     try {
@@ -1970,18 +2034,12 @@ export default class AuthBackendProvider extends BackendProvider {
       console.error(`[auth] ${(error as Error).message}`);
       return { error: 'WebID sign-in is not available', action: 'not_configured' };
     }
-    const found = await runtime.discovery.discover(input);
-    if (found.ok === false) {
-      if (found.reason === 'invalid-input') {
-        return { error: 'Enter an email or a WebID', action: 'invalid_input' };
-      }
-      return { error: 'No sign-in service was found for this WebID', action: 'issuer_not_found' };
-    }
+    const target = await oidcStartTarget(runtime, input, providerHint);
+    if ('error' in target) return target;
 
     const begun = await runtime.relyingParty.begin({
-      issuer: found.issuer,
+      ...target,
       redirectUri,
-      ...('loginHint' in found ? { loginHint: found.loginHint } : {}),
       ...(prompt ? { prompt } : {}),
       ...(providerHint ? { providerHint } : {}),
     });
@@ -2072,15 +2130,19 @@ export default class AuthBackendProvider extends BackendProvider {
    * VERIFIED_OAUTH_PROVIDERS). The account is then found from what the provider vouches for,
    * never from what the client sent:
    *
-   * 1. an identity linked to an account (provider + subject) signs straight in;
-   * 2. otherwise an existing account with the verified email is attached only when
-   *    `decideEmailMatchedAccount` allows it. When it does not, sign-in fails with
+   * 1. an identity linked to an account (provider + subject) signs in to it while it keeps the
+   *    email it was linked with (see `linkKeepsEmail`). When its verified email has changed, the
+   *    link is removed and the sign-in continues by the new email: the email decides the
+   *    account, not the provider's subject;
+   * 2. otherwise an existing account with the verified email is attached when
+   *    `decideEmailMatchedAccount` allows it: always when the account's email is verified too
+   *    (one verified email, one account). When it does not, sign-in fails with
    *    `action: 'sign_in_to_link'`: the user signs in the way they did before and connects the
    *    provider with `linkOAuthIdentity`;
    * 3. otherwise a new account is created, without a password.
    *
-   * Every sign-in that reaches an account leaves a link behind, so the email is consulted only
-   * once per identity.
+   * Every sign-in that reaches an account leaves a link behind, with the provider's verified
+   * email.
    *
    * @param provider - The OAuth provider
    * @param oauthUserData - The provider's credential (Google: `authentication.idToken`, Apple:
@@ -2120,18 +2182,40 @@ export default class AuthBackendProvider extends BackendProvider {
         error: 'This sign-in is linked to more than one account. Please contact support.',
       };
     }
+    // links of this identity to an account its email has left, removed when the email reaches
+    // or creates an account (so a refused sign-in keeps them, and one identity has one account)
+    let staleLinks: OAuthIdentityLink[] = [];
+    const removeStaleLinks = async () => {
+      for (const link of staleLinks) await OAuthIdentityStore.removeLink(link);
+    };
     if (linkedAccountIds.length === 1) {
       const account = await loadAccountWithPerson(this, linkedAccountIds[0]);
       if (account?.accountOf?.id) {
-        for (const link of links.filter((l) => l.legacy)) {
-          await OAuthIdentityStore.upgradeLegacyLink(link, provider).catch((err) =>
-            console.warn(`${provider} sign-in: could not upgrade a legacy identity link`, err)
-          );
+        const emailStill = await linkKeepsEmail(this, identity, links, account);
+        if (emailStill === 'changed') {
+          // the email decides, not the subject: the identity no longer has the email it was
+          // linked with, so it does not sign in to the old account and continues by its new
+          // email below. The old link is removed only once that reaches or creates an account.
+          console.log(`${provider} sign-in: the linked identity's email changed`);
+          staleLinks = links;
+        } else {
+          for (const link of links.filter((l) => l.legacy)) {
+            await OAuthIdentityStore.upgradeLegacyLink(link, provider).catch((err) =>
+              console.warn(`${provider} sign-in: could not upgrade a legacy identity link`, err)
+            );
+          }
+          if (emailStill === 'same' && identity.email) {
+            for (const link of links.filter((l) => !l.email)) {
+              await OAuthIdentityStore.recordLinkEmail(link, identity.email).catch((err) =>
+                console.warn(`${provider} sign-in: could not record the email of a link`, err)
+              );
+            }
+          }
+          await markOAuthEmailVerified(identity, account.accountOf.id);
+          return Auth.onSigninSuccessful(this, account.accountOf as UserData, account);
         }
-        await markOAuthEmailVerified(identity, account.accountOf.id);
-        return Auth.onSigninSuccessful(this, account.accountOf as UserData, account);
       }
-      // a link to an account that no longer exists: fall through to the email
+      // a link to an account that no longer exists, or one the email has left: by the email
     }
 
     if (!identity.email || !identity.emailVerified) {
@@ -2160,6 +2244,7 @@ export default class AuthBackendProvider extends BackendProvider {
         provider,
         emailVerified: identity.emailVerified,
         existing: {
+          emailVerified: await personEmailVerified(existing.personId),
           hasPassword: await OAuthIdentityStore.personHasPassword(existing.personId),
           linkedProviders: existing.account
             ? await OAuthIdentityStore.findLinkedProviders(existing.account.id)
@@ -2171,6 +2256,7 @@ export default class AuthBackendProvider extends BackendProvider {
       const person = { id: existing.personId } as UserData;
       const account =
         existing.account ?? ((await this.getOrCreateAccount(person)) as UserAccountData);
+      await removeStaleLinks();
       await OAuthIdentityStore.createLink(identity, account.id);
       await markOAuthEmailVerified(identity, existing.personId);
       return Auth.onSigninSuccessful(
@@ -2220,6 +2306,7 @@ export default class AuthBackendProvider extends BackendProvider {
             throw new Error(`Could not create ${provider} account for user ${user.id}`);
           });
 
+        await removeStaleLinks();
         await OAuthIdentityStore.createLink(identity, account.id).catch((err) => {
           console.error(`Error linking the ${provider} identity of user ${user.id}:`, err);
           throw new Error(`Could not link the ${provider} identity of user ${user.id}`);
