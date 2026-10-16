@@ -165,6 +165,14 @@ test('reuses the account another method made for the WebID (dev sign-in keeps no
   assert.equal(accounts.rows[0].email, EMAIL);
 });
 
+test('signup does not replace an email already on the reused account (nothing proved its own)', async () => {
+  accounts.rows.push({ id: 'https://app.test/account/dev', email: 'dev-token@example.test', accountOf: { id: WEBID } });
+  const result = await signup();
+  assert.ok(result.created, `not created: ${JSON.stringify(result)}`);
+  assert.equal(result.created.isNewAccount, false);
+  assert.equal(accounts.rows[0].email, 'dev-token@example.test');
+});
+
 test('a password of exactly the minimum length is accepted', async () => {
   const result = await signup(EMAIL, 'x'.repeat(MIN_PASSWORD_LENGTH));
   assert.ok(result.created, `not created: ${JSON.stringify(result)}`);

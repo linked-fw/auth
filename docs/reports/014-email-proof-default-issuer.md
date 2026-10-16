@@ -21,16 +21,19 @@ email proved its WebID in production, and a dev sign-in followed by an issuer si
   marked verified): `email_verified` is true and one of
   - **derivation** (unchanged): `Auth.webIdFor(email) === webid`;
   - **default issuer:** `iss` is the app's default issuer (`Auth.oidcSignin.defaultIssuer`, else
-    webid.email, compared exactly, as the issuer's metadata must name it) and `webid` is on that
-    issuer's origin. The default issuer vouches for its own WebIDs' emails;
+    webid.email, compared as every issuer comparison is: one trailing slash ignored) and `webid` is
+    on that issuer's origin. The default issuer vouches for its own WebIDs' emails;
   - **development and test:** `NODE_ENV` is `development` or `test` (auth's `isDevelopmentLikeEnv`,
     the guard the secret fallbacks use), any issuer. A warning naming the issuer is logged each time.
   Any other issuer's email is unproven, whatever it claims.
 - **One account per WebID.** Cause: `signinDev` keeps no Person (the profile is the issuer's), and
   the OIDC callback's new-Person branch created a new account without looking for one
   (`getOrCreateAccount` ran only when the Person existed). A helper, `accountForNewPerson`, now
-  finds the account whose `sioc:account_of` is the new Person's IRI and reuses it (storing the
-  email on it when it has none), else creates one. It serves the OIDC callback, code sign-in and
+  finds the account whose `sioc:account_of` is the new Person's IRI and reuses it, else creates
+  one. The reused account is selected with `accountOf`, so the session has the same shape either
+  way. Its email is set when it has none; a proven email (OIDC with `emailProven`, code sign-in)
+  also replaces a different one, with a warning (the only writer of an email there is dev
+  sign-in's unproven token email); signup never replaces one. It serves the OIDC callback, code sign-in and
   signup, which had the same branch. OAuth already finds the WebID's account
   (`findAccountForOAuthEmail`). A reused account reports `isNewAccount: false`, in the OIDC outcome
   and to `onSigninSuccessful` (so `extendAuthSession` runs): `Auth.login`'s `createAccount` may now
@@ -45,23 +48,26 @@ email proved its WebID in production, and a dev sign-in followed by an issuer si
 |---|---|
 | 1 — the email rule (`emailProvesWebId`, readme, doc comments) | build ok; `npm test` 545/545; `npm run test:integration` 47/47 |
 | 2 — one account per WebID (`accountForNewPerson`, `Auth.login`, contract 4, changeset) | build ok; `npm test` 548/548; `npm run test:integration` 48/48 |
+| Review fixes — `sameIssuer` for the default issuer; the reused account selected with `accountOf`; a proven email replaces a dev one | build ok; `npm test` 552/552; `npm run test:integration` 48/48 |
 
 Final runs (baseline on `main`: 536 and 47):
 
 ```
-npm test                    # tests 548  # pass 548  # fail 0
-npm run test:integration    # tests 48   # pass 48   # fail 0   (3.8 s, local Fuseki)
+npm test                    # tests 552  # pass 552  # fail 0
+npm run test:integration    # tests 48   # pass 48   # fail 0   (3.6 s, local Fuseki)
 ```
 
 New tests:
-- `oidc-callback.test.mjs` (+11): proven by derivation from a non-default issuer in production;
+- `oidc-callback.test.mjs` (+14): the default issuer configured with a trailing slash; a proven
+  email replaces the dev email on the reused account, an unproven one does not; proven by derivation from a non-default issuer in production;
   proven by the default issuer for a WebID on its origin with no derivation, in production; a
   non-default issuer not proven in production; a WebID off the default issuer's origin not proven
   in production (the existing "another issuer's email" test, now under `production`); any issuer
   proven under `development` and `test`; the development rule not applied under `production`,
   `staging` and unset `NODE_ENV`; `email_verified: false` unproven even in development; an account
   without a person reused.
-- `signin-code.test.mjs`, `signup.test.mjs` (+1 each): the account dev sign-in left is reused.
+- `signin-code.test.mjs` (+1), `signup.test.mjs` (+2): the account dev sign-in left is reused;
+  signup does not replace its email.
 - `oidc.fuseki.test.mjs` (+1, real store): `signinDev`, then the mock issuer for the same WebID →
   one `sioc:account_of`, `isNewAccount: false`, the proven email on it.
 
@@ -94,3 +100,12 @@ the same text: the master-plan agent copies it.
   invitations resolve there; CN needs no new option (its default issuer is webid.email). Close §1
   and §2.
 - Existing duplicate accounts in developer data are not merged (dev only; no production data).
+
+## Known limitations (from the independent review)
+
+- Several person-less accounts for one WebID (only possible in dev data): the reuse picks an
+  arbitrary one.
+- A dev sign-in session on the reused account survives a later issuer sign-in (by design: same
+  account, same WebID).
+- The origin comparison cannot match two opaque origins (`"null" === "null"`): the WebID and the
+  issuer are http(s) URLs by then, and `onIssuerOrigin` refuses an opaque origin explicitly.

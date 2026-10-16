@@ -68,6 +68,7 @@ import {
   createOidcRelyingParty,
   defaultOidcResultLocation,
   safeReturnTo,
+  sameIssuer,
 } from './utils/oidcSignin.js';
 import type {
   OidcCallbackError,
@@ -838,20 +839,30 @@ async function hasUnprovenPassword(personId: string): Promise<boolean> {
 /**
  * The account of a person just created at `person.id`. A WebID has one account whichever method
  * signs it in, and another method may have made it without a person (dev sign-in keeps none: the
- * profile is the issuer's), so that account is reused (`isNewAccount: false`), with `email` stored
- * on it when it has none. Otherwise an account is created, with `email` when given.
+ * profile is the issuer's), so that account is reused (`isNewAccount: false`). Otherwise an
+ * account is created, with `email` when given.
+ *
+ * On a reused account, `email` is stored when it has none. A `proven` email (the sign-in proved
+ * it) also replaces a different one: the only writer of an email on a person-less account is dev
+ * sign-in, whose email nothing proved.
  */
 async function accountForNewPerson(
   provider: AuthBackendProvider,
   person: { id: string },
-  email?: string
+  email: string | undefined,
+  proven: boolean
 ): Promise<{ account: UserAccountData; isNewAccount: boolean }> {
   const existing = await provider.accountShape
-    .select((a) => [a.email])
+    .select((a) => [a.email, a.accountOf])
     .where((a) => a.accountOf.equals({ id: person.id }))
     .one();
   if (existing) {
-    if (email && !existing.email) {
+    if (email && existing.email !== email && (!existing.email || proven)) {
+      if (existing.email) {
+        console.warn(
+          `[auth] account ${existing.id}: its email is replaced by the one the sign-in proved for ${person.id}`
+        );
+      }
       await provider.accountShape.update({ email }).for(existing);
       return { account: { ...existing, email } as unknown as UserAccountData, isNewAccount: false };
     }
@@ -866,10 +877,14 @@ async function accountForNewPerson(
   return { account: account as unknown as UserAccountData, isNewAccount: true };
 }
 
-/** Whether `url`'s origin is `issuer`'s. */
+/**
+ * Whether `url`'s origin is `issuer`'s. Both are http(s) URLs by the time this runs (the issuer
+ * and the WebID passed the relying party's checks), and an opaque origin (`"null"`) never matches.
+ */
 function onIssuerOrigin(url: string, issuer: string): boolean {
   try {
-    return new URL(url).origin === new URL(issuer).origin;
+    const origin = new URL(url).origin;
+    return origin !== 'null' && origin === new URL(issuer).origin;
   } catch {
     return false;
   }
@@ -899,7 +914,7 @@ function emailProvesWebId(
   } catch {
     // an email the derivation refuses proves nothing by derivation; the rules below still apply
   }
-  if (identity.issuer === defaultIssuer && onIssuerOrigin(identity.webId, defaultIssuer)) {
+  if (sameIssuer(identity.issuer, defaultIssuer) && onIssuerOrigin(identity.webId, defaultIssuer)) {
     return true;
   }
   if (isDevelopmentLikeEnv()) {
@@ -960,7 +975,12 @@ async function signInVerifiedWebId(
           throw new Error(`Could not create user ${webId}`);
         });
       if (emailProven) await markEmailVerified(user.id, email);
-      const created = await accountForNewPerson(provider, user, emailProven ? email : undefined);
+      const created = await accountForNewPerson(
+        provider,
+        user,
+        emailProven ? email : undefined,
+        emailProven
+      );
       isNewAccount = created.isNewAccount;
       console.log(
         `new user ${user.id} from a Solid-OIDC sign-in, ${isNewAccount ? 'new ' : ''}account ${created.account.id}`
@@ -1523,7 +1543,12 @@ export default class AuthBackendProvider extends BackendProvider {
         console.log(`created new password for ${user.id}`);
 
         // its account (one another method made for this WebID, or a new one)
-        const { account, isNewAccount } = await accountForNewPerson(this, user, normalizedEmail);
+        const { account, isNewAccount } = await accountForNewPerson(
+          this,
+          user,
+          normalizedEmail,
+          false
+        );
 
         console.log(`new user ${user.id}, ${isNewAccount ? 'new ' : ''}account ${account.id}`);
 
@@ -1973,7 +1998,12 @@ export default class AuthBackendProvider extends BackendProvider {
             throw new Error(`Could not create user ${personId}`);
           });
         await markEmailVerified(user.id, normalizedEmail);
-        const { account, isNewAccount } = await accountForNewPerson(this, user, normalizedEmail);
+        const { account, isNewAccount } = await accountForNewPerson(
+          this,
+          user,
+          normalizedEmail,
+          true
+        );
         console.log(
           `new user ${user.id} from a sign-in code, ${isNewAccount ? 'new ' : ''}account ${account.id}`
         );

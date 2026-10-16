@@ -223,6 +223,29 @@ test('an account another method made without a person (as dev sign-in leaves it)
   assert.equal(outcomes[0].emailProven, true);
 });
 
+test('a proven email replaces the unproven one dev sign-in left on the reused account', async () => {
+  const webId = issuer.webIdFor(ADA);
+  accounts.rows.push({ id: 'https://app.test/account/dev', email: 'dev-token@example.test', accountOf: { id: webId } });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(accounts.created.length, 0);
+  assert.equal(accounts.rows[0].email, ADA);
+  assert.equal(outcomes[0].isNewAccount, false);
+});
+
+test('an unproven email does not replace the reused account\'s email', async () => {
+  process.env.NODE_ENV = 'production';
+  Auth.oidcSignin.defaultIssuer = 'https://default-issuer.test';
+  Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+  const webId = issuer.addProfile('ada', [issuer.issuer]);
+  issuer.claims = (c) => ({ ...c, webid: webId });
+  accounts.rows.push({ id: 'https://app.test/account/dev', email: 'dev-token@example.test', accountOf: { id: webId } });
+  const { base } = await startApp();
+  await signIn(browser(base), { input: webId });
+  assert.equal(outcomes[0].emailProven, false);
+  assert.equal(accounts.rows[0].email, 'dev-token@example.test');
+});
+
 test('a first proven sign-in ends the unproven password of a pre-registered person', async () => {
   const webId = issuer.webIdFor(ADA);
   people.rows.push({ id: webId, givenName: 'Mallory' });
@@ -287,6 +310,17 @@ test("proven by the default issuer: its verified email for a WebID on its origin
   const [credential] = [...credentials.rows.values()];
   assert.equal(credential.credentialOf.id, webId);
   assert.ok(credential.emailVerifiedAt);
+});
+
+test('the default issuer configured with a trailing slash still vouches for its WebIDs', async () => {
+  process.env.NODE_ENV = 'production';
+  Auth.oidcSignin.defaultIssuer = `${issuer.issuer}/`;
+  Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(outcomes[0].ok, true, JSON.stringify(outcomes[0]));
+  assert.equal(outcomes[0].issuer, issuer.issuer);
+  assert.equal(outcomes[0].emailProven, true);
 });
 
 test('a non-default issuer\'s verified email is not proven in production', async () => {
