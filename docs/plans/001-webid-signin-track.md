@@ -145,12 +145,18 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   confirming that the WebID dereferences at all: a webid.email WebID is trusted from the issuer's
   word alone. `login_required` and a refused issuer check are returned to the app, not thrown.
 - The token's `email` is trusted (stored on the account, marked verified) only when it **proves
-  the WebID**: `email_verified` is true and `Auth.webIdFor(email) === webid`. Any issuer can claim
-  any email for its own WebIDs, so an app that resolves anything by email (CN's invitations, C2b)
-  uses the email only when the callback's outcome says `emailProven`. In practice only
-  webid.email-derived WebIDs carry a proven email (with CN's HMAC derivation), so email-based
-  invitations will not match users of third-party issuers: a product limitation, which the invite
-  UI's "grant a WebID directly" covers.
+  the WebID**: `email_verified` is true and either `Auth.webIdFor(email) === webid`, or (A9) `iss`
+  is the app's default issuer (`Auth.oidcSignin.defaultIssuer`, else webid.email) and `webid` is
+  on that issuer's origin: the default issuer vouches for the emails of its own WebIDs, which is
+  how webid.email's emails count in production, where the app cannot derive its WebIDs. With
+  `NODE_ENV` `development` or `test` (never `production`, `staging` or unset), any issuer's
+  verified email counts. Any other issuer can claim any email for its own WebIDs, so an app that
+  resolves anything by email (CN's invitations, C2b) uses the email only when the callback's
+  outcome says `emailProven`. Email-based invitations will not match users of third-party
+  issuers: a product limitation, which the invite UI's "grant a WebID directly" covers.
+- (A9) A WebID has one `UserAccount` whichever method signs it in: the Solid-OIDC callback, code
+  sign-in and signup reuse an account another method made without a person (`signinDev` keeps
+  none), and report `isNewAccount: false`.
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
   a shared artifact; C1 is the first test across the two real processes.

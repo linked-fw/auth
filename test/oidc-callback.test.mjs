@@ -209,6 +209,20 @@ test('an existing person signs in to its account; no second person or account', 
   assert.equal(outcomes[0].isNewAccount, false);
 });
 
+test('an account another method made without a person (as dev sign-in leaves it) is reused', async () => {
+  const webId = issuer.webIdFor(ADA);
+  accounts.rows.push({ id: 'https://app.test/account/dev', accountOf: { id: webId } });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.deepEqual(people.created.map((p) => p.id), [webId], 'the person is created');
+  assert.equal(accounts.created.length, 0, 'no second account');
+  assert.equal(accounts.rows.length, 1);
+  assert.equal(accounts.rows[0].email, ADA, 'the proven email is stored on it');
+  assert.equal([...sessionStore.records.values()][0].accountId, 'https://app.test/account/dev');
+  assert.equal(outcomes[0].isNewAccount, false);
+  assert.equal(outcomes[0].emailProven, true);
+});
+
 test('a first proven sign-in ends the unproven password of a pre-registered person', async () => {
   const webId = issuer.webIdFor(ADA);
   people.rows.push({ id: webId, givenName: 'Mallory' });

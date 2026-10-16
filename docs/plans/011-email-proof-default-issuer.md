@@ -75,13 +75,23 @@ does not serve; the origin comparison is the same code).
 
 ### Phase 2 — One account per WebID
 
-- [ ] `signInVerifiedWebId` new-Person branch: create the Person, then reuse the WebID's existing
+- [x] `signInVerifiedWebId` new-Person branch: create the Person, then reuse the WebID's existing
   account (store a proven email on it), else create one.
-- [ ] Unit test: an account without a Person (as `signinDev` leaves it) is reused.
-- [ ] Integration test (`oidc.fuseki.test.mjs`): `signinDev` then the mock issuer for the same
+- [x] Unit test: an account without a Person (as `signinDev` leaves it) is reused.
+- [x] Integration test (`oidc.fuseki.test.mjs`): `signinDev` then the mock issuer for the same
   WebID → one `sioc:account_of`, `isNewAccount: false`.
-- [ ] Contract 4 in 001 (and 065 via the report), changeset (minor).
+- [x] Contract 4 in 001 (and 065 via the report), changeset (minor).
 
 **Validation:** build; `npm test` and `npm run test:integration` (baseline 47) pass.
+
+**Done.** build ok; `npm test` 548/548; `npm run test:integration` 48/48. Without the `src/`
+change the new unit test and the new integration test fail (`not ok 29 - a dev sign-in, then an
+issuer sign-in of the same WebID: one account`). Cause found: `signinDev` keeps no Person, and the
+callback's new-Person branch created its account without looking for one (`getOrCreateAccount` was
+used only when the Person existed). Per the owner's "every method": one helper,
+`accountForNewPerson`, also serves code sign-in and signup, which had the same new-Person branch;
+OAuth already finds the WebID's account (`findAccountForOAuthEmail`, covered by "a verified email
+attaches to an OAuth-only account"). `Auth.login`'s `createAccount` may now return
+`isNewAccount: false`, so a reused account still gets `extendAuthSession`.
 
 **Dependencies:** phase 2 builds on phase 1's `signInVerifiedWebId` signature; sequential.

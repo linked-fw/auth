@@ -1,7 +1,8 @@
 // Solid-OIDC sign-in against a REAL graph store: through a mock issuer (../mockIssuer.mjs), a new
 // WebID gets its person, account and verified email, and the session it starts authenticates the
 // next request; the same WebID signing in again reaches the same account; a native app's sign-in
-// (sealed pending record, app-claimed link, tokens in the body) reaches the same account too.
+// (sealed pending record, app-claimed link, tokens in the body) reaches the same account too; and a
+// WebID that signed in with dev sign-in first (an account, no person) keeps that one account.
 //
 // Needs a Fuseki server (see fuseki.mjs). Runs against the BUILT package in lib/ (build first).
 import { test, before, after, mock } from 'node:test';
@@ -34,6 +35,7 @@ const libDir = new URL('../../lib/esm/', import.meta.url);
 await import(new URL('shapes/index.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const { Auth } = await import(new URL('utils/auth.js', libDir));
+const jwtUtils = await import(new URL('utils/jwt.js', libDir));
 
 const SIOC_ACCOUNT_OF = 'http://rdfs.org/sioc/ns#account_of';
 const NATIVE_LINK = 'test.app.native:/oidc/callback';
@@ -44,6 +46,7 @@ useThrowawayDataset();
 let issuer;
 let base;
 let server;
+let outcomes = [];
 
 before(async () => {
   mock.method(console, 'log', () => {});
@@ -55,6 +58,10 @@ before(async () => {
     allowLocalhost: true,
     defaultIssuer: issuer.issuer,
     discovery: { skipDomains: ['example.test'] },
+    onResult: (outcome) => {
+      outcomes.push(outcome);
+      return undefined;
+    },
   };
   const app = express();
   app.lazyrouter();
@@ -63,7 +70,7 @@ before(async () => {
   app.post('/start', express.json(), async (req, res) => {
     res.json(await serving(provider, req).startOidcSignin(req.body));
   });
-  for (const method of ['startNativeOidcSignin', 'completeNativeOidcSignin']) {
+  for (const method of ['startNativeOidcSignin', 'completeNativeOidcSignin', 'signinDev']) {
     app.post(`/${method}`, express.json(), async (req, res) => {
       res.json(await serving(provider, req)[method](req.body));
     });
@@ -171,4 +178,42 @@ test('a native sign-in reaches the same account, and its bearer token authentica
   ).json();
   assert.equal(me.user, webId);
   assert.equal(await countSubjectsWith(SIOC_ACCOUNT_OF, webId), 1, 'one account');
+});
+
+test('a dev sign-in, then an issuer sign-in of the same WebID: one account', async () => {
+  const email = newEmail();
+  const webId = issuer.webIdFor(email);
+  process.env.DEV_AUTH = 'true';
+  try {
+    const accessToken = await jwtUtils.createAccessToken({
+      user: { id: webId },
+      userAccount: { id: 'https://app.test/account/unused' },
+    });
+    const dev = await (
+      await fetch(`${base}/signinDev`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-linked-auth-transport': 'body' },
+        body: JSON.stringify({ webId, accessToken, refreshToken: '' }),
+      })
+    ).json();
+    assert.ok(!dev?.error, JSON.stringify(dev));
+  } finally {
+    delete process.env.DEV_AUTH;
+  }
+  assert.equal(await countSubjectsWith(SIOC_ACCOUNT_OF, webId), 1, 'dev sign-in made the account');
+
+  outcomes = [];
+  const { me } = await signIn(email);
+  assert.equal(me.user, webId);
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0].ok, true, JSON.stringify(outcomes[0]));
+  assert.equal(outcomes[0].isNewAccount, false);
+  assert.equal(await countSubjectsWith(SIOC_ACCOUNT_OF, webId), 1, 'one account');
+  // the proven email is stored on the reused account
+  const emails = await sparql(`
+    SELECT ?email WHERE {
+      { ?a <${SIOC_ACCOUNT_OF}> <${webId}> ; <http://rdfs.org/sioc/ns#email> ?email }
+      UNION { GRAPH ?g { ?a <${SIOC_ACCOUNT_OF}> <${webId}> ; <http://rdfs.org/sioc/ns#email> ?email } }
+    }`);
+  assert.deepEqual(emails.map((row) => row.email.value), [email]);
 });

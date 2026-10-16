@@ -1,7 +1,7 @@
 // An in-memory stand-in for the query API of one shape, for tests that call providers directly:
 // `select(...).where(...)/.for(...)` then `.one()` or awaited (every match, or the one row for
-// `.for`), and `create(data)`. `where` records each `prop.equals(value)` the callback makes; a
-// value with an `id` matches a row whose property has that id.
+// `.for`), `create(data)` and `update(data).for(node)`. `where` records each `prop.equals(value)`
+// the callback makes; a value with an `id` matches a row whose property has that id.
 import { mock } from 'node:test';
 
 /** A table of plain rows, with the query API above over them. */
@@ -45,6 +45,16 @@ export function fakeShapeTable(kind, rows = []) {
     select() {
       selects.push(true);
       return query();
+    },
+    /** `update(data).for(node)`: writes `data` onto the row with that id. */
+    update(data) {
+      return {
+        async for(node) {
+          const row = rows.find((r) => r.id === (typeof node === 'string' ? node : node.id));
+          if (row) Object.assign(row, data);
+          return row ? { ...row } : null;
+        },
+      };
     },
     async create(data) {
       const { __id, ...rest } = data;

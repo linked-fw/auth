@@ -732,7 +732,9 @@ Auth.oidcSignin = {
    `'signin'` (the default: the returned email wins) or `'refuse'`. Its `hasAccount(email)` looks
    accounts up inside the callback; it is never callable.
 6. The person at the WebID and its account are found or created, and a session starts as for the
-   other methods (cookies). The token's email is trusted only when it **proves the WebID** (`emailProven`). Only then is it stored on the account and marked
+   other methods (cookies). A WebID has one account whichever method signed it in: an account
+   another method made without a person (dev sign-in keeps none) is reused, and the outcome says
+   `isNewAccount: false`. The token's email is trusted only when it **proves the WebID** (`emailProven`). Only then is it stored on the account and marked
    verified, since any issuer can claim any email for its own WebIDs. A sign-in to a person with a
    password but no verified email removes that password and its sessions, as a code sign-in does.
 

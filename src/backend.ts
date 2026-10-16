@@ -835,6 +835,37 @@ async function hasUnprovenPassword(personId: string): Promise<boolean> {
   return (credentials || []).some((credential) => Boolean(credential.passwordHash));
 }
 
+/**
+ * The account of a person just created at `person.id`. A WebID has one account whichever method
+ * signs it in, and another method may have made it without a person (dev sign-in keeps none: the
+ * profile is the issuer's), so that account is reused (`isNewAccount: false`), with `email` stored
+ * on it when it has none. Otherwise an account is created, with `email` when given.
+ */
+async function accountForNewPerson(
+  provider: AuthBackendProvider,
+  person: { id: string },
+  email?: string
+): Promise<{ account: UserAccountData; isNewAccount: boolean }> {
+  const existing = await provider.accountShape
+    .select((a) => [a.email])
+    .where((a) => a.accountOf.equals({ id: person.id }))
+    .one();
+  if (existing) {
+    if (email && !existing.email) {
+      await provider.accountShape.update({ email }).for(existing);
+      return { account: { ...existing, email } as unknown as UserAccountData, isNewAccount: false };
+    }
+    return { account: existing as unknown as UserAccountData, isNewAccount: false };
+  }
+  const account = await provider.accountShape
+    .create({ accountOf: person, ...(email ? { email } : {}) })
+    .catch((err) => {
+      console.error(`Error creating account for user ${person.id}:`, err);
+      throw new Error(`Could not create account for user ${person.id}`);
+    });
+  return { account: account as unknown as UserAccountData, isNewAccount: true };
+}
+
 /** Whether `url`'s origin is `issuer`'s. */
 function onIssuerOrigin(url: string, issuer: string): boolean {
   try {
@@ -917,6 +948,7 @@ async function signInVerifiedWebId(
     return { isNewAccount: false, emailProven, authentication };
   }
 
+  let isNewAccount = true;
   const authentication = await Auth.login(
     provider,
     async () => null,
@@ -928,18 +960,16 @@ async function signInVerifiedWebId(
           throw new Error(`Could not create user ${webId}`);
         });
       if (emailProven) await markEmailVerified(user.id, email);
-      const account = await provider.accountShape
-        .create({ accountOf: user, ...(emailProven ? { email } : {}) })
-        .catch((err) => {
-          console.error(`Error creating account for user ${user.id}:`, err);
-          throw new Error(`Could not create account for user ${user.id}`);
-        });
-      console.log(`new user ${user.id} from a Solid-OIDC sign-in, account ${account.id}`);
-      return { account, person: user };
+      const created = await accountForNewPerson(provider, user, emailProven ? email : undefined);
+      isNewAccount = created.isNewAccount;
+      console.log(
+        `new user ${user.id} from a Solid-OIDC sign-in, ${isNewAccount ? 'new ' : ''}account ${created.account.id}`
+      );
+      return { account: created.account, person: user, isNewAccount };
     },
     'oidc'
   );
-  return { isNewAccount: true, emailProven, authentication };
+  return { isNewAccount, emailProven, authentication };
 }
 
 /**
@@ -1492,22 +1522,15 @@ export default class AuthBackendProvider extends BackendProvider {
         });
         console.log(`created new password for ${user.id}`);
 
-        //create a new account
-        const account = await this.accountShape
-          .create({
-            accountOf: user,
-            email: normalizedEmail,
-          })
-          .catch((err) => {
-            console.error(`Error creating account for user ${user.id}:`, err);
-            throw new Error(`Could not create account for user ${user.id}`);
-          });
+        // its account (one another method made for this WebID, or a new one)
+        const { account, isNewAccount } = await accountForNewPerson(this, user, normalizedEmail);
 
-        console.log(`new user ${user.id}, account ${account.id}`);
+        console.log(`new user ${user.id}, ${isNewAccount ? 'new ' : ''}account ${account.id}`);
 
         return {
           account: account,
           person: user,
+          isNewAccount,
         };
       },
       'createAccount'
@@ -1950,14 +1973,11 @@ export default class AuthBackendProvider extends BackendProvider {
             throw new Error(`Could not create user ${personId}`);
           });
         await markEmailVerified(user.id, normalizedEmail);
-        const account = await this.accountShape
-          .create({ accountOf: user, email: normalizedEmail })
-          .catch((err) => {
-            console.error(`Error creating account for user ${user.id}:`, err);
-            throw new Error(`Could not create account for user ${user.id}`);
-          });
-        console.log(`new user ${user.id} from a sign-in code, account ${account.id}`);
-        return { account, person: user };
+        const { account, isNewAccount } = await accountForNewPerson(this, user, normalizedEmail);
+        console.log(
+          `new user ${user.id} from a sign-in code, ${isNewAccount ? 'new ' : ''}account ${account.id}`
+        );
+        return { account, person: user, isNewAccount };
       },
       'signinWithCode'
     );

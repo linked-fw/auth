@@ -79,7 +79,9 @@ export class Auth {
    *
    * @param request - The incoming request
    * @param findAccount - Function to find an existing account, will log in with this account if it's found
-   * @param createAccount - Function to set new data for the user and account
+   * @param createAccount - Function to set new data for the user and account. It returns
+   *   `isNewAccount: false` when it reused an account that already existed (see
+   *   `isNewAccount` of `onSigninSuccessful`); the default is `true`.
    * @param logMethodName - Name of the log method
    * @returns - Returns the result of the sign-in process
    */
@@ -92,12 +94,14 @@ export class Auth {
     createAccount: () => Promise<{
       account: QResult<UserAccount>;
       person: QResult<Shape>;
+      isNewAccount?: boolean;
     }>,
     logMethodName: string
   ): Promise<AuthenticationResult> {
     console.log(`login method: ${logMethodName}`);
 
     let person, account;
+    let isNewAccount = false;
     const existing = await findAccount();
 
     if (existing) {
@@ -108,9 +112,10 @@ export class Auth {
       const newAccount = await createAccount();
       person = newAccount.person;
       account = newAccount.account;
+      isNewAccount = newAccount.isNewAccount ?? true;
     }
 
-    return this.onSigninSuccessful(provider, person, account, !existing);
+    return this.onSigninSuccessful(provider, person, account, isNewAccount);
   }
 
   /**

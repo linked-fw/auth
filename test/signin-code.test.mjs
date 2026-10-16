@@ -275,6 +275,18 @@ test('an email with no account gets the same answer, and its code creates the ac
   assert.ok(credential.emailVerifiedAt);
 });
 
+test('a new person reuses the account another method made for its WebID (dev sign-in keeps no person)', async () => {
+  accounts.rows.push({ id: 'https://app.test/account/dev', accountOf: { id: NEW_PERSON_ID } });
+  const { code } = await requestCode(NEW_EMAIL);
+  const result = await provider.signinWithCode(NEW_EMAIL, code);
+  assert.equal(result.signedIn, NEW_PERSON_ID);
+  assert.equal(result.account, 'https://app.test/account/dev');
+  assert.equal(result.isNew, false);
+  assert.deepEqual(people.created.map((p) => p.id), [NEW_PERSON_ID]);
+  assert.equal(accounts.created.length, 0, 'no second account');
+  assert.equal(accounts.rows.at(-1).email, NEW_EMAIL, 'the proven email is stored on it');
+});
+
 test('a second request for an email with no account reuses its pending credential', async () => {
   const first = await requestCode(NEW_EMAIL);
   let second = await requestCode(NEW_EMAIL);
