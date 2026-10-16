@@ -579,7 +579,7 @@ to set unless you want a specific name. Contract 2: CN and webid.email set no pr
 
 ## A7 — OAuth into an existing account, and a provider start without an email
 
-**Depends on:** A5. Report [013](../reports/013-oauth-existing-account.md). Needed before Peace Game's migration (P1): every migrated Peace Game user has a
+**Depends on:** A5. **PR:** [#135](https://github.com/linked-fw/auth/pull/135), report [013](../reports/013-oauth-existing-account.md). Needed before Peace Game's migration (P1): every migrated Peace Game user has a
 password and may sign in with Google. **Size:** small-to-medium, 2 phases. From webid.email's
 backlog 008 (W5).
 
@@ -661,5 +661,5 @@ never an unverified one; the email decides, not the provider subject)
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [x] A4 — [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md)
 - [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)
-- [ ] A7 — OAuth into an existing account; a provider start without an email
+- [x] A7 — [#135](https://github.com/linked-fw/auth/pull/135), report [013](../reports/013-oauth-existing-account.md)
 - [x] A8 — [#133](https://github.com/linked-fw/auth/pull/133), report [012](../reports/012-cookie-prefix-default.md)
