@@ -26,11 +26,13 @@ migrated user has a password and may sign in with Google.
   different email never reaches the account.
 - **Changed email.** `IdentityToken` links now record the provider's verified email (`auth:email`,
   normalised), from `signinOAuth` and `linkOAuthIdentity`. A linked identity signs in to its
-  account only while its verified email is the recorded one; when it changed, its link is
-  removed and the sign-in continues by the new email (that email's account under the rule above,
-  or a new account). A link from an earlier release (no recorded email) is followed while the
-  provider's email still resolves to the linked account, and then gets the email recorded. A
-  token with no verified email (Apple, some sign-ins) follows its link.
+  account only while its verified email is the recorded one; when it changed, the sign-in
+  continues by the new email (that email's account under the rule above, or a new account), and
+  the old link is removed only once that reaches or creates an account (a refused sign-in keeps
+  it). A link from an earlier release (no recorded email) is followed while the provider's email
+  still resolves to the linked account, and then gets the email recorded; when the email resolves
+  to no single account (no WebID, or a conflict) the link decides, as before. A token with no
+  verified email (Apple, some sign-ins) follows its link.
 - **Provider start without an email.** `startOidcSignin({providerHint})` and
   `startNativeOidcSignin({providerHint, redirectUri})` with no `input` start at the default
   issuer (`Auth.oidcSignin.defaultIssuer`, else webid.email) with `provider_hint` and no
@@ -42,23 +44,26 @@ migrated user has a password and may sign in with Google.
 |---|---|
 | 1 — the existing-account rule (`oauth-account.ts`, `oauthIdentities.ts`, `signinOAuth`, readme) | build ok; `npm test` 530/530; `npm run test:integration` 46/46 |
 | 2 — the provider start without an email (`startOidcSignin`, `startNativeOidcSignin`, client types, readme, contract 4, changeset) | build ok; `npm test` 533/533; `npm run test:integration` 46/46 |
+| Review fix (M1) — stale links removed only after the new email reaches or creates an account; an earlier-release link whose email resolves to no single account is followed | build ok; `npm test` 536/536; `npm run test:integration` 47/47 |
 
 Final runs (baseline on `main`: 523 and 42):
 
 ```
-npm test                    # tests 533  # pass 533  # fail 0   (5.6 s)
-npm run test:integration    # tests 46   # pass 46   # fail 0   (5.4 s, local Fuseki)
+npm test                    # tests 536  # pass 536  # fail 0   (5.6 s)
+npm run test:integration    # tests 47   # pass 47   # fail 0   (5.4 s, local Fuseki)
 ```
 
 New tests: unit `oauth.test.mjs` (+7: password account with verified email → same account;
 verified account with another Google identity → same account; unverified provider email →
 refused; different email → new account; changed email → link removed, new account; earlier-release
-link kept and recorded; earlier-release link whose email moved → removed), `oidc-callback.test.mjs`
+link kept and recorded; earlier-release link whose email moved → removed; then, from the review:
+a changed email whose new address is refused keeps the old link; an earlier-release link whose
+email is ambiguous, or gives no WebID, is followed), `oidc-callback.test.mjs`
 (+2: hint-only start builds a valid authorization URL at the mock issuer — code flow, S256, state,
 nonce, client_id, redirect_uri, `provider_hint`, no `login_hint` — and completes; nothing typed
-needs a plain hint), `oidc-native.test.mjs` (+1); integration `oauth.fuseki.test.mjs` (+4: the
+needs a plain hint), `oidc-native.test.mjs` (+1); integration `oauth.fuseki.test.mjs` (+5: the
 same four cases against Fuseki, including one link per identity after the email change and the
-recorded email).
+recorded email, and a refused new address keeping the old link).
 
 **Existing tests changed by the rule:**
 - `oauth.test.mjs` *a linked identity signs in to its account without looking at the email* →
@@ -88,10 +93,20 @@ verified.
 
 ## Review
 
-No medium or higher findings. Low, recorded in [backlog 007](../backlog/007-oauth-email-rule-edges.md):
-a verification link opened by the owner on an account someone else registered now also lets the
-owner's Google sign-in reach it; and earlier-release links with a different address are dropped on
-their first sign-in after the upgrade (P1 should count them first; the query is in 007).
+Independent review (master plan): one medium, fixed. **M1:** a changed email removed the old
+links before the by-email path succeeded, and an earlier-release link whose email resolved to a
+conflict (or gave no WebID) counted as changed, so such a user could be locked out (link gone,
+then `account_conflict` or `sign_in_to_link`). Now the links are removed only when the new email
+reaches or creates an account, and a conflict or a missing WebID leaves the link deciding; tested
+both ways (unit and integration).
+
+Low, recorded in [backlog 007](../backlog/007-oauth-email-rule-edges.md): §1 a verification link
+opened by the owner on an account someone else registered now also lets Google reach it (a
+product decision for the owner; pre-exists via the code sign-in, lives in `verifyEmail`); §2
+earlier-release links with a different address are dropped on their first sign-in after the
+upgrade (P1 should count them first); §3 OAuth's first proof of an unverified, passwordless,
+unlinked account runs no `dropUnprovenAccess` (auth cannot create that state today); §4
+"verified" is per person, not per address (the readme states the precondition).
 
 ## Follow-ups
 

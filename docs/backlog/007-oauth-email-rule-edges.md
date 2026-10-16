@@ -4,14 +4,15 @@ summary: >
   by the owner on an account someone else registered now also lets the owner's Google sign-in
   reach that account; and links written before links recorded their email are dropped when the
   provider's email no longer resolves to the account (a cross-email link made with an earlier
-  linkOAuthIdentity).
+  linkOAuthIdentity). Plus the one first-proof entrance without the unproven-password rule, and
+  the per-person meaning of "verified".
 status: Open
 ---
 
 # 007 — Edges of the OAuth email rule
 
-From A7 ([report 013](../reports/013-oauth-existing-account.md)). Neither blocks the step; both
-need a decision before acting.
+From A7 ([report 013](../reports/013-oauth-existing-account.md)). None blocks the step; each
+needs a decision before acting.
 
 ## 1. A verified email on an account someone else registered
 
@@ -22,6 +23,10 @@ if that person later opens the "Verify your email" message they never asked for,
 verified with the other's password, and their Google sign-in now lands in it (before A7 it was
 refused with `sign_in_to_link`). A sign-in code already drops unproven passwords before the first
 proof (`dropUnprovenAccess`); the verification link does not.
+
+This pre-exists A7: a code sign-in to such an account (after the link was opened) keeps the
+password too. The cause lives in `verifyEmail`; A7 only adds another way in. A product decision
+for the owner.
 
 To decide: whether `verifyEmail` should drop the password and sessions of an account whose
 password was set before the email was proven (as a code sign-in does), or whether the
@@ -47,3 +52,21 @@ SELECT (COUNT(?t) AS ?links) WHERE {
 
 The ones that matter are those whose provider email differs from the account's email; only the
 provider knows that, so the count is an upper bound.
+
+## 3. OAuth's first proof runs no `dropUnprovenAccess`
+
+When `signinOAuth` attaches to an account whose email is not verified, it does so only for an
+account with no password and no links (the old rules), and marks the email verified without
+running `dropUnprovenAccess`, the rule a code or WebID sign-in applies at the first proof. That
+state (unverified, passwordless, unlinked) cannot be created by auth itself today, so nothing is
+exposed; an app that creates such accounts would have this one entrance without the rule. To
+decide: call `dropUnprovenAccess` there too, for consistency.
+
+## 4. "Verified" is per person, not per address
+
+`existing.emailVerified` is `personEmailVerified`: any credential of the person has
+`emailVerifiedAt`. The matched address is not compared with the verified credential's address,
+because a person has one email. The readme states the precondition: an app must never write a
+different, unverified address onto a verified person's `UserAccount.email` or
+`AuthCredential.email`. To decide: compare the verified credential's email instead, once every
+verified credential is known to carry its address.

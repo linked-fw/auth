@@ -318,6 +318,12 @@ test('a new identity creates an account and links it', async () => {
 
 // ---- one verified email, one account; the email decides, not the provider's subject ----
 
+/** Let the create step `Auth.login` is handed run against stubs. */
+function allowNewAccounts() {
+  provider.userShape = { ...provider.userShape, create: async (data) => ({ id: data.__id }) };
+  provider.accountShape = { ...provider.accountShape, create: async () => ({ id: 'acc-new' }) };
+}
+
 /** Ada's person has a verified email (and, when `password`, a password). */
 function adaVerified({ password = false } = {}) {
   credentialTable.insert({
@@ -381,11 +387,69 @@ test('a linked identity whose email changed no longer signs in to the old accoun
   links = [link];
   existingAccount = ADA_ACCOUNT;
   adaVerified();
+  allowNewAccounts();
   const result = await provider.signinOAuth('google', GOOGLE);
   assert.equal(result, SIGNED_IN);
   assert.equal(onSignin.mock.callCount(), 0, 'signed in to the old account');
-  assert.deepEqual(removeLink.mock.calls.map((c) => c.arguments[0]), [link]);
   assert.deepEqual(loginLabels(), ['google OAuth'], 'continued by the new email');
+  assert.equal(removeLink.mock.callCount(), 0, 'removed before the new account exists');
+  await login.mock.calls[0].arguments[2]();
+  assert.deepEqual(removeLink.mock.calls.map((c) => c.arguments[0]), [link]);
+  assert.equal(createLink.mock.callCount(), 1);
+});
+
+test('a changed email whose new address is refused keeps the old link', async () => {
+  // the new address belongs to a password account whose email is not verified
+  verifiedGoogle('grace@example.test');
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' }];
+  existingAccount = ADA_ACCOUNT;
+  const graceAccount = { id: 'https://app.test/account/grace', email: 'grace@example.test', accountOf: { id: emailToWebID('grace@example.test') } };
+  const select = provider.accountShape.select;
+  provider.accountShape = {
+    select: () => {
+      const query = select();
+      return {
+        where: (filter) => {
+          let byGrace = false;
+          filter({
+            accountOf: { equals: (node) => (byGrace = node.id === graceAccount.accountOf.id) },
+            email: { equals: (email) => (byGrace = email === 'grace@example.test') },
+          });
+          const rows = byGrace ? [graceAccount] : [];
+          return { one: async () => rows[0] ?? null, then: (res, rej) => Promise.resolve(rows).then(res, rej) };
+        },
+        for: query.for,
+      };
+    },
+  };
+  personHasPassword = true;
+  const result = await provider.signinOAuth('google', GOOGLE);
+  assert.equal(result.action, 'sign_in_to_link');
+  assert.equal(onSignin.mock.callCount() + login.mock.callCount(), 0);
+  assert.equal(removeLink.mock.callCount(), 0, 'the link was removed by a refused sign-in');
+});
+
+test('a link from an earlier release whose email resolves ambiguously is followed, not removed', async () => {
+  verifiedGoogle();
+  links = [{ id: 'link-1', accountId: LEGACY_ADA_ACCOUNT.id, legacy: false }];
+  existingAccount = LEGACY_ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID }; // a second person for the same email: a conflict
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.equal(onSignin.mock.calls[0].arguments[2], LEGACY_ADA_ACCOUNT);
+  assert.equal(removeLink.mock.callCount(), 0);
+  assert.equal(recordLinkEmail.mock.callCount(), 0, 'an ambiguous email was recorded');
+});
+
+test('a link from an earlier release is followed when the email gives no WebID', async () => {
+  verifiedGoogle();
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
+  existingAccount = ADA_ACCOUNT;
+  mock.method(Auth, 'webIdFor', () => {
+    throw new Error('no WebID for this email');
+  });
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.equal(onSignin.mock.calls[0].arguments[2], ADA_ACCOUNT);
+  assert.equal(removeLink.mock.callCount(), 0);
 });
 
 test('a link from an earlier release follows the email: kept and recorded when it still matches', async () => {
@@ -403,11 +467,13 @@ test('a link from an earlier release whose email no longer reaches its account i
   verifiedGoogle('someone-else@example.test');
   links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
   existingAccount = ADA_ACCOUNT;
+  allowNewAccounts();
   const result = await provider.signinOAuth('google', GOOGLE);
   assert.equal(result, SIGNED_IN);
   assert.equal(onSignin.mock.callCount(), 0, 'signed in to the old account');
-  assert.equal(removeLink.mock.callCount(), 1);
   assert.deepEqual(loginLabels(), ['google OAuth']);
+  await login.mock.calls[0].arguments[2]();
+  assert.equal(removeLink.mock.callCount(), 1);
 });
 
 // ---- the provider's verified email verifies the person's email ----

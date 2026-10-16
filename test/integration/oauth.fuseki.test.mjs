@@ -198,6 +198,24 @@ test('a Google identity whose email changed signs in by its new email, not to th
   assert.equal(again.auth.userAccount.id, renamed.auth.userAccount.id);
 });
 
+test('a changed email whose new address is refused keeps the old link', async () => {
+  const sub = newSub();
+  googleSays(newEmail(), sub);
+  const first = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(first.error, undefined, first.error);
+
+  // the new address has a password account whose email is not verified: refused
+  const newAddress = newEmail();
+  await provider().createAccount({ firstName: 'Mallory', email: newAddress, password: 'attacker-Passw0rd!' });
+  googleSays(newAddress, sub);
+  const refused = await provider().signinOAuth('google', GOOGLE);
+  assert.equal(refused.action, 'sign_in_to_link');
+
+  const tokens = await identityTokensFor(sub);
+  assert.equal(tokens.length, 1, 'the link was removed by a refused sign-in');
+  assert.equal(tokens[0].account, first.auth.userAccount.id);
+});
+
 test('a new OAuth user gets a link with its provider and no stored token', async () => {
   const email = newEmail();
   const sub = newSub();

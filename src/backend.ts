@@ -387,8 +387,9 @@ async function findAccountForOAuthEmail(
  *   before links recorded one, an email that resolves to the linked account (as an email sign-in
  *   would find it);
  * - `'changed'`: the token's verified email is another one;
- * - `'unknown'`: the token carries no verified email (Apple sends none on some sign-ins), so there
- *   is nothing to compare and the link decides.
+ * - `'unknown'`: the token carries no verified email (Apple sends none on some sign-ins), or, for a
+ *   link that recorded none, the email resolves to no single account (no WebID, or a conflict),
+ *   so there is nothing to compare and the link decides.
  *
  * A link recorded with an address other than the account's own (an explicit `linkOAuthIdentity`,
  * e.g. Apple's private relay) stays valid while the provider keeps that address.
@@ -404,14 +405,16 @@ async function linkKeepsEmail(
   const recorded = links.map((link) => link.email).filter(Boolean);
   if (recorded.length) return recorded.every((linked) => linked === email) ? 'same' : 'changed';
 
+  // an email that cannot be resolved cleanly (no WebID, several accounts) proves no change:
+  // the link decides, as before links recorded their email
   let webID: string;
   try {
     webID = Auth.webIdFor(email);
   } catch {
-    return 'changed';
+    return 'unknown';
   }
   const found = await findAccountForOAuthEmail(provider, webID, identity.email, email);
-  if (found.conflict) return 'changed';
+  if (found.conflict) return 'unknown';
   const reachesAccount =
     (found.account?.id !== undefined && found.account.id === account.id) ||
     (!found.account && found.personId !== undefined && found.personId === account.accountOf?.id);
@@ -2179,15 +2182,22 @@ export default class AuthBackendProvider extends BackendProvider {
         error: 'This sign-in is linked to more than one account. Please contact support.',
       };
     }
+    // links of this identity to an account its email has left, removed when the email reaches
+    // or creates an account (so a refused sign-in keeps them, and one identity has one account)
+    let staleLinks: OAuthIdentityLink[] = [];
+    const removeStaleLinks = async () => {
+      for (const link of staleLinks) await OAuthIdentityStore.removeLink(link);
+    };
     if (linkedAccountIds.length === 1) {
       const account = await loadAccountWithPerson(this, linkedAccountIds[0]);
       if (account?.accountOf?.id) {
         const emailStill = await linkKeepsEmail(this, identity, links, account);
         if (emailStill === 'changed') {
           // the email decides, not the subject: the identity no longer has the email it was
-          // linked with, so it leaves the old account and continues by its new email below
-          console.log(`${provider} sign-in: the linked identity's email changed, link removed`);
-          for (const link of links) await OAuthIdentityStore.removeLink(link);
+          // linked with, so it does not sign in to the old account and continues by its new
+          // email below. The old link is removed only once that reaches or creates an account.
+          console.log(`${provider} sign-in: the linked identity's email changed`);
+          staleLinks = links;
         } else {
           for (const link of links.filter((l) => l.legacy)) {
             await OAuthIdentityStore.upgradeLegacyLink(link, provider).catch((err) =>
@@ -2246,6 +2256,7 @@ export default class AuthBackendProvider extends BackendProvider {
       const person = { id: existing.personId } as UserData;
       const account =
         existing.account ?? ((await this.getOrCreateAccount(person)) as UserAccountData);
+      await removeStaleLinks();
       await OAuthIdentityStore.createLink(identity, account.id);
       await markOAuthEmailVerified(identity, existing.personId);
       return Auth.onSigninSuccessful(
@@ -2295,6 +2306,7 @@ export default class AuthBackendProvider extends BackendProvider {
             throw new Error(`Could not create ${provider} account for user ${user.id}`);
           });
 
+        await removeStaleLinks();
         await OAuthIdentityStore.createLink(identity, account.id).catch((err) => {
           console.error(`Error linking the ${provider} identity of user ${user.id}:`, err);
           throw new Error(`Could not link the ${provider} identity of user ${user.id}`);
