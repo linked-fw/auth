@@ -1,6 +1,7 @@
 // Two Linked apps on one host (an app and a local issuer, e.g. CN on :4040 and webid.email on
-// :4050) share cookies, because browsers do not separate cookies by port. With a cookie prefix
-// each (AUTH_COOKIE_PREFIX), signing out of one leaves the other signed in.
+// :4050) share cookies, because browsers do not separate cookies by port. Each app's cookies carry
+// a prefix of their own, by default from its APP_PREFIX (neither app sets AUTH_COOKIE_PREFIX), so
+// signing out of one leaves the other signed in.
 //
 // Each app runs in its own process (the prefix is per process, as in real apps) on one throwaway
 // Fuseki dataset. One cookie jar stands in for the browser: keyed by name and path, ports ignored.
@@ -17,17 +18,17 @@ import { useThrowawayDataset, testDataset } from './fuseki.mjs';
 
 useThrowawayDataset();
 
-/** Start one app with `prefix`; resolves with its URL and process. */
-function startApp(prefix) {
+/** Start one app with `appPrefix` as its APP_PREFIX; resolves with its URL and process. */
+function startApp(appPrefix) {
   const child = spawn(process.execPath, [new URL('prefixedApp.mjs', import.meta.url).pathname], {
     env: {
       PATH: process.env.PATH,
       NODE_ENV: 'test',
       SITE_ROOT: 'https://app.test',
-      JWT_SECRET: `prefix-integration-${prefix}-secret-0123456789`,
-      SESSION_SECRET: `prefix-integration-${prefix}-session`,
+      JWT_SECRET: `prefix-integration-${appPrefix}-secret-0123456789`,
+      SESSION_SECRET: `prefix-integration-${appPrefix}-session`,
       AUTH_SESSION_CLEANUP: 'false',
-      AUTH_COOKIE_PREFIX: prefix,
+      APP_PREFIX: appPrefix,
       TEST_DATASET_ENDPOINT: testDataset.endpoint,
       TEST_DATASET_USER: testDataset.username,
       TEST_DATASET_PASSWORD: testDataset.password,
@@ -43,7 +44,7 @@ function startApp(prefix) {
       const match = stdout.match(/LISTENING (\S+)/);
       if (match) resolve({ url: match[1], child });
     });
-    child.on('exit', (code) => reject(new Error(`app ${prefix} exited (${code}): ${stderr}`)));
+    child.on('exit', (code) => reject(new Error(`app ${appPrefix} exited (${code}): ${stderr}`)));
   });
 }
 
@@ -96,7 +97,7 @@ function createBrowser() {
 let cn;
 let wie;
 before(async () => {
-  [cn, wie] = await Promise.all([startApp('cn_'), startApp('wie_')]);
+  [cn, wie] = await Promise.all([startApp('cn'), startApp('webid-email')]);
 });
 after(() => {
   cn?.child.kill();
@@ -120,16 +121,20 @@ test('two apps in one cookie jar: signing out of one leaves the other signed in'
     'cn_accessToken',
     'cn_linkedAuthSession',
     'cn_refreshToken',
-    'wie_accessToken',
-    'wie_linkedAuthSession',
-    'wie_refreshToken',
+    'webid-email_accessToken',
+    'webid-email_linkedAuthSession',
+    'webid-email_refreshToken',
   ]);
   const cnAccount = await browser.page(cn.url);
   const wieAccount = await browser.page(wie.url);
   assert.ok(cnAccount && wieAccount && cnAccount !== wieAccount);
 
   assert.equal(await browser.rpc(cn.url, 'signout'), true);
-  assert.deepEqual(browser.names(), ['wie_accessToken', 'wie_linkedAuthSession', 'wie_refreshToken']);
+  assert.deepEqual(browser.names(), [
+    'webid-email_accessToken',
+    'webid-email_linkedAuthSession',
+    'webid-email_refreshToken',
+  ]);
 
   // the signed-out app: no page session, nothing to refresh
   assert.equal(await browser.page(cn.url), null);

@@ -59,6 +59,11 @@ of this package (the build's dependency check flagged it).
 
 **Validation:** `npm test`; `npm run test:integration` (Fuseki on :3030).
 
+**Done.** `npm test`: 523/523. `npm run test:integration`: `# tests 42 / # pass 42 / # fail 0`,
+including `ok 6 - two apps in one cookie jar: signing out of one leaves the other signed in` with
+`APP_PREFIX` `cn` and `webid-email` and no `AUTH_COOKIE_PREFIX`. Control: the same test with
+`APP_PREFIX` removed from both apps fails (`not ok 1`).
+
 ## Dependencies
 
 Phase 2 depends on phase 1. No parallel work.

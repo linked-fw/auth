@@ -23,7 +23,7 @@ decisions 1–7, 9 and 10.
 its Rules apply (worktrees, a changeset per PR, PRs ending in an Outcome section, never "Claude" in
 commits or PRs), and its §Contracts is the cross-repo source of the [Contracts](#contracts) below.
 Each step agent works in its own plan doc (numbers assigned by 065: A0 → `002`, A1 → `003`,
-A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`, A6 → `008`). The issuer side is webid.email
+A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`, A6 → `008`, A8 → `009`). The issuer side is webid.email
 ([its plan](https://github.com/Semantu/webid-email/blob/main/docs/plans/001-webid-email-service.md)).
 
 **The steps.** A0 makes the email → WebID derivation configurable and exports the HMAC rule
@@ -32,7 +32,8 @@ WebFinger, fallback). A2 is the Solid-OIDC exchange itself, on `openid-client`. 
 app's Client ID Document and defines its theme extension. A5 adds a passwordless sign-in by
 emailed code, which webid.email's pages use. A4 makes the exchange work in native (Capacitor)
 builds. A6 prefixes auth's cookie names so two Linked apps on one host (CN and a local
-webid.email) keep separate sessions. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
+webid.email) keep separate sessions; A8 makes that prefix default to the app's `APP_PREFIX`, so
+no app has to set one. A0, A1, A3 and A5 depend on nothing and run in parallel; A2 needs A1; A4 needs A2.
 
 **A parallel track.** Every existing method — password, Google/Apple/Facebook OAuth, temporary,
 dev sign-in (`signinDev`) — keeps its behaviour, exposure, cookies and sessions. All methods end in
@@ -87,14 +88,16 @@ Set by the consumers, never read by this package directly; they feed `hmacWebIdF
 | webid.email | `WEBID_SECRET` | the HMAC secret; the same name in production and locally, where it holds the dev value |
 | webid.email | issuer URL | `SITE_ROOT` (`http://localhost:4050` locally, `https://webid.email` in production); no separate variable |
 
-One variable this package does read, set by both apps when they share a host (A6):
+Two variables this package does read for its cookie names (A6, A8):
 
-| Where | Variable | Values |
-|---|---|---|
-| CN | `AUTH_COOKIE_PREFIX` | `cn_` in local development (CN on `localhost:4040` next to webid.email on `:4050`); also in CN's browser bundle (Vite `define`) |
-| webid.email | `AUTH_COOKIE_PREFIX` | `wie_` in local development; its issuer reads its own hint cookie, `wie_linkedAuthSession` |
+| Variable | Meaning |
+|---|---|
+| `APP_PREFIX` | every Linked app's own identifier; gives the default cookie prefix, sanitised plus `_` (CN `cn` → `cn_`, webid.email `webid-email` → `webid-email_`); also in the app's browser bundle (Vite `define`) |
+| `AUTH_COOKIE_PREFIX` | overrides that default when an app wants a specific name; unset or empty falls through to `APP_PREFIX` |
 
-Empty (the default) keeps today's cookie names; production apps on their own hosts need none.
+CN and webid.email set no `AUTH_COOKIE_PREFIX`: their `APP_PREFIX` values apply, so CN's cookies
+are `cn_accessToken`, … and webid.email's issuer reads its own hint `webid-email_linkedAuthSession`.
+An app with neither variable keeps the plain names.
 
 CN's `WEBID_MODE` (`bypass` · `local` · `production`; `DEV_AUTH=true` maps to `bypass` and is
 deprecated) is CN's own and not read here. Note that this package's dev-only behaviour
@@ -527,6 +530,47 @@ reads, server and client side: `accessToken`, `refreshToken` (and its legacy `/`
   `createViteConfig({define})`.
 - 065 §Contracts 2 gets the two `AUTH_COOKIE_PREFIX` rows above.
 
+Superseded by [A8](#a8--cookie-prefix-defaults-to-app_prefix): the apps' `APP_PREFIX` now gives the
+prefix, and neither app sets `AUTH_COOKIE_PREFIX`.
+
+---
+
+## A8 — Cookie prefix defaults to `APP_PREFIX`
+
+**Depends on:** A6. **PR:** _pending_. **Size:** small, 2 phases.
+Changes [contract 2](#2-environment-variables-this-repo-must-know-cn-c0c2a-webidemail-w2).
+
+**Problem.** Several Linked backends often run on one host (CN on 4040, webid.email on 4050, other
+apps), and browsers share one cookie jar per host. With A6 each app had to set
+`AUTH_COOKIE_PREFIX` itself; an app that didn't still collided.
+
+**Scope.** When `Auth.cookiePrefix` and `AUTH_COOKIE_PREFIX` are unset, the prefix defaults to the
+app's `APP_PREFIX`, sanitised to a cookie-name token plus `_` (`webid-email` → `webid-email_`), and
+to none only when `APP_PREFIX` is unset too. Precedence: `Auth.cookiePrefix` >
+`AUTH_COOKIE_PREFIX` > `APP_PREFIX` > `''`. The client resolves it the same way from
+`process.env.AUTH_COOKIE_PREFIX` and `process.env.APP_PREFIX`, inlined by Vite's `define`
+(`resolveCookiePrefix(process.env)` gives an app's Vite config the resolved prefix). Readme: nothing
+to set unless you want a specific name. Contract 2: CN and webid.email set no prefix; their
+`APP_PREFIX` applies.
+
+**Verify**
+- Unit tests: the sanitisation rule, the default, the precedence; no `APP_PREFIX` keeps today's
+  names.
+- Integration: A6's two-app test with neither app setting `AUTH_COOKIE_PREFIX`, different
+  `APP_PREFIX`es.
+- `npm test` and `npm run test:integration` pass. Changeset (minor): apps with `APP_PREFIX` set get
+  new cookie names on upgrade, which signs users out once.
+
+**Consumers** (outside this repo; routed by master plan 065)
+- webid.email: drop `AUTH_COOKIE_PREFIX=wie_` from `.env.example` (and local `.env`); its vite
+  config defines `process.env.AUTH_COOKIE_PREFIX` as `resolveCookiePrefix(process.env)` (today
+  `process.env.AUTH_COOKIE_PREFIX ?? ''`, which the client then reads as unset and falls back to an
+  undefined `APP_PREFIX`, i.e. no prefix: a mismatch with the server's `webid-email_`).
+- CN: drop `AUTH_COOKIE_PREFIX=cn_` (its `APP_PREFIX=cn` gives the same `cn_`, so no sign-out) and
+  define the resolved prefix the same way in `vite.config.ts`.
+- The Linked CLI's `createViteConfig` could define `process.env.APP_PREFIX` for the client by
+  default (as it does `APP_NAME`), so an app with no `define` at all gets the client default too.
+
 ---
 
 ## A4 — Native apps (Capacitor)
@@ -571,3 +615,4 @@ reads, server and client side: `accessToken`, `refreshToken` (and its legacy `/`
 - [x] A5 — [#123](https://github.com/linked-fw/auth/pull/123), report [008](../reports/008-signin-code.md)
 - [x] A4 — [#129](https://github.com/linked-fw/auth/pull/129), report [010](../reports/010-native-oidc-signin.md)
 - [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)
+- [ ] A8 — cookie prefix defaults to `APP_PREFIX`
