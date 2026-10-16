@@ -89,6 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   mock.restoreAll();
+  process.env.NODE_ENV = 'test';
   Auth.webIdFor = defaultWebIdFor;
   delete Auth.signinClient;
   delete Auth.oidcSignin;
@@ -208,6 +209,43 @@ test('an existing person signs in to its account; no second person or account', 
   assert.equal(outcomes[0].isNewAccount, false);
 });
 
+test('an account another method made without a person (as dev sign-in leaves it) is reused', async () => {
+  const webId = issuer.webIdFor(ADA);
+  accounts.rows.push({ id: 'https://app.test/account/dev', accountOf: { id: webId } });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.deepEqual(people.created.map((p) => p.id), [webId], 'the person is created');
+  assert.equal(accounts.created.length, 0, 'no second account');
+  assert.equal(accounts.rows.length, 1);
+  assert.equal(accounts.rows[0].email, ADA, 'the proven email is stored on it');
+  assert.equal([...sessionStore.records.values()][0].accountId, 'https://app.test/account/dev');
+  assert.equal(outcomes[0].isNewAccount, false);
+  assert.equal(outcomes[0].emailProven, true);
+});
+
+test('a proven email replaces the unproven one dev sign-in left on the reused account', async () => {
+  const webId = issuer.webIdFor(ADA);
+  accounts.rows.push({ id: 'https://app.test/account/dev', email: 'dev-token@example.test', accountOf: { id: webId } });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(accounts.created.length, 0);
+  assert.equal(accounts.rows[0].email, ADA);
+  assert.equal(outcomes[0].isNewAccount, false);
+});
+
+test('an unproven email does not replace the reused account\'s email', async () => {
+  process.env.NODE_ENV = 'production';
+  Auth.oidcSignin.defaultIssuer = 'https://default-issuer.test';
+  Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+  const webId = issuer.addProfile('ada', [issuer.issuer]);
+  issuer.claims = (c) => ({ ...c, webid: webId });
+  accounts.rows.push({ id: 'https://app.test/account/dev', email: 'dev-token@example.test', accountOf: { id: webId } });
+  const { base } = await startApp();
+  await signIn(browser(base), { input: webId });
+  assert.equal(outcomes[0].emailProven, false);
+  assert.equal(accounts.rows[0].email, 'dev-token@example.test');
+});
+
 test('a first proven sign-in ends the unproven password of a pre-registered person', async () => {
   const webId = issuer.webIdFor(ADA);
   people.rows.push({ id: webId, givenName: 'Mallory' });
@@ -231,8 +269,10 @@ test('an email the issuer does not verify is neither stored nor marked verified'
   assert.equal(outcomes[0].emailProven, false);
 });
 
-test("another issuer's verified email for its own WebID is not stored: it proves nothing here", async () => {
-  // a WebID whose profile names this issuer, with someone else's email claimed as verified
+test("an issuer's verified email for a WebID off its origin is not stored in production: it proves nothing", async () => {
+  process.env.NODE_ENV = 'production';
+  // a WebID whose profile names this (the default) issuer, with someone else's email claimed as
+  // verified; the WebID is on the profile host, not on the issuer's origin
   const webId = issuer.addProfile('mallory', [issuer.issuer]);
   issuer.claims = (c) => ({ ...c, webid: webId, email: 'victim@example.test', email_verified: true });
   const { base } = await startApp();
@@ -240,6 +280,100 @@ test("another issuer's verified email for its own WebID is not stored: it proves
   assert.equal(accounts.created[0].email, undefined);
   assert.equal(credentials.rows.size, 0);
   assert.equal(outcomes[0].emailProven, false);
+});
+
+test('proven by derivation: a non-default issuer whose email derives the WebID, in production', async () => {
+  process.env.NODE_ENV = 'production';
+  Auth.oidcSignin.defaultIssuer = 'https://default-issuer.test';
+  const webId = issuer.addProfile('ada', [issuer.issuer]);
+  Auth.webIdFor = (email) => (email === ADA ? webId : 'https://elsewhere.test/id#me');
+  issuer.claims = (c) => ({ ...c, webid: webId });
+  const { base } = await startApp();
+  await signIn(browser(base), { input: webId });
+  assert.equal(outcomes[0].issuer, issuer.issuer);
+  assert.equal(outcomes[0].emailProven, true);
+  assert.equal(accounts.created[0].email, ADA);
+  assert.ok([...credentials.rows.values()][0].emailVerifiedAt);
+});
+
+test("proven by the default issuer: its verified email for a WebID on its origin, in production, with no derivation", async () => {
+  process.env.NODE_ENV = 'production';
+  // the app cannot derive webid.email's WebIDs (the HMAC secret stays with the issuer)
+  Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+  const { base } = await startApp();
+  await signIn(browser(base));
+  const webId = issuer.webIdFor(ADA);
+  assert.equal(new URL(webId).origin, new URL(issuer.issuer).origin);
+  assert.equal(outcomes[0].webId, webId);
+  assert.equal(outcomes[0].emailProven, true);
+  assert.equal(accounts.created[0].email, ADA);
+  const [credential] = [...credentials.rows.values()];
+  assert.equal(credential.credentialOf.id, webId);
+  assert.ok(credential.emailVerifiedAt);
+});
+
+test('the default issuer configured with a trailing slash still vouches for its WebIDs', async () => {
+  process.env.NODE_ENV = 'production';
+  Auth.oidcSignin.defaultIssuer = `${issuer.issuer}/`;
+  Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(outcomes[0].ok, true, JSON.stringify(outcomes[0]));
+  assert.equal(outcomes[0].issuer, issuer.issuer);
+  assert.equal(outcomes[0].emailProven, true);
+});
+
+test('a non-default issuer\'s verified email is not proven in production', async () => {
+  process.env.NODE_ENV = 'production';
+  Auth.oidcSignin.defaultIssuer = 'https://default-issuer.test';
+  Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+  const webId = issuer.addProfile('ada', [issuer.issuer]);
+  issuer.claims = (c) => ({ ...c, webid: webId });
+  const { base } = await startApp();
+  await signIn(browser(base), { input: webId });
+  assert.equal(outcomes[0].ok, true);
+  assert.equal(outcomes[0].email, ADA);
+  assert.equal(outcomes[0].emailProven, false);
+  assert.equal(accounts.created[0].email, undefined);
+  assert.equal(credentials.rows.size, 0);
+});
+
+for (const nodeEnv of ['development', 'test']) {
+  test(`with NODE_ENV=${nodeEnv}, any issuer's verified email is proven`, async () => {
+    process.env.NODE_ENV = nodeEnv;
+    Auth.oidcSignin.defaultIssuer = 'https://default-issuer.test';
+    Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+    const webId = issuer.addProfile('ada', [issuer.issuer]);
+    issuer.claims = (c) => ({ ...c, webid: webId });
+    const { base } = await startApp();
+    await signIn(browser(base), { input: webId });
+    assert.equal(outcomes[0].emailProven, true);
+    assert.equal(accounts.created[0].email, ADA);
+    assert.ok([...credentials.rows.values()][0].emailVerifiedAt);
+  });
+}
+
+for (const nodeEnv of ['production', 'staging', undefined]) {
+  test(`with NODE_ENV=${nodeEnv ?? '(unset)'}, the development rule does not apply`, async () => {
+    if (nodeEnv) process.env.NODE_ENV = nodeEnv;
+    else delete process.env.NODE_ENV;
+    Auth.webIdFor = () => 'https://elsewhere.test/id#me';
+    const webId = issuer.addProfile('mallory', [issuer.issuer]);
+    issuer.claims = (c) => ({ ...c, webid: webId, email: 'victim@example.test', email_verified: true });
+    const { base } = await startApp();
+    await signIn(browser(base), { input: webId });
+    assert.equal(outcomes[0].ok, true, JSON.stringify(outcomes[0]));
+    assert.equal(outcomes[0].emailProven, false);
+  });
+}
+
+test('an email the issuer does not verify is not proven, even in development', async () => {
+  process.env.NODE_ENV = 'development';
+  issuer.emailVerified = false;
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(outcomes[0].emailProven, false);
+  assert.equal(credentials.rows.size, 0);
 });
 
 test('a sign-in without an email proof still ends an unproven password, once', async () => {

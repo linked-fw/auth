@@ -449,9 +449,11 @@ export type OidcSigninOutcome =
       /** The token's `email`, as the issuer claims it. */
       email?: string;
       /**
-       * Whether the issuer verified `email` and it is the email this WebID derives from
-       * (`Auth.webIdFor`). Only then is it stored on the account and marked verified; any issuer
-       * can claim any email for its own WebIDs.
+       * Whether `email` proves the WebID: the issuer verified it, and it is the email this WebID
+       * derives from (`Auth.webIdFor`), or the issuer is the default issuer (`defaultIssuer`) and
+       * the WebID is on its origin. With `NODE_ENV` `development` or `test`, any issuer's verified
+       * email counts. Only a proven email is stored on the account and marked verified; any other
+       * issuer can claim any email for its own WebIDs.
        */
       emailProven: boolean;
       isNewAccount: boolean;
@@ -477,7 +479,11 @@ export interface OidcSigninConfig {
    * (`{SITE_ROOT}/.well-known/linked-client.jsonld`, needs `Auth.signinClient`).
    */
   clientId?: string;
-  /** Issuer for emails whose domain names none. Default webid.email. */
+  /**
+   * Issuer for emails whose domain names none, and for a provider hint with nothing typed.
+   * Default webid.email. Its verified emails prove the WebIDs on its own origin (see
+   * `emailProven`).
+   */
   defaultIssuer?: string;
   /** Allow `http://` and loopback issuers and WebIDs (a local issuer in development). Default `false`. */
   allowLocalhost?: boolean;

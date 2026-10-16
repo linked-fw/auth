@@ -145,12 +145,18 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   confirming that the WebID dereferences at all: a webid.email WebID is trusted from the issuer's
   word alone. `login_required` and a refused issuer check are returned to the app, not thrown.
 - The token's `email` is trusted (stored on the account, marked verified) only when it **proves
-  the WebID**: `email_verified` is true and `Auth.webIdFor(email) === webid`. Any issuer can claim
-  any email for its own WebIDs, so an app that resolves anything by email (CN's invitations, C2b)
-  uses the email only when the callback's outcome says `emailProven`. In practice only
-  webid.email-derived WebIDs carry a proven email (with CN's HMAC derivation), so email-based
-  invitations will not match users of third-party issuers: a product limitation, which the invite
-  UI's "grant a WebID directly" covers.
+  the WebID**: `email_verified` is true and either `Auth.webIdFor(email) === webid`, or (A9) `iss`
+  is the app's default issuer (`Auth.oidcSignin.defaultIssuer`, else webid.email) and `webid` is
+  on that issuer's origin: the default issuer vouches for the emails of its own WebIDs, which is
+  how webid.email's emails count in production, where the app cannot derive its WebIDs. With
+  `NODE_ENV` `development` or `test` (never `production`, `staging` or unset), any issuer's
+  verified email counts. Any other issuer can claim any email for its own WebIDs, so an app that
+  resolves anything by email (CN's invitations, C2b) uses the email only when the callback's
+  outcome says `emailProven`. Email-based invitations will not match users of third-party
+  issuers: a product limitation, which the invite UI's "grant a WebID directly" covers.
+- (A9) A WebID has one `UserAccount` whichever method signs it in: the Solid-OIDC callback, code
+  sign-in and signup reuse an account another method made without a person (`signinDev` keeps
+  none), and report `isNewAccount: false`.
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
   a shared artifact; C1 is the first test across the two real processes.
@@ -619,6 +625,33 @@ never an unverified one; the email decides, not the provider subject)
 
 ---
 
+## A9 — Email proof by the default issuer, and one account per WebID
+
+**Depends on:** A2, A7. **PR:** [#137](https://github.com/linked-fw/auth/pull/137), report [014](../reports/014-email-proof-default-issuer.md). **Size:** small-to-medium, 2 phases. From CN's backlog 110 §1–2 (step C4):
+in production no webid.email email proves its WebID to an app (webid.email's HMAC secret never
+leaves it, so `Auth.webIdFor` cannot derive), so email invitations never resolve; and a bypass
+(`signinDev`) sign-in followed by an issuer sign-in of the same WebID leaves two `UserAccount`s.
+
+**Scope** (the owner's decisions)
+- `emailProven` is also true when the ID token's `email_verified` is true, its `iss` is the app's
+  configured default issuer (`Auth.oidcSignin.defaultIssuer`, else webid.email) and the `webid`
+  is on that issuer's origin: the default issuer vouches for the emails of its own WebIDs. Any
+  other issuer's email stays unproven (it could claim any email).
+- Outside production (`NODE_ENV` `development` or `test`), `email_verified` from any issuer counts
+  as proof. Never in production.
+- One `UserAccount` per Person whatever the sign-in method: every method finds the existing
+  account for the Person's IRI.
+- Contract 4 and the readme updated; a changeset (minor).
+
+**Verify**
+- Mock-issuer tests: proven via derivation (unchanged); proven via the default issuer and its
+  origin; not proven for a non-default issuer in production; proven for any issuer outside
+  production and refused in production.
+- `signinDev` then the mock issuer for the same WebID → one account.
+- `npm test` and `npm run test:integration` pass.
+
+---
+
 ## A4 — Native apps (Capacitor)
 
 **Depends on:** A2. Needed for Peace Game.
@@ -663,3 +696,4 @@ never an unverified one; the email decides, not the provider subject)
 - [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)
 - [x] A7 — [#135](https://github.com/linked-fw/auth/pull/135), report [013](../reports/013-oauth-existing-account.md)
 - [x] A8 — [#133](https://github.com/linked-fw/auth/pull/133), report [012](../reports/012-cookie-prefix-default.md)
+- [x] A9 — [#137](https://github.com/linked-fw/auth/pull/137), report [014](../reports/014-email-proof-default-issuer.md)

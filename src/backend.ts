@@ -49,7 +49,12 @@ import {
   wantsTokensInBody,
 } from './utils/cookies.js';
 import { authCookieName } from './utils/cookieNames.js';
-import { assertAuthSecrets, FatalConfigError, getJwtSecret } from './utils/secrets.js';
+import {
+  assertAuthSecrets,
+  FatalConfigError,
+  getJwtSecret,
+  isDevelopmentLikeEnv,
+} from './utils/secrets.js';
 import {
   buildClientIdDocument,
   CLIENT_ID_DOCUMENT_PATH,
@@ -63,6 +68,7 @@ import {
   createOidcRelyingParty,
   defaultOidcResultLocation,
   safeReturnTo,
+  sameIssuer,
 } from './utils/oidcSignin.js';
 import type {
   OidcCallbackError,
@@ -831,34 +837,117 @@ async function hasUnprovenPassword(personId: string): Promise<boolean> {
 }
 
 /**
+ * The account of a person just created at `person.id`. A WebID has one account whichever method
+ * signs it in, and another method may have made it without a person (dev sign-in keeps none: the
+ * profile is the issuer's), so that account is reused (`isNewAccount: false`). Otherwise an
+ * account is created, with `email` when given.
+ *
+ * On a reused account, `email` is stored when it has none. A `proven` email (the sign-in proved
+ * it) also replaces a different one: the only writer of an email on a person-less account is dev
+ * sign-in, whose email nothing proved.
+ */
+async function accountForNewPerson(
+  provider: AuthBackendProvider,
+  person: { id: string },
+  email: string | undefined,
+  proven: boolean
+): Promise<{ account: UserAccountData; isNewAccount: boolean }> {
+  const existing = await provider.accountShape
+    .select((a) => [a.email, a.accountOf])
+    .where((a) => a.accountOf.equals({ id: person.id }))
+    .one();
+  if (existing) {
+    if (email && existing.email !== email && (!existing.email || proven)) {
+      if (existing.email) {
+        console.warn(
+          `[auth] account ${existing.id}: its email is replaced by the one the sign-in proved for ${person.id}`
+        );
+      }
+      await provider.accountShape.update({ email }).for(existing);
+      return { account: { ...existing, email } as unknown as UserAccountData, isNewAccount: false };
+    }
+    return { account: existing as unknown as UserAccountData, isNewAccount: false };
+  }
+  const account = await provider.accountShape
+    .create({ accountOf: person, ...(email ? { email } : {}) })
+    .catch((err) => {
+      console.error(`Error creating account for user ${person.id}:`, err);
+      throw new Error(`Could not create account for user ${person.id}`);
+    });
+  return { account: account as unknown as UserAccountData, isNewAccount: true };
+}
+
+/**
+ * Whether `url`'s origin is `issuer`'s. Both are http(s) URLs by the time this runs (the issuer
+ * and the WebID passed the relying party's checks), and an opaque origin (`"null"`) never matches.
+ */
+function onIssuerOrigin(url: string, issuer: string): boolean {
+  try {
+    const origin = new URL(url).origin;
+    return origin !== 'null' && origin === new URL(issuer).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a Solid-OIDC token's `email` proves its WebID, so that the app may find the person by
+ * it. The issuer must have verified it (`email_verified`), and then one of:
+ *
+ * - it is the email the WebID derives from (`Auth.webIdFor`), as for OAuth;
+ * - the token comes from the app's default issuer and the WebID is on that issuer's origin: the
+ *   default issuer vouches for the emails of its own WebIDs (webid.email mints a WebID only for a
+ *   verified email, and an app cannot derive it without webid.email's secret);
+ * - `NODE_ENV` is `development` or `test`, where any issuer's verified email counts. Never in
+ *   production (nor `staging`, nor with `NODE_ENV` unset).
+ *
+ * Any other issuer can claim any email for its own WebIDs, so its email proves nothing.
+ */
+function emailProvesWebId(
+  identity: VerifiedOidcIdentity,
+  email: string | undefined,
+  defaultIssuer: string
+): boolean {
+  if (!email || identity.emailVerified !== true) return false;
+  try {
+    if (Auth.webIdFor(email) === identity.webId) return true;
+  } catch {
+    // an email the derivation refuses proves nothing by derivation; the rules below still apply
+  }
+  if (sameIssuer(identity.issuer, defaultIssuer) && onIssuerOrigin(identity.webId, defaultIssuer)) {
+    return true;
+  }
+  if (isDevelopmentLikeEnv()) {
+    console.warn(
+      `[auth] OIDC sign-in: the email from ${identity.issuer} counts as proof only because NODE_ENV=${process.env.NODE_ENV}`
+    );
+    return true;
+  }
+  return false;
+}
+
+/**
  * The last step of a Solid-OIDC sign-in: the person whose IRI is the verified WebID, its account,
  * and a session, as the other methods end. The issuer's tokens are not kept.
  *
- * The token's email is trusted only when it proves the WebID: the issuer verified it and it is the
- * email the WebID derives from (`Auth.webIdFor`), as for OAuth. Any issuer can claim any email for
- * its own WebIDs, and the email is how the other methods find an account, so an email that does
- * not prove the WebID is neither stored on the account nor marked verified. A sign-in that proves
- * the person (always the WebID, and the email when it does) ends access nobody proved, as a code
- * sign-in does: unverified passwords and their sessions (see `dropUnprovenAccess`).
+ * The token's email is trusted only when it proves the WebID (see `emailProvesWebId`). The email
+ * is how the other methods find an account, so an email that does not prove the WebID is neither
+ * stored on the account nor marked verified. A sign-in that proves the person (always the WebID,
+ * and the email when it does) ends access nobody proved, as a code sign-in does: unverified
+ * passwords and their sessions (see `dropUnprovenAccess`).
  */
 async function signInVerifiedWebId(
   provider: AuthBackendProvider,
-  identity: VerifiedOidcIdentity
+  identity: VerifiedOidcIdentity,
+  defaultIssuer: string
 ): Promise<{ isNewAccount: boolean; emailProven: boolean; authentication: AuthenticationResult }> {
   const webId = identity.webId;
   const email = identity.email ? normalizeSigninEmail(identity.email) : undefined;
-  let emailProvesWebId = false;
-  if (email && identity.emailVerified === true) {
-    try {
-      emailProvesWebId = Auth.webIdFor(email) === webId;
-    } catch {
-      emailProvesWebId = false;
-    }
-  }
+  const emailProven = emailProvesWebId(identity, email, defaultIssuer);
 
   const person = await provider.userShape.select((p) => [p.givenName]).for(webId);
   if (person) {
-    if (emailProvesWebId) {
+    if (emailProven) {
       await dropUnprovenAccess(provider, webId);
       await markEmailVerified(webId, email);
     } else if (await hasUnprovenPassword(webId)) {
@@ -871,9 +960,10 @@ async function signInVerifiedWebId(
       { id: webId } as UserData,
       account as UserAccountData
     );
-    return { isNewAccount: false, emailProven: emailProvesWebId, authentication };
+    return { isNewAccount: false, emailProven, authentication };
   }
 
+  let isNewAccount = true;
   const authentication = await Auth.login(
     provider,
     async () => null,
@@ -884,19 +974,22 @@ async function signInVerifiedWebId(
           console.error(`Error creating user ${webId}:`, err);
           throw new Error(`Could not create user ${webId}`);
         });
-      if (emailProvesWebId) await markEmailVerified(user.id, email);
-      const account = await provider.accountShape
-        .create({ accountOf: user, ...(emailProvesWebId ? { email } : {}) })
-        .catch((err) => {
-          console.error(`Error creating account for user ${user.id}:`, err);
-          throw new Error(`Could not create account for user ${user.id}`);
-        });
-      console.log(`new user ${user.id} from a Solid-OIDC sign-in, account ${account.id}`);
-      return { account, person: user };
+      if (emailProven) await markEmailVerified(user.id, email);
+      const created = await accountForNewPerson(
+        provider,
+        user,
+        emailProven ? email : undefined,
+        emailProven
+      );
+      isNewAccount = created.isNewAccount;
+      console.log(
+        `new user ${user.id} from a Solid-OIDC sign-in, ${isNewAccount ? 'new ' : ''}account ${created.account.id}`
+      );
+      return { account: created.account, person: user, isNewAccount };
     },
     'oidc'
   );
-  return { isNewAccount: true, emailProven: emailProvesWebId, authentication };
+  return { isNewAccount, emailProven, authentication };
 }
 
 /**
@@ -957,7 +1050,7 @@ async function completeOidcExchange(
 
   let signedIn: Awaited<ReturnType<typeof signInVerifiedWebId>>;
   try {
-    signedIn = await signInVerifiedWebId(provider, identity);
+    signedIn = await signInVerifiedWebId(provider, identity, runtime.defaultIssuer);
   } catch (error) {
     console.error('[auth] OIDC sign-in: could not create the session', error);
     return failed('failed', mismatch);
@@ -1449,22 +1542,20 @@ export default class AuthBackendProvider extends BackendProvider {
         });
         console.log(`created new password for ${user.id}`);
 
-        //create a new account
-        const account = await this.accountShape
-          .create({
-            accountOf: user,
-            email: normalizedEmail,
-          })
-          .catch((err) => {
-            console.error(`Error creating account for user ${user.id}:`, err);
-            throw new Error(`Could not create account for user ${user.id}`);
-          });
+        // its account (one another method made for this WebID, or a new one)
+        const { account, isNewAccount } = await accountForNewPerson(
+          this,
+          user,
+          normalizedEmail,
+          false
+        );
 
-        console.log(`new user ${user.id}, account ${account.id}`);
+        console.log(`new user ${user.id}, ${isNewAccount ? 'new ' : ''}account ${account.id}`);
 
         return {
           account: account,
           person: user,
+          isNewAccount,
         };
       },
       'createAccount'
@@ -1907,14 +1998,16 @@ export default class AuthBackendProvider extends BackendProvider {
             throw new Error(`Could not create user ${personId}`);
           });
         await markEmailVerified(user.id, normalizedEmail);
-        const account = await this.accountShape
-          .create({ accountOf: user, email: normalizedEmail })
-          .catch((err) => {
-            console.error(`Error creating account for user ${user.id}:`, err);
-            throw new Error(`Could not create account for user ${user.id}`);
-          });
-        console.log(`new user ${user.id} from a sign-in code, account ${account.id}`);
-        return { account, person: user };
+        const { account, isNewAccount } = await accountForNewPerson(
+          this,
+          user,
+          normalizedEmail,
+          true
+        );
+        console.log(
+          `new user ${user.id} from a sign-in code, ${isNewAccount ? 'new ' : ''}account ${account.id}`
+        );
+        return { account, person: user, isNewAccount };
       },
       'signinWithCode'
     );

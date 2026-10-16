@@ -732,11 +732,23 @@ Auth.oidcSignin = {
    `'signin'` (the default: the returned email wins) or `'refuse'`. Its `hasAccount(email)` looks
    accounts up inside the callback; it is never callable.
 6. The person at the WebID and its account are found or created, and a session starts as for the
-   other methods (cookies). The token's email is trusted only when it proves the WebID: the issuer
-   verified it and it is the email this WebID derives from (`Auth.webIdFor`). Only then is it
-   stored on a new account and marked verified, since any issuer can claim any email for its own
-   WebIDs. A sign-in to a person with a password but no verified email removes that password and
-   its sessions, as a code sign-in does.
+   other methods (cookies). A WebID has one account whichever method signed it in: an account
+   another method made without a person (dev sign-in keeps none) is reused, and the outcome says
+   `isNewAccount: false`. The token's email is trusted only when it **proves the WebID** (`emailProven`). Only then is it stored on the account and marked
+   verified, since any issuer can claim any email for its own WebIDs. A sign-in to a person with a
+   password but no verified email removes that password and its sessions, as a code sign-in does.
+
+   **Proven** means the issuer verified the email (`email_verified: true`) and one of:
+
+   - it is the email the WebID derives from (`Auth.webIdFor(email) === webid`);
+   - the token's `iss` is the default issuer (`defaultIssuer`, webid.email unless set) and the
+     WebID is on that issuer's origin: the default issuer vouches for the emails of its own
+     WebIDs. This is what makes webid.email's emails count in production, where the app cannot
+     derive its WebIDs (the HMAC secret stays with webid.email). Any other issuer's email is not
+     proven, whatever it claims;
+   - **development and test only:** with `NODE_ENV` `development` or `test`, any issuer's verified
+     email counts, and a warning is logged each time. `production`, `staging`, any other value and
+     an unset `NODE_ENV` never get this rule.
 7. The browser is redirected to `onResult(outcome)`'s answer. The default is the start's
    `returnTo` (or `/`), or `/signin?oidc_error=<error>` on failure. No email goes into the URL.
    `outcome` is `{ok: true, webId, issuer, email?, emailProven, isNewAccount, returnTo?, mismatch?}`
