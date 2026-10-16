@@ -90,7 +90,7 @@ import PasswordHelper, {
 } from './helpers/password.js';
 import { IdentityToken } from './shapes/IdentityToken.js';
 import { decideEmailMatchedAccount } from './helpers/oauth-account.js';
-import { OAuthIdentityStore } from './utils/oauthIdentities.js';
+import { OAuthIdentityStore, normalizeLinkEmail } from './utils/oauthIdentities.js';
 import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
 import path, { dirname, basename } from 'path';
@@ -377,6 +377,45 @@ async function findAccountForOAuthEmail(
     account: accountsById.values().next().value,
     personId: personIds.values().next().value,
   };
+}
+
+/**
+ * Whether a linked provider identity still has the email it was linked with, so it may sign in to
+ * the linked account:
+ *
+ * - `'same'`: the token's verified email is the link's recorded email or, for a link written
+ *   before links recorded one, an email that resolves to the linked account (as an email sign-in
+ *   would find it);
+ * - `'changed'`: the token's verified email is another one;
+ * - `'unknown'`: the token carries no verified email (Apple sends none on some sign-ins), so there
+ *   is nothing to compare and the link decides.
+ *
+ * A link recorded with an address other than the account's own (an explicit `linkOAuthIdentity`,
+ * e.g. Apple's private relay) stays valid while the provider keeps that address.
+ */
+async function linkKeepsEmail(
+  provider: AuthBackendProvider,
+  identity: VerifiedOAuthIdentity,
+  links: OAuthIdentityLink[],
+  account: UserAccountData
+): Promise<'same' | 'changed' | 'unknown'> {
+  if (!identity.email || !identity.emailVerified) return 'unknown';
+  const email = normalizeLinkEmail(identity.email);
+  const recorded = links.map((link) => link.email).filter(Boolean);
+  if (recorded.length) return recorded.every((linked) => linked === email) ? 'same' : 'changed';
+
+  let webID: string;
+  try {
+    webID = Auth.webIdFor(email);
+  } catch {
+    return 'changed';
+  }
+  const found = await findAccountForOAuthEmail(provider, webID, identity.email, email);
+  if (found.conflict) return 'changed';
+  const reachesAccount =
+    (found.account?.id !== undefined && found.account.id === account.id) ||
+    (!found.account && found.personId !== undefined && found.personId === account.accountOf?.id);
+  return reachesAccount ? 'same' : 'changed';
 }
 
 // The configured user shape (`Auth.userType`). Historically `SchemaPerson | FoafPerson`;
@@ -2072,15 +2111,19 @@ export default class AuthBackendProvider extends BackendProvider {
    * VERIFIED_OAUTH_PROVIDERS). The account is then found from what the provider vouches for,
    * never from what the client sent:
    *
-   * 1. an identity linked to an account (provider + subject) signs straight in;
-   * 2. otherwise an existing account with the verified email is attached only when
-   *    `decideEmailMatchedAccount` allows it. When it does not, sign-in fails with
+   * 1. an identity linked to an account (provider + subject) signs in to it while it keeps the
+   *    email it was linked with (see `linkKeepsEmail`). When its verified email has changed, the
+   *    link is removed and the sign-in continues by the new email: the email decides the
+   *    account, not the provider's subject;
+   * 2. otherwise an existing account with the verified email is attached when
+   *    `decideEmailMatchedAccount` allows it: always when the account's email is verified too
+   *    (one verified email, one account). When it does not, sign-in fails with
    *    `action: 'sign_in_to_link'`: the user signs in the way they did before and connects the
    *    provider with `linkOAuthIdentity`;
    * 3. otherwise a new account is created, without a password.
    *
-   * Every sign-in that reaches an account leaves a link behind, so the email is consulted only
-   * once per identity.
+   * Every sign-in that reaches an account leaves a link behind, with the provider's verified
+   * email.
    *
    * @param provider - The OAuth provider
    * @param oauthUserData - The provider's credential (Google: `authentication.idToken`, Apple:
@@ -2123,15 +2166,30 @@ export default class AuthBackendProvider extends BackendProvider {
     if (linkedAccountIds.length === 1) {
       const account = await loadAccountWithPerson(this, linkedAccountIds[0]);
       if (account?.accountOf?.id) {
-        for (const link of links.filter((l) => l.legacy)) {
-          await OAuthIdentityStore.upgradeLegacyLink(link, provider).catch((err) =>
-            console.warn(`${provider} sign-in: could not upgrade a legacy identity link`, err)
-          );
+        const emailStill = await linkKeepsEmail(this, identity, links, account);
+        if (emailStill === 'changed') {
+          // the email decides, not the subject: the identity no longer has the email it was
+          // linked with, so it leaves the old account and continues by its new email below
+          console.log(`${provider} sign-in: the linked identity's email changed, link removed`);
+          for (const link of links) await OAuthIdentityStore.removeLink(link);
+        } else {
+          for (const link of links.filter((l) => l.legacy)) {
+            await OAuthIdentityStore.upgradeLegacyLink(link, provider).catch((err) =>
+              console.warn(`${provider} sign-in: could not upgrade a legacy identity link`, err)
+            );
+          }
+          if (emailStill === 'same' && identity.email) {
+            for (const link of links.filter((l) => !l.email)) {
+              await OAuthIdentityStore.recordLinkEmail(link, identity.email).catch((err) =>
+                console.warn(`${provider} sign-in: could not record the email of a link`, err)
+              );
+            }
+          }
+          await markOAuthEmailVerified(identity, account.accountOf.id);
+          return Auth.onSigninSuccessful(this, account.accountOf as UserData, account);
         }
-        await markOAuthEmailVerified(identity, account.accountOf.id);
-        return Auth.onSigninSuccessful(this, account.accountOf as UserData, account);
       }
-      // a link to an account that no longer exists: fall through to the email
+      // a link to an account that no longer exists, or one the email has left: by the email
     }
 
     if (!identity.email || !identity.emailVerified) {
@@ -2160,6 +2218,7 @@ export default class AuthBackendProvider extends BackendProvider {
         provider,
         emailVerified: identity.emailVerified,
         existing: {
+          emailVerified: await personEmailVerified(existing.personId),
           hasPassword: await OAuthIdentityStore.personHasPassword(existing.personId),
           linkedProviders: existing.account
             ? await OAuthIdentityStore.findLinkedProviders(existing.account.id)

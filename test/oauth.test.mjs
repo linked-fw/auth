@@ -42,6 +42,8 @@ let provider;
 let login;
 let onSignin;
 let createLink;
+let removeLink;
+let recordLinkEmail;
 // what the stubbed store holds
 let links;
 let existingAccount;
@@ -69,6 +71,8 @@ beforeEach(() => {
   mock.method(OAuthIdentityStore, 'findLinkedProviders', async () => linkedProviders);
   mock.method(OAuthIdentityStore, 'upgradeLegacyLink', async () => {});
   createLink = mock.method(OAuthIdentityStore, 'createLink', async () => {});
+  removeLink = mock.method(OAuthIdentityStore, 'removeLink', async () => {});
+  recordLinkEmail = mock.method(OAuthIdentityStore, 'recordLinkEmail', async () => {});
   credentialTable = fakeCredentialTable();
   credentialTable.install(AuthCredential);
   provider.accountShape = {
@@ -212,9 +216,10 @@ const LEGACY_ADA_ACCOUNT = {
   accountOf: { id: 'https://legacy.example.test/person/ada' },
 };
 
-test('a linked identity signs in to its account without looking at the email', async () => {
+test('a linked identity signs in to its account while it keeps the email it was linked with', async () => {
+  // a link recorded with an address other than the account's (an explicit linkOAuthIdentity)
   verifiedGoogle('someone-else@example.test');
-  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'someone-else@example.test' }];
   existingAccount = ADA_ACCOUNT;
   const result = await provider.signinOAuth('google', GOOGLE);
   assert.equal(result, SIGNED_IN);
@@ -311,6 +316,100 @@ test('a new identity creates an account and links it', async () => {
   assert.deepEqual(loginLabels(), ['google OAuth']);
 });
 
+// ---- one verified email, one account; the email decides, not the provider's subject ----
+
+/** Ada's person has a verified email (and, when `password`, a password). */
+function adaVerified({ password = false } = {}) {
+  credentialTable.insert({
+    credentialOf: { id: ADA_WEBID },
+    email: 'ada@example.test',
+    emailVerifiedAt: new Date(),
+    ...(password ? { passwordHash: 'hash' } : {}),
+  });
+  personHasPassword = password;
+}
+
+test('a verified Google email reaches the password account whose email is verified', async () => {
+  verifiedGoogle();
+  existingAccount = ADA_ACCOUNT;
+  adaVerified({ password: true });
+  const result = await provider.signinOAuth('google', GOOGLE);
+  assert.equal(result, SIGNED_IN);
+  assert.equal(onSignin.mock.calls[0].arguments[2], ADA_ACCOUNT);
+  assert.equal(login.mock.callCount(), 0, 'no second account');
+  const [identity, accountId] = createLink.mock.calls[0].arguments;
+  assert.deepEqual([identity.subject, accountId], ['g-1', ADA_ACCOUNT.id]);
+});
+
+test('a verified email reaches a verified account already linked to another identity at the provider', async () => {
+  verifiedGoogle('ada@example.test', 'g-2');
+  existingAccount = ADA_ACCOUNT;
+  linkedProviders = ['google'];
+  adaVerified({ password: true });
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.equal(createLink.mock.calls[0].arguments[1], ADA_ACCOUNT.id);
+});
+
+test('an unverified provider email never reaches the verified account', async () => {
+  mock.method(GoogleHelper, 'validateIdToken', async () => ({
+    sub: 'g-1',
+    email: 'ada@example.test',
+    email_verified: false,
+  }));
+  existingAccount = ADA_ACCOUNT;
+  adaVerified({ password: true });
+  const result = await provider.signinOAuth('google', GOOGLE);
+  assert.ok(result.error);
+  assert.equal(onSignin.mock.callCount() + login.mock.callCount(), 0);
+  assert.equal(createLink.mock.callCount(), 0);
+});
+
+test('a different verified email gets a new account, never the existing one', async () => {
+  verifiedGoogle('grace@example.test');
+  existingAccount = ADA_ACCOUNT;
+  adaVerified({ password: true });
+  const result = await provider.signinOAuth('google', GOOGLE);
+  assert.equal(result, SIGNED_IN);
+  assert.equal(onSignin.mock.callCount(), 0, 'signed in to an existing account');
+  assert.deepEqual(loginLabels(), ['google OAuth']);
+  assert.equal(createLink.mock.callCount(), 0, 'linked to the existing account');
+});
+
+test('a linked identity whose email changed no longer signs in to the old account', async () => {
+  verifiedGoogle('ada-renamed@example.test');
+  const link = { id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' };
+  links = [link];
+  existingAccount = ADA_ACCOUNT;
+  adaVerified();
+  const result = await provider.signinOAuth('google', GOOGLE);
+  assert.equal(result, SIGNED_IN);
+  assert.equal(onSignin.mock.callCount(), 0, 'signed in to the old account');
+  assert.deepEqual(removeLink.mock.calls.map((c) => c.arguments[0]), [link]);
+  assert.deepEqual(loginLabels(), ['google OAuth'], 'continued by the new email');
+});
+
+test('a link from an earlier release follows the email: kept and recorded when it still matches', async () => {
+  verifiedGoogle('Ada@Example.test');
+  const link = { id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false };
+  links = [link];
+  existingAccount = ADA_ACCOUNT;
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.equal(onSignin.mock.calls[0].arguments[2], ADA_ACCOUNT);
+  assert.deepEqual(recordLinkEmail.mock.calls[0].arguments, [link, 'Ada@Example.test']);
+  assert.equal(removeLink.mock.callCount(), 0);
+});
+
+test('a link from an earlier release whose email no longer reaches its account is removed', async () => {
+  verifiedGoogle('someone-else@example.test');
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
+  existingAccount = ADA_ACCOUNT;
+  const result = await provider.signinOAuth('google', GOOGLE);
+  assert.equal(result, SIGNED_IN);
+  assert.equal(onSignin.mock.callCount(), 0, 'signed in to the old account');
+  assert.equal(removeLink.mock.callCount(), 1);
+  assert.deepEqual(loginLabels(), ['google OAuth']);
+});
+
 // ---- the provider's verified email verifies the person's email ----
 
 /** The credentials of a person in an in-memory table installed for `AuthCredential`. */
@@ -345,7 +444,7 @@ test('a linked sign-in whose verified email maps to the person marks the email v
 test('a linked sign-in whose email is another address does not mark the email verified', async () => {
   credentialTable.insert({ credentialOf: { id: ADA_WEBID }, email: 'ada@example.test' });
   verifiedGoogle('someone-else@example.test');
-  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'someone-else@example.test' }];
   existingAccount = ADA_ACCOUNT;
   assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
   assert.equal(credentialsOf(credentialTable, ADA_WEBID)[0].emailVerifiedAt, undefined);
@@ -397,14 +496,21 @@ test('linkOAuthIdentity refuses an identity linked to another account', async ()
 test('decideEmailMatchedAccount: each rule', () => {
   const decide = (provider, emailVerified, existing) =>
     decideEmailMatchedAccount({ provider, emailVerified, existing });
-  const none = { hasPassword: false, linkedProviders: [] };
+  const none = { emailVerified: false, hasPassword: false, linkedProviders: [] };
+  const verified = (facts) => ({ emailVerified: true, hasPassword: false, linkedProviders: [], ...facts });
+  // one verified email, one account: whatever else the account has
+  assert.deepEqual(decide('google', true, verified({ hasPassword: true })), { link: true });
+  assert.deepEqual(decide('google', true, verified({ linkedProviders: ['google', 'facebook'] })), { link: true });
+  // never for an unverified provider email, or a provider that does not verify emails
+  assert.equal(decide('google', false, verified({})).action, 'sign_in_to_link');
+  assert.equal(decide('facebook', true, verified({})).action, 'sign_in_to_link');
   assert.deepEqual(decide('google', true, none), { link: true });
-  assert.deepEqual(decide('apple', true, { hasPassword: false, linkedProviders: ['google'] }), { link: true });
+  assert.deepEqual(decide('apple', true, { ...none, linkedProviders: ['google'] }), { link: true });
   assert.equal(decide('google', false, none).action, 'sign_in_to_link');
   assert.equal(decide('facebook', true, none).action, 'sign_in_to_link');
-  assert.equal(decide('google', true, { hasPassword: true, linkedProviders: [] }).action, 'sign_in_to_link');
-  assert.equal(decide('google', true, { hasPassword: false, linkedProviders: ['google'] }).action, 'sign_in_to_link');
-  assert.equal(decide('google', true, { hasPassword: false, linkedProviders: ['facebook'] }).action, 'sign_in_to_link');
+  assert.equal(decide('google', true, { ...none, hasPassword: true }).action, 'sign_in_to_link');
+  assert.equal(decide('google', true, { ...none, linkedProviders: ['google'] }).action, 'sign_in_to_link');
+  assert.equal(decide('google', true, { ...none, linkedProviders: ['facebook'] }).action, 'sign_in_to_link');
 });
 
 test('providerOfIdentityLink: a row without a provider is a legacy Apple link', () => {

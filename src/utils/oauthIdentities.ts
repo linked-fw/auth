@@ -9,7 +9,17 @@ export type OAuthIdentityLink = {
   accountId: string;
   /** Written before links recorded their provider (an Apple link, possibly holding its token). */
   legacy: boolean;
+  /**
+   * The provider's verified email when the link was made, normalised. Links written before links
+   * recorded it have none.
+   */
+  email?: string;
 };
+
+/** How a provider email is compared and stored on a link: trimmed, lower case. */
+export function normalizeLinkEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 /**
  * The store reads and writes of OAuth sign-in. Module functions, not provider methods: every
@@ -26,6 +36,7 @@ export const OAuthIdentityStore = {
     const rows = await IdentityToken.select((token) => [
       token.sub,
       token.identityProvider,
+      token.email,
       token.account,
     ]).where((token) => token.sub.equals(subject));
     return (rows || [])
@@ -34,6 +45,7 @@ export const OAuthIdentityStore = {
         id: row.id,
         accountId: row.account.id,
         legacy: !row.identityProvider,
+        ...(row.email ? { email: normalizeLinkEmail(row.email) } : {}),
       }));
   },
 
@@ -52,13 +64,30 @@ export const OAuthIdentityStore = {
     ];
   },
 
-  /** Link a verified provider identity to an account. The provider's token is never stored. */
+  /**
+   * Link a verified provider identity to an account, with the provider's email when the provider
+   * verified it (a link is followed only while the identity keeps that email). The provider's
+   * token is never stored.
+   */
   async createLink(identity: VerifiedOAuthIdentity, accountId: string): Promise<void> {
     await IdentityToken.create({
       sub: identity.subject,
       identityProvider: identity.provider,
+      ...(identity.email && identity.emailVerified
+        ? { email: normalizeLinkEmail(identity.email) }
+        : {}),
       account: { id: accountId },
     } as any);
+  },
+
+  /** Record the provider email on a link written before links recorded it. */
+  async recordLinkEmail(link: OAuthIdentityLink, email: string): Promise<void> {
+    await IdentityToken.update({ email: normalizeLinkEmail(email) } as any).for({ id: link.id });
+  },
+
+  /** Remove a link: the identity no longer signs in to that account. */
+  async removeLink(link: OAuthIdentityLink): Promise<void> {
+    await IdentityToken.delete({ id: link.id });
   },
 
   /**
