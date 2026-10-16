@@ -619,6 +619,33 @@ never an unverified one; the email decides, not the provider subject)
 
 ---
 
+## A9 — Email proof by the default issuer, and one account per WebID
+
+**Depends on:** A2, A7. **Size:** small-to-medium, 2 phases. From CN's backlog 110 §1–2 (step C4):
+in production no webid.email email proves its WebID to an app (webid.email's HMAC secret never
+leaves it, so `Auth.webIdFor` cannot derive), so email invitations never resolve; and a bypass
+(`signinDev`) sign-in followed by an issuer sign-in of the same WebID leaves two `UserAccount`s.
+
+**Scope** (the owner's decisions)
+- `emailProven` is also true when the ID token's `email_verified` is true, its `iss` is the app's
+  configured default issuer (`Auth.oidcSignin.defaultIssuer`, else webid.email) and the `webid`
+  is on that issuer's origin: the default issuer vouches for the emails of its own WebIDs. Any
+  other issuer's email stays unproven (it could claim any email).
+- Outside production (`NODE_ENV` `development` or `test`), `email_verified` from any issuer counts
+  as proof. Never in production.
+- One `UserAccount` per Person whatever the sign-in method: every method finds the existing
+  account for the Person's IRI.
+- Contract 4 and the readme updated; a changeset (minor).
+
+**Verify**
+- Mock-issuer tests: proven via derivation (unchanged); proven via the default issuer and its
+  origin; not proven for a non-default issuer in production; proven for any issuer outside
+  production and refused in production.
+- `signinDev` then the mock issuer for the same WebID → one account.
+- `npm test` and `npm run test:integration` pass.
+
+---
+
 ## A4 — Native apps (Capacitor)
 
 **Depends on:** A2. Needed for Peace Game.
@@ -663,3 +690,4 @@ never an unverified one; the email decides, not the provider subject)
 - [x] A6 — [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md)
 - [x] A7 — [#135](https://github.com/linked-fw/auth/pull/135), report [013](../reports/013-oauth-existing-account.md)
 - [x] A8 — [#133](https://github.com/linked-fw/auth/pull/133), report [012](../reports/012-cookie-prefix-default.md)
+- [ ] A9 — email proof by the default issuer, one account per WebID
