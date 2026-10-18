@@ -68,7 +68,7 @@
   "devDependencies": {
     "@_linked/cli": "^1.45.5",
     "@_linked/fuseki": "^3.2.3",
-    "@_linked/server": "^2.0",
+    "@_linked/server": "^3.0.0",
     "@changesets/changelog-github": "^1.0.0",
     "@changesets/cli": "^3.0.0",
     "@types/n3": "^1.26.4",
