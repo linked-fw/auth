@@ -39,7 +39,6 @@
     "@_linked/primitives": "^1.8.0",
     "@_linked/react": "^2.0.0",
     "@_linked/schema": "^1.5.0",
-    "@_linked/server": "^2.0",
     "@_linked/server-utils": "^1.9.0",
     "@_linked/sioc": "^1.4.0",
     "@_linked/xsd": "^1.0",
@@ -69,6 +68,7 @@
   "devDependencies": {
     "@_linked/cli": "^1.45.5",
     "@_linked/fuseki": "^3.2.3",
+    "@_linked/server": "^2.0",
     "@changesets/changelog-github": "^1.0.0",
     "@changesets/cli": "^3.0.0",
     "@types/n3": "^1.26.4",
