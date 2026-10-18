@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.15.3
+
+### Patch Changes
+
+- [#144](https://github.com/linked-fw/auth/pull/144) [`7177978`](https://github.com/linked-fw/auth/commit/7177978bec7dce8e8cccfcbe0400323750b46bc6) Thanks [@flyon](https://github.com/flyon)! - The `@_linked/server` devDependency range is `^3.0.0` (was `^2.0`), so a workspace that has `@_linked/server@3` installs without an ERESOLVE conflict. The package's runtime code is unchanged.
+
 ## 3.15.2
 
 ### Patch Changes
