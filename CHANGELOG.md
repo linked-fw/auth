@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.15.2
+
+### Patch Changes
+
+- [#142](https://github.com/linked-fw/auth/pull/142) [`d78782d`](https://github.com/linked-fw/auth/commit/d78782da120d14e9c772ca178851c79308b7f79a) Thanks [@flyon](https://github.com/flyon)! - Move `@_linked/server` from `dependencies` to `devDependencies`. The package's code never imports it; only a test does, so consumers no longer install a copy of it through `@_linked/auth`.
+
 ## 3.15.1
 
 ### Patch Changes
