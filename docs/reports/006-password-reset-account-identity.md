@@ -87,3 +87,5 @@ backlog file was removed during wrapup.
 Code review, documentation, patch changeset, and full runtime validation are complete. The change
 is ready for review and release as a patch; the base-branch compiler diagnostics above remain an
 independent build-readiness issue.
+
+Pull request: [linked-fw/auth#148](https://github.com/linked-fw/auth/pull/148)
