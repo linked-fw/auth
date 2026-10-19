@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.15.5
+
+### Patch Changes
+
+- [#149](https://github.com/linked-fw/auth/pull/149) [`9611ffe`](https://github.com/linked-fw/auth/commit/9611ffe55d9724b68f881f058300f7351e35ca31) Thanks [@flyon](https://github.com/flyon)! - The provider methods that need a session are declared `'signed-in'` instead of the deprecated alias `'user'` (`linkOAuthIdentity`, `resendEmailVerification`, `getReauthenticationMethods`, `removeAccount`, `userHasAuthCredential`, `userHasPassword`). No behaviour change. Requires `@_linked/server-utils` ^1.14.0.
+
 ## 3.15.4
 
 ### Patch Changes
