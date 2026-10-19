@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.15.6
+
+### Patch Changes
+
+- [#148](https://github.com/linked-fw/auth/pull/148) [`a7e940b`](https://github.com/linked-fw/auth/commit/a7e940ba5d031f3060fc30726338ba13d3a6e1e0) Thanks [@abdipramana](https://github.com/abdipramana)! - Resolve password-reset credentials through the account matched by email, so legacy OAuth accounts whose generated WebID differs from `UserAccount.accountOf` can set a password safely. Password sign-in sessions now also include the stored account email.
+
 ## 3.15.5
 
 ### Patch Changes
