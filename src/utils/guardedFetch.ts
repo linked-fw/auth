@@ -105,11 +105,15 @@ const limitResponse = (
       return reader.cancel(reason);
     },
   });
-  const wrapped = new UndiciResponse(limited as ConstructorParameters<typeof UndiciResponse>[0], {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
+  // undici accepts a ReadableStream body; its `BodyInit` type does not include one
+  const wrapped = new UndiciResponse(
+    limited as unknown as ConstructorParameters<typeof UndiciResponse>[0],
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    }
+  );
   // a constructed response has no URL; keep the one it was fetched from
   Object.defineProperty(wrapped, 'url', { value: response.url });
   return wrapped;
@@ -173,6 +177,10 @@ export class RefusedUrlError extends Error {
 
 type FetchInput = Parameters<typeof undiciFetch>[0];
 
+// Node implements `AbortSignal.any`. The DOM `AbortSignal` in this compile does not declare it.
+const anyAbortSignal = (signals: AbortSignal[]): AbortSignal =>
+  (AbortSignal as unknown as { any(signals: AbortSignal[]): AbortSignal }).any(signals);
+
 const hrefOf = (input: FetchInput): string =>
   typeof input === 'string' ? input : input instanceof URL ? input.href : (input as { url: string }).url;
 
@@ -200,7 +208,7 @@ export const createGuardedFetch = (options: GuardedFetchOptions = {}): typeof fe
     const deadline = Date.now() + timeoutMs;
     // the deadline covers the headers as well; the caller's own signal still applies
     const signal = init?.signal
-      ? AbortSignal.any([init.signal as AbortSignal, AbortSignal.timeout(timeoutMs)])
+      ? anyAbortSignal([init.signal as AbortSignal, AbortSignal.timeout(timeoutMs)])
       : AbortSignal.timeout(timeoutMs);
     const response = await undiciFetch(input, { ...init, redirect, dispatcher, signal });
     return limitResponse(response, href, maxBytes, deadline, timeoutMs);

@@ -67,11 +67,10 @@ All 555 unit tests pass against the emitted ESM, including the new legacy identi
 password-session regressions. Test coverage also retains reset-token single-use, expiry,
 enumeration resistance, failed-send cleanup, and log-hygiene guarantees.
 
-The standard package build reaches TypeScript compilation but the current base branch has two
-unrelated diagnostics in `src/utils/guardedFetch.ts` involving `ReadableStream`/`BodyInit` and
-`AbortSignal.any` under the workspace compiler. Emitting with those pre-existing diagnostics and
-copying the package CSS assets allows the complete runtime suite to execute. This PR does not
-expand into guarded-fetch compatibility work.
+`src/utils/guardedFetch.ts` now compiles under the workspace TypeScript. Undici's `BodyInit` type
+omits `ReadableStream`, and the DOM `AbortSignal` in that compiler omits `any`, so both call sites
+cast through `unknown`. Runtime behavior is unchanged: undici still receives the stream, and the
+combined signal is still `AbortSignal.any`.
 
 ## Known limitations
 
@@ -85,7 +84,6 @@ backlog file was removed during wrapup.
 ## PR readiness
 
 Code review, documentation, patch changeset, and full runtime validation are complete. The change
-is ready for review and release as a patch; the base-branch compiler diagnostics above remain an
-independent build-readiness issue.
+is ready for review and release as a patch.
 
 Pull request: [linked-fw/auth#148](https://github.com/linked-fw/auth/pull/148)
