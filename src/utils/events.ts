@@ -1,6 +1,14 @@
 import { EventEmitter } from 'events';
+import { sharedState } from '@_linked/core/utils/sharedState';
 
-const authEvents = new EventEmitter();
+/**
+ * The auth event bus, shared by every copy of this module in the runtime: a listener added
+ * through one copy hears an event emitted through another (account-removal cleanup). See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const { authEvents } = sharedState('@_linked/auth', 'events', () => ({
+  authEvents: new EventEmitter(),
+}));
 
 const NEW_USER_EVENT = '@_linked/auth/new-user';
 const ACCOUNT_REMOVED_EVENT = '@_linked/auth/account-removed';

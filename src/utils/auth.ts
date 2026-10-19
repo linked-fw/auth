@@ -21,16 +21,41 @@ import { setQueryContext } from '@_linked/core/queries/QueryContext';
 import { personEmailVerified } from '../helpers/emailVerification.js';
 import { emailToWebID } from './webID.js';
 import { getCookiePrefix, setCookiePrefix } from './cookieNames.js';
+import { sharedState } from '@_linked/core/utils/sharedState';
 import type { SigninClientConfig } from './clientIdDocument.js';
 import type { OidcSigninConfig } from './oidcSignin.js';
+
+/**
+ * What the app configures on `Auth`, shared by every copy of this module in the runtime: the app
+ * sets `Auth.webIdFor`, `Auth.oidcSignin` and the rest through one copy, and the backend setup or a
+ * sign-in may run on another. See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const authState = sharedState('@_linked/auth', 'Auth', () => ({
+  userType: SchemaPerson as typeof Shape,
+  accountType: UserAccount as typeof UserAccount,
+  webIdFor: emailToWebID as (email: string) => string,
+  signinClient: undefined as SigninClientConfig | undefined,
+  oidcSignin: undefined as OidcSigninConfig | undefined,
+}));
 
 export class Auth {
   // define the default user and account types
   // Widened from `typeof SchemaPerson | typeof FoafPerson`: `foaf` was the last
   // legacy `lincd` package in this dependency tree and the union was type-only.
   // `AuthProviderProps.userType` already used `typeof Shape`.
-  static userType: typeof Shape = SchemaPerson;
-  static accountType: typeof UserAccount = UserAccount;
+  static get userType(): typeof Shape {
+    return authState.userType;
+  }
+  static set userType(type: typeof Shape) {
+    authState.userType = type;
+  }
+  static get accountType(): typeof UserAccount {
+    return authState.accountType;
+  }
+  static set accountType(type: typeof UserAccount) {
+    authState.accountType = type;
+  }
 
   /**
    * Turns a verified email into the user's WebID (the Person's IRI). Every sign-in method that
@@ -38,7 +63,12 @@ export class Auth {
    * nothing keeps its WebIDs. An app with another derivation sets it once in its backend setup,
    * before requests are served, e.g. `Auth.webIdFor = hmacWebIdFor({secret, issuer})`.
    */
-  static webIdFor: (email: string) => string = emailToWebID;
+  static get webIdFor(): (email: string) => string {
+    return authState.webIdFor;
+  }
+  static set webIdFor(derive: (email: string) => string) {
+    authState.webIdFor = derive;
+  }
 
   /**
    * The app's Client ID Document configuration, for signing in through a Solid-OIDC issuer. When
@@ -46,7 +76,12 @@ export class Auth {
    * not, nothing is served there. Set it once in the backend setup, before
    * `setupBeforeControllers` runs, e.g. `Auth.signinClient = {clientName: 'Create.Now', theme}`.
    */
-  static signinClient?: SigninClientConfig;
+  static get signinClient(): SigninClientConfig | undefined {
+    return authState.signinClient;
+  }
+  static set signinClient(config: SigninClientConfig | undefined) {
+    authState.signinClient = config;
+  }
 
   /**
    * Opt-in to signing in through Solid-OIDC issuers (webid.email, or the issuer a user's WebID
@@ -55,7 +90,12 @@ export class Auth {
    * when not, neither exists. Set it once in the backend setup, before `setupBeforeControllers`
    * runs, e.g. `Auth.oidcSignin = {}` next to `Auth.signinClient`.
    */
-  static oidcSignin?: OidcSigninConfig;
+  static get oidcSignin(): OidcSigninConfig | undefined {
+    return authState.oidcSignin;
+  }
+  static set oidcSignin(config: OidcSigninConfig | undefined) {
+    authState.oidcSignin = config;
+  }
 
   /**
    * The prefix of every cookie this package sets and reads (`accessToken`, `refreshToken`,

@@ -20,6 +20,7 @@ import { LincdServerProxy } from '@_linked/server-utils/utils/LincdServerProxy';
 import type { AuthHandler } from '@_linked/server-utils/utils/LincdServerProxy';
 import { decodeJwtPayload } from './token.js';
 import { authCookieName } from './cookieNames.js';
+import { sharedState } from '@_linked/core/utils/sharedState';
 
 /** Refresh this long before the access token expires. */
 export const REFRESH_LEAD_MS = 60 * 1000;
@@ -52,26 +53,37 @@ export const SESSION_HINT_COOKIE = 'linkedAuthSession';
 /** Performs a refresh; resolves true when a new access token was obtained. */
 export type RefreshHandler = () => Promise<boolean>;
 
-let refreshHandler: RefreshHandler | undefined;
-let inFlight: Promise<boolean> | undefined;
-let lastRefreshAtMs = 0;
 /**
  * A 401 within this long after a successful refresh is not about an expired token (the app
  * refused the call for another reason), so it does not trigger yet another refresh.
  */
 const FRESH_TOKEN_WINDOW_MS = 10 * 1000;
-let accessToken: string | undefined;
-let accessTokenExpiresAtMs: number | undefined;
-/** The lead in use for the current token (see refreshLeadFor). */
-let currentLeadMs = REFRESH_LEAD_MS;
-let timer: ReturnType<typeof setTimeout> | undefined;
-let listenersInstalled = false;
+
+/**
+ * The client's session state, shared by every copy of this module in the runtime: `ProvideAuth`
+ * registers the refresh handler and sets the token through one copy, and a call or the scheduler
+ * may run on another. One token, one in-flight refresh and one timer per runtime. See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const client = sharedState('@_linked/auth', 'authClient', () => ({
+  refreshHandler: undefined as RefreshHandler | undefined,
+  inFlight: undefined as Promise<boolean> | undefined,
+  lastRefreshAtMs: 0,
+  accessToken: undefined as string | undefined,
+  accessTokenExpiresAtMs: undefined as number | undefined,
+  /** The lead in use for the current token (see refreshLeadFor). */
+  currentLeadMs: REFRESH_LEAD_MS,
+  timer: undefined as ReturnType<typeof setTimeout> | undefined,
+  listenersInstalled: false,
+  /** Whether `installServerCallRetry` has installed the retry hook. */
+  retryInstalled: false,
+}));
 
 /** Register what a refresh does. Returns a function that unregisters it. */
 export function setRefreshHandler(handler: RefreshHandler | undefined): () => void {
-  refreshHandler = handler;
+  client.refreshHandler = handler;
   return () => {
-    if (refreshHandler === handler) refreshHandler = undefined;
+    if (client.refreshHandler === handler) client.refreshHandler = undefined;
   };
 }
 
@@ -80,14 +92,14 @@ export function setRefreshHandler(handler: RefreshHandler | undefined): () => vo
  * when a new access token was obtained, false when the refresh failed or nothing is registered.
  */
 export function refreshAccessToken(): Promise<boolean> {
-  if (inFlight) return inFlight;
-  const handler = refreshHandler;
+  if (client.inFlight) return client.inFlight;
+  const handler = client.refreshHandler;
   if (!handler) return Promise.resolve(false);
-  inFlight = Promise.resolve()
+  client.inFlight = Promise.resolve()
     .then(handler)
     .then(
       (ok) => {
-        if (ok) lastRefreshAtMs = Date.now();
+        if (ok) client.lastRefreshAtMs = Date.now();
         return Boolean(ok);
       },
       (err) => {
@@ -96,19 +108,19 @@ export function refreshAccessToken(): Promise<boolean> {
       }
     )
     .finally(() => {
-      inFlight = undefined;
+      client.inFlight = undefined;
     });
-  return inFlight;
+  return client.inFlight;
 }
 
 /** The access token currently held in memory (web) or last set (native). */
 export function getCurrentAccessToken(): string | undefined {
-  return accessToken;
+  return client.accessToken;
 }
 
 /** When the current access token expires (ms since epoch), if known. */
 export function getAccessTokenExpiresAt(): number | undefined {
-  return accessTokenExpiresAtMs;
+  return client.accessTokenExpiresAtMs;
 }
 
 /**
@@ -118,8 +130,8 @@ export function getAccessTokenExpiresAt(): number | undefined {
  */
 export function setAccessToken(token: string | null | undefined, nowMs: number = Date.now()) {
   if (!token) {
-    accessToken = undefined;
-    accessTokenExpiresAtMs = undefined;
+    client.accessToken = undefined;
+    client.accessTokenExpiresAtMs = undefined;
     clearScheduledRefresh();
     try {
       Server.removeDefaultHeaders('Authorization');
@@ -128,8 +140,8 @@ export function setAccessToken(token: string | null | undefined, nowMs: number =
     }
     return;
   }
-  const previousExpiry = accessTokenExpiresAtMs;
-  accessToken = token;
+  const previousExpiry = client.accessTokenExpiresAtMs;
+  client.accessToken = token;
   try {
     Server.addDefaultHeaders({ Authorization: `Bearer ${token}` });
   } catch {
@@ -146,7 +158,7 @@ export function setAccessToken(token: string | null | undefined, nowMs: number =
     scheduleRefreshAt(expMs, nowMs, sameAsBefore ? 0 : undefined, iatMs);
   } else {
     // not a readable JWT: nothing to schedule from
-    accessTokenExpiresAtMs = undefined;
+    client.accessTokenExpiresAtMs = undefined;
     clearScheduledRefresh();
   }
 }
@@ -168,27 +180,28 @@ export function scheduleRefreshAt(
   if (leadMs === undefined) {
     leadMs = refreshLeadFor(iatMs !== undefined ? expMs - iatMs : expMs - nowMs);
   }
-  currentLeadMs = leadMs;
-  accessTokenExpiresAtMs = expMs;
+  client.currentLeadMs = leadMs;
+  client.accessTokenExpiresAtMs = expMs;
   clearScheduledRefresh();
   const delay = Math.min(MAX_TIMEOUT_MS, Math.max(MIN_REFRESH_DELAY_MS, expMs - leadMs - nowMs));
-  timer = setTimeout(() => {
-    timer = undefined;
+  client.timer = setTimeout(() => {
+    client.timer = undefined;
     refreshAccessToken();
   }, delay);
-  (timer as any)?.unref?.();
+  (client.timer as any)?.unref?.();
 }
 
 export function clearScheduledRefresh() {
-  if (timer) {
-    clearTimeout(timer);
-    timer = undefined;
+  if (client.timer) {
+    clearTimeout(client.timer);
+    client.timer = undefined;
   }
 }
 
 /** Is the access token expired, or about to (within the current lead)? */
 export function accessTokenNeedsRefresh(nowMs: number = Date.now()): boolean {
-  return accessTokenExpiresAtMs !== undefined && nowMs >= accessTokenExpiresAtMs - currentLeadMs;
+  const expiresAtMs = client.accessTokenExpiresAtMs;
+  return expiresAtMs !== undefined && nowMs >= expiresAtMs - client.currentLeadMs;
 }
 
 /** Called on visibilitychange / focus: refresh if the token expired while the tab slept. */
@@ -202,7 +215,11 @@ export function refreshIfStale(nowMs: number = Date.now()): Promise<boolean> | u
  * a function that removes the listeners.
  */
 export function installVisibilityRefresh(): () => void {
-  if (listenersInstalled || typeof window === 'undefined' || typeof document === 'undefined') {
+  if (
+    client.listenersInstalled ||
+    typeof window === 'undefined' ||
+    typeof document === 'undefined'
+  ) {
     return () => {};
   }
   const onVisible = () => {
@@ -211,11 +228,11 @@ export function installVisibilityRefresh(): () => void {
   const onFocus = () => refreshIfStale();
   document.addEventListener('visibilitychange', onVisible);
   window.addEventListener('focus', onFocus);
-  listenersInstalled = true;
+  client.listenersInstalled = true;
   return () => {
     document.removeEventListener('visibilitychange', onVisible);
     window.removeEventListener('focus', onFocus);
-    listenersInstalled = false;
+    client.listenersInstalled = false;
   };
 }
 
@@ -257,8 +274,8 @@ function isAuthCall(url: string): boolean {
 
 function withCurrentAuthorization(init: RequestInit): RequestInit {
   const headers: Record<string, string> = { ...((init?.headers as any) || {}) };
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
+  if (client.accessToken) {
+    headers.Authorization = `Bearer ${client.accessToken}`;
   } else {
     // web after a server-rendered load: the renewed httpOnly cookie authenticates the retry
     delete headers.Authorization;
@@ -268,16 +285,16 @@ function withCurrentAuthorization(init: RequestInit): RequestInit {
 
 /** Before a call: if the token is already expired, refresh first (the call would fail anyway). */
 async function beforeRequest(url: string): Promise<void> {
-  if (isAuthCall(url) || accessTokenExpiresAtMs === undefined) return;
-  if (Date.now() >= accessTokenExpiresAtMs) {
+  if (isAuthCall(url) || client.accessTokenExpiresAtMs === undefined) return;
+  if (Date.now() >= client.accessTokenExpiresAtMs) {
     await refreshAccessToken();
   }
 }
 
 /** After a 401: refresh once; true means "retry with the new token". */
 async function onUnauthorized(url: string): Promise<boolean> {
-  if (isAuthCall(url) || !refreshHandler) return false;
-  if (!inFlight && Date.now() - lastRefreshAtMs < FRESH_TOKEN_WINDOW_MS) return false;
+  if (isAuthCall(url) || !client.refreshHandler) return false;
+  if (!client.inFlight && Date.now() - client.lastRefreshAtMs < FRESH_TOKEN_WINDOW_MS) return false;
   return refreshAccessToken();
 }
 
@@ -294,8 +311,8 @@ export function withAuthRetry(fetchFn: FetchLike): FetchLike {
     if (first?.status !== 401 || isAuthCall(url)) return first;
     // Another call refreshed while this one was under way: just retry with the new token.
     const tokenChanged =
-      accessToken !== undefined &&
-      (sentInit?.headers as any)?.Authorization !== `Bearer ${accessToken}`;
+      client.accessToken !== undefined &&
+      (sentInit?.headers as any)?.Authorization !== `Bearer ${client.accessToken}`;
     if (!tokenChanged && !(await onUnauthorized(url))) return first;
     return fetchFn.call(this, url, withCurrentAuthorization(init), ...rest);
   };
@@ -304,13 +321,11 @@ export function withAuthRetry(fetchFn: FetchLike): FetchLike {
 /** Use the newest token if the call was prepared with an older one (it refreshed meanwhile). */
 function withCurrentAuthIfChanged(init: RequestInit): RequestInit {
   const sent = (init?.headers as any)?.Authorization;
-  if (sent && accessToken && sent !== `Bearer ${accessToken}`) {
+  if (sent && client.accessToken && sent !== `Bearer ${client.accessToken}`) {
     return withCurrentAuthorization(init);
   }
   return init;
 }
-
-let retryInstalled = false;
 
 /**
  * Make `Server.call` refresh and retry once on 401. Idempotent.
@@ -321,7 +336,7 @@ let retryInstalled = false;
  * Returns false in that case.
  */
 export function installServerCallRetry(): boolean {
-  if (retryInstalled) return true;
+  if (client.retryInstalled) return true;
   const proxyClass: any = LincdServerProxy;
   if (typeof proxyClass?.setAuthHandler === 'function') {
     const handler: AuthHandler = {
@@ -329,13 +344,13 @@ export function installServerCallRetry(): boolean {
       onUnauthorized: (url) => onUnauthorized(url),
     };
     proxyClass.setAuthHandler(handler);
-    retryInstalled = true;
+    client.retryInstalled = true;
     return true;
   }
   const proto = proxyClass?.prototype;
   if (proto && typeof proto.fetchWithRetry === 'function') {
     proto.fetchWithRetry = withAuthRetry(proto.fetchWithRetry);
-    retryInstalled = true;
+    client.retryInstalled = true;
     return true;
   }
   console.warn(
@@ -352,9 +367,9 @@ export function installServerCallRetry(): boolean {
 export function resetAuthClient() {
   setAccessToken(null);
   clearScheduledRefresh();
-  accessToken = undefined;
-  accessTokenExpiresAtMs = undefined;
-  inFlight = undefined;
-  lastRefreshAtMs = 0;
-  currentLeadMs = REFRESH_LEAD_MS;
+  client.accessToken = undefined;
+  client.accessTokenExpiresAtMs = undefined;
+  client.inFlight = undefined;
+  client.lastRefreshAtMs = 0;
+  client.currentLeadMs = REFRESH_LEAD_MS;
 }

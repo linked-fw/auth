@@ -312,6 +312,9 @@ test('the browser bundle can inline APP_PREFIX too: a define of either token is 
   const run = (define) => {
     let code = source;
     for (const [token, value] of Object.entries(define)) code = code.split(token).join(value);
+    // a data: module cannot resolve a package name: point it at the installed file
+    const sharedState = '@_linked/core/utils/sharedState';
+    code = code.split(`'${sharedState}'`).join(JSON.stringify(import.meta.resolve(sharedState)));
     const out = spawnSync(
       process.execPath,
       [

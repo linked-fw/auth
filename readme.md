@@ -57,6 +57,10 @@ The client refreshes ~60 s before the access token's `exp`, again when the tab b
 
 Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/token`) before rendering `ProvideAuth`. The client then sends `x-linked-auth-transport: body`, the server returns the refresh token in the response body, and both tokens are stored through your functions (`expires` in seconds). Other non-browser clients (scripts, tests) can send that header too. For WebID sign-in in a native app, see *Native apps (Capacitor)* under *Sign in through a Solid-OIDC issuer*.
 
+### Two copies of the package in one runtime
+
+A module can be evaluated twice in one runtime (Vite's SSR runner and Node under `linked start`, or two browser bundles). What the app configures is kept once per runtime, so either copy sees it: the `Auth.*` statics (`userType`, `accountType`, `webIdFor`, `signinClient`, `oidcSignin`, `cookiePrefix`), the client's token, refresh handler and refresh timer, native token storage, the rate-limit store and limits, the refresh session store and limits, the native OIDC browser opener and the auth events. `ProvideAuth` from one copy is seen by `useAuth` from the other. Match a `FatalConfigError` with `isLinkedError(err, FatalConfigError)` (`@_linked/core/utils/linkedError`) rather than `instanceof`. The `Auth.*` statics are accessors: assign them (`Auth.webIdFor = fn`) rather than `mock.method(Auth, 'webIdFor')` in tests. See [shared state and error brands](https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md).
+
 ## Upgrading to 3.4
 
 > **Breaking: `removeAccount()` no longer answers a plain boolean.** It answers `true` when the

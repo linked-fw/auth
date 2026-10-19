@@ -24,6 +24,7 @@
  * Revoked and expired records are deleted by `cleanupExpiredSessions` once they are old enough
  * (see `startSessionCleanup` for the daily run the backend provider starts).
  */
+import { sharedState } from '@_linked/core/utils/sharedState';
 import crypto from 'node:crypto';
 import { RefreshToken } from '../shapes/RefreshToken.js';
 import {
@@ -230,14 +231,28 @@ export class MemoryRefreshSessionStore implements RefreshSessionStore {
   }
 }
 
-let store: RefreshSessionStore = new GraphRefreshSessionStore();
+/**
+ * The refresh session store, the session limits and the rotations under way, shared by every copy
+ * of this module in the runtime: a store or limits set through one copy hold for the other, and
+ * two copies never rotate one refresh token at once (that would look like reuse). See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const sessionState = sharedState('@_linked/auth', 'sessions', () => ({
+  store: new GraphRefreshSessionStore() as RefreshSessionStore,
+  limits: {
+    idleTtl: SESSION_IDLE_TTL,
+    maxTtl: SESSION_MAX_TTL,
+    refreshTtl: REFRESH_TOKEN_EXPIRES,
+  } as SessionLimits,
+  inFlight: new Map<string, Promise<RotateResult>>(),
+}));
 
 /** Replace where refresh token records are kept (defaults to the graph via `RefreshToken`). */
 export function setRefreshSessionStore(newStore: RefreshSessionStore) {
-  store = newStore;
+  sessionState.store = newStore;
 }
 export function getRefreshSessionStore(): RefreshSessionStore {
-  return store;
+  return sessionState.store;
 }
 
 /** A new session identifier (the token family shared by every rotation of one sign-in). */
@@ -252,15 +267,9 @@ export interface SessionLimits {
   refreshTtl: number;
 }
 
-let limits: SessionLimits = {
-  idleTtl: SESSION_IDLE_TTL,
-  maxTtl: SESSION_MAX_TTL,
-  refreshTtl: REFRESH_TOKEN_EXPIRES,
-};
-
 /** The session limits in force. */
 export function getSessionLimits(): SessionLimits {
-  return { ...limits };
+  return { ...sessionState.limits };
 }
 
 /**
@@ -268,7 +277,7 @@ export function getSessionLimits(): SessionLimits {
  * with `AUTH_SESSION_IDLE_TTL`, `AUTH_SESSION_MAX_TTL` and `AUTH_REFRESH_TOKEN_TTL`.
  */
 export function setSessionLimits(newLimits: Partial<SessionLimits>) {
-  limits = { ...limits, ...newLimits };
+  sessionState.limits = { ...sessionState.limits, ...newLimits };
 }
 
 /**
@@ -276,6 +285,7 @@ export function setSessionLimits(newLimits: Partial<SessionLimits>) {
  * the earliest of its own lifetime, the idle timeout and the session's absolute lifetime.
  */
 export function refreshTokenExpiresAt(now: Date, sessionStartedAt: Date = now): Date {
+  const { limits } = sessionState;
   let expires = now.getTime() + limits.refreshTtl * 1000;
   if (limits.idleTtl > 0) {
     expires = Math.min(expires, now.getTime() + limits.idleTtl * 1000);
@@ -301,7 +311,7 @@ export async function issueRefreshToken(
   }
   const refreshToken = generateRefreshToken();
   const expiresAt = refreshTokenExpiresAt(now, sessionStartedAt);
-  await store.create({
+  await sessionState.store.create({
     tokenHash: hashRefreshToken(refreshToken),
     sessionId,
     accountId,
@@ -316,7 +326,7 @@ export async function issueRefreshToken(
 /** When a record's session started: stored on the record, else its family's first createdAt. */
 async function sessionStartOf(record: RefreshSessionRecord): Promise<Date> {
   if (record.sessionStartedAt) return record.sessionStartedAt;
-  const family = await store.findBySessionId(record.sessionId);
+  const family = await sessionState.store.findBySessionId(record.sessionId);
   let start = record.createdAt;
   for (const member of family) {
     if (member.createdAt && (!start || member.createdAt < start)) start = member.createdAt;
@@ -363,7 +373,7 @@ async function successorIsAlive(record: RefreshSessionRecord, now: Date) {
   let current = record;
   for (let i = 0; i < 5; i++) {
     if (!current.replacedBy) return false;
-    const next = await store.findByTokenHash(current.replacedBy);
+    const next = await sessionState.store.findByTokenHash(current.replacedBy);
     if (!next || next.sessionId !== record.sessionId) return false;
     if (isActive(next, now)) return true;
     if (
@@ -377,8 +387,6 @@ async function successorIsAlive(record: RefreshSessionRecord, now: Date) {
   }
   return false;
 }
-
-const inFlight = new Map<string, Promise<RotateResult>>();
 
 /**
  * Validate a raw refresh token and replace it with a new one in the same session.
@@ -395,17 +403,18 @@ export function rotateRefreshToken(
   const tokenHash = hashRefreshToken(rawToken);
   // Two requests in this process presenting the same token: the second one waits for the
   // first and is then treated as a grace-window reuse rather than a theft.
-  const pending = inFlight.get(tokenHash);
+  const pending = sessionState.inFlight.get(tokenHash);
   if (pending) {
     return pending.then(() => doRotate(tokenHash, now));
   }
+  const { inFlight } = sessionState;
   const promise = doRotate(tokenHash, now).finally(() => inFlight.delete(tokenHash));
   inFlight.set(tokenHash, promise);
   return promise;
 }
 
 async function doRotate(tokenHash: string, now: Date): Promise<RotateResult> {
-  const record = await store.findByTokenHash(tokenHash);
+  const record = await sessionState.store.findByTokenHash(tokenHash);
   if (!record) {
     return { ok: false, reason: 'unknown' };
   }
@@ -455,6 +464,7 @@ async function doRotate(tokenHash: string, now: Date): Promise<RotateResult> {
   // Session limits. New records already expire at the earlier limit, so this mostly catches
   // records issued before the limits existed (or before they were lowered).
   const lastUsed = record.lastUsedAt ?? record.createdAt;
+  const { limits } = sessionState;
   if (limits.idleTtl > 0 && lastUsed && now.getTime() - lastUsed.getTime() > limits.idleTtl * 1000) {
     await revokeSession(record.sessionId, now);
     return { ok: false, reason: 'idle' };
@@ -473,7 +483,7 @@ async function doRotate(tokenHash: string, now: Date): Promise<RotateResult> {
     now,
     sessionStartedAt
   );
-  await store.update(record, {
+  await sessionState.store.update(record, {
     revokedAt: now,
     replacedBy: hashRefreshToken(next.refreshToken),
     lastUsedAt: now,
@@ -492,7 +502,7 @@ export async function findSessionIdForRefreshToken(
   rawToken: string
 ): Promise<string | undefined> {
   if (!looksLikeOpaqueRefreshToken(rawToken)) return undefined;
-  const record = await store.findByTokenHash(hashRefreshToken(rawToken));
+  const record = await sessionState.store.findByTokenHash(hashRefreshToken(rawToken));
   return record?.sessionId;
 }
 
@@ -505,7 +515,7 @@ export async function findRefreshTokenExpiry(
   now: Date = new Date()
 ): Promise<Date | undefined> {
   if (!looksLikeOpaqueRefreshToken(rawToken)) return undefined;
-  const record = await store.findByTokenHash(hashRefreshToken(rawToken));
+  const record = await sessionState.store.findByTokenHash(hashRefreshToken(rawToken));
   return record && isActive(record, now) ? record.expiresAt : undefined;
 }
 
@@ -515,11 +525,11 @@ export async function revokeSession(
   now: Date = new Date()
 ): Promise<number> {
   if (!sessionId) return 0;
-  const records = await store.findBySessionId(sessionId);
+  const records = await sessionState.store.findBySessionId(sessionId);
   let revoked = 0;
   for (const record of records) {
     if (!record.revokedAt) {
-      await store.update(record, { revokedAt: now });
+      await sessionState.store.update(record, { revokedAt: now });
       revoked++;
     }
   }
@@ -532,11 +542,11 @@ export async function revokeAllSessionsForAccount(
   now: Date = new Date()
 ): Promise<number> {
   if (!accountId) return 0;
-  const records = await store.findByAccount(accountId);
+  const records = await sessionState.store.findByAccount(accountId);
   let revoked = 0;
   for (const record of records) {
     if (!record.revokedAt) {
-      await store.update(record, { revokedAt: now });
+      await sessionState.store.update(record, { revokedAt: now });
       revoked++;
     }
   }
@@ -546,9 +556,9 @@ export async function revokeAllSessionsForAccount(
 /** Delete every refresh token record of an account (account removal). */
 export async function deleteAllSessionsForAccount(accountId: string): Promise<number> {
   if (!accountId) return 0;
-  const records = await store.findByAccount(accountId);
+  const records = await sessionState.store.findByAccount(accountId);
   for (const record of records) {
-    await store.delete(record);
+    await sessionState.store.delete(record);
   }
   return records.length;
 }
@@ -565,7 +575,7 @@ export const DEFAULT_CLEANUP_AFTER_SECONDS = 30 * 24 * 60 * 60;
  * @param options.olderThan seconds (default 30 days, or `AUTH_SESSION_CLEANUP_AFTER`)
  */
 export async function cleanupExpiredSessions(
-  targetStore: RefreshSessionStore = store,
+  targetStore: RefreshSessionStore = sessionState.store,
   {
     olderThan = readTtlFromEnv('AUTH_SESSION_CLEANUP_AFTER', DEFAULT_CLEANUP_AFTER_SECONDS),
     now = new Date(),

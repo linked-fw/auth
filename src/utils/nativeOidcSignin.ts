@@ -13,6 +13,7 @@
  *    stores the session's tokens. When the browser itself resolves to the URL
  *    (`ASWebAuthenticationSession`), step 1 does this at once.
  */
+import { sharedState } from '@_linked/core/utils/sharedState';
 import { Server } from '@_linked/server-utils/utils/Server';
 import { packageName } from '../package.js';
 import {
@@ -42,11 +43,18 @@ export const OIDC_PENDING_STORAGE_KEY = 'oidcPending';
 /** How long the device keeps a pending sign-in, in seconds; the server refuses it after that. */
 const OIDC_PENDING_STORAGE_SECONDS = 10 * 60;
 
-let openSystemBrowser: OidcSigninBrowser | undefined;
+/**
+ * The app's browser opener, shared by every copy of this module in the runtime: the app registers
+ * it through one copy, and the sign-in may start on another. See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const browserState = sharedState('@_linked/auth', 'nativeOidcSignin', () => ({
+  openSystemBrowser: undefined as OidcSigninBrowser | undefined,
+}));
 
 /** Register how this app opens the system browser for a sign-in (see `OidcSigninBrowser`). */
 export function setOidcSigninBrowser(open: OidcSigninBrowser | undefined): void {
-  openSystemBrowser = open;
+  browserState.openSystemBrowser = open;
 }
 
 /** What `startNativeOidcSignin` answers while the user is still at the issuer. */
@@ -95,7 +103,7 @@ export async function startNativeOidcSignin(options: {
   if (!isNativeTokenStorage()) {
     return failure('not_native', 'Register the token storage first (setAuthTokenStorageMethods)');
   }
-  const open = openSystemBrowser;
+  const open = browserState.openSystemBrowser;
   if (!open) return failure('no_browser', 'Register the system browser first (setOidcSigninBrowser)');
 
   const started: NativeOidcStartAnswer | undefined = await Server.call(

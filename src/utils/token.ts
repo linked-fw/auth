@@ -1,4 +1,5 @@
 import { Server } from '@_linked/server-utils/utils/Server';
+import { sharedState } from '@_linked/core/utils/sharedState';
 
 /**
  * Where the CLIENT keeps its tokens.
@@ -11,10 +12,24 @@ import { Server } from '@_linked/server-utils/utils/Server';
  *   `setAuthTokenStorageMethods`. The client then asks the server to return the refresh token in
  *   the response body (header `x-linked-auth-transport: body`), stores both tokens through those
  *   functions and passes the refresh token to `validateToken` / `signout` itself.
+ *
+ * The registered storage and the in-memory token are shared by every copy of this module in the
+ * runtime: the app registers storage through one copy, and sign-in may run on another. See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
  */
-let _setTokenFn: (key: string, value: string, expires?: number) => Promise<void>;
-let _getTokenFn: (key: string) => Promise<string>;
-let _removeTokenFn: (key: string) => Promise<void>;
+const tokenState = sharedState('@_linked/auth', 'token', () => ({
+  setTokenFn: undefined as
+    | ((key: string, value: string, expires?: number) => Promise<void>)
+    | undefined,
+  getTokenFn: undefined as ((key: string) => Promise<string>) | undefined,
+  removeTokenFn: undefined as ((key: string) => Promise<void>) | undefined,
+  /**
+   * In-memory access token of a web client. Not persisted anywhere: after a full page load the
+   * server-rendered request is authenticated by the httpOnly cookie, and the client gets a token
+   * in memory again with its next refresh.
+   */
+  memoryAccessToken: undefined as string | undefined,
+}));
 
 /** Header a client sends to receive the refresh token in the response body (native clients). */
 export const TOKEN_TRANSPORT_HEADER = 'x-linked-auth-transport';
@@ -31,9 +46,9 @@ function setAuthTokenStorageMethods(
   setTokenFn: (key: string, value: string, expires?: number) => Promise<void>,
   removeTokenFn: (key: string) => Promise<void>
 ) {
-  _getTokenFn = getTokenFn;
-  _setTokenFn = setTokenFn;
-  _removeTokenFn = removeTokenFn;
+  tokenState.getTokenFn = getTokenFn;
+  tokenState.setTokenFn = setTokenFn;
+  tokenState.removeTokenFn = removeTokenFn;
   try {
     Server.addDefaultHeaders({ [TOKEN_TRANSPORT_HEADER]: TOKEN_TRANSPORT_BODY });
   } catch {
@@ -43,7 +58,7 @@ function setAuthTokenStorageMethods(
 
 /** True when the app registered its own token storage (native clients). */
 function isNativeTokenStorage(): boolean {
-  return Boolean(_getTokenFn && _setTokenFn && _removeTokenFn);
+  return Boolean(tokenState.getTokenFn && tokenState.setTokenFn && tokenState.removeTokenFn);
 }
 
 // token keys (also the cookie names the server uses)
@@ -129,21 +144,14 @@ const SESSION_MAX_TTL = readTtlFromEnv('AUTH_SESSION_MAX_TTL', DEFAULT_SESSION_M
 });
 
 /**
- * In-memory access token of a web client. Not persisted anywhere: after a full page load the
- * server-rendered request is authenticated by the httpOnly cookie, and the client gets a token in
- * memory again with its next refresh.
- */
-let memoryAccessToken: string | undefined;
-
-/**
  * Read a token. Native: from the registered storage. Web: the access token from memory; the
  * refresh token is an httpOnly cookie and is never readable (always undefined).
  */
 async function getAuthToken(key: string): Promise<string | undefined> {
-  if (_getTokenFn) {
-    return await _getTokenFn(key);
+  if (tokenState.getTokenFn) {
+    return await tokenState.getTokenFn(key);
   }
-  return key === ACCESS_TOKEN ? memoryAccessToken : undefined;
+  return key === ACCESS_TOKEN ? tokenState.memoryAccessToken : undefined;
 }
 
 /**
@@ -159,19 +167,19 @@ async function setAuthToken({
   value: string;
   expires?: number;
 }) {
-  if (_setTokenFn) {
-    await _setTokenFn(key, value, expires);
+  if (tokenState.setTokenFn) {
+    await tokenState.setTokenFn(key, value, expires);
   } else if (key === ACCESS_TOKEN) {
-    memoryAccessToken = value;
+    tokenState.memoryAccessToken = value;
   }
 }
 
 /** Remove a token. Native: from the registered storage. Web: from memory (cookies are the server's). */
 async function removeAuthToken(key: string) {
-  if (_removeTokenFn) {
-    await _removeTokenFn(key);
+  if (tokenState.removeTokenFn) {
+    await tokenState.removeTokenFn(key);
   } else if (key === ACCESS_TOKEN) {
-    memoryAccessToken = undefined;
+    tokenState.memoryAccessToken = undefined;
   }
 }
 
