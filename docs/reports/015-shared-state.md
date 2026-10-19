@@ -10,7 +10,7 @@ summary: >
 
 Replaces backlog 009 (found by the survey for linked-fw/cli backlog 017). Convention:
 [shared state and error brands](https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md)
-and cli report 020.
+and [linked-fw/cli report 020](https://github.com/linked-fw/cli/blob/main/docs/reports/020-shared-state-and-error-brands.md).
 
 ## Why
 
