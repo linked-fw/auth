@@ -97,3 +97,20 @@ memos, the JWT verification cache, warn-once flags, and the stub-able `UsedNonce
 - Changeset `.changeset/shared-state.md` (patch).
 - No architecture doc in this repo covers module state; the convention doc lives in linked-fw/cli.
   Its "Where the packages stand" row for auth (`auth backlog 009`) can now say done.
+
+## Review notes
+
+An independent review of [#150](https://github.com/linked-fw/auth/pull/150) found no high or medium
+issues, and confirmed every consumer (Create Now, webid.email, auth itself) only assigns the `Auth`
+statics, so the accessors are safe. Known limits it recorded:
+
+1. **The two-copy tests load auth twice, but core, server-utils and React once.** They do not prove
+   that two server-utils copies share the retry handler; the `^1.13.0` floor relies on
+   server-utils' own shared `proxyState` (and its own two-copy test).
+2. **Shared defaults belong to the copy that evaluates first.** `GraphRefreshSessionStore`,
+   `SchemaPerson` and `UserAccount` in the containers are that copy's instances and classes. This is
+   safe while core keeps dispatch and the shape registries on `globalThis`.
+3. **Two browser bundles with different `AUTH_COOKIE_PREFIX` defines share the first one's prefix.**
+   Intended: one runtime, one set of cookie names.
+4. **`installVisibilityRefresh` runs once per runtime.** Unmounting one copy's `ProvideAuth` removes
+   the listeners for both, as two providers in one copy already did.
