@@ -1736,22 +1736,20 @@ export default class AuthBackendProvider extends BackendProvider {
   }
 
   async getOrCreateAccount(user: QResult<Person>) {
-    //get or create account
-    let account = await this.accountShape
-      .select((a) => a.accountOf)
+    // The account enters the AuthSession directly, so load email as well as its Person.
+    // Password sign-in otherwise produces a session without the account's email.
+    const account = await this.accountShape
+      .select((a) => [a.email, a.accountOf])
       .where((a) => a.accountOf.equals({ id: user.id }))
       .one();
-    if (!account) {
-      //accounts can be created on the fly,
-      // it means this user/webID existed, but it's the first time they log in here to this app
-      // use account.profileSetupComplete or similar if you want to direct the user to a profile setup page
-      account = await this.accountShape.create({
-        accountOf: {
-          id: user.id,
-        },
-      });
-    }
-    return account;
+    if (account) return account;
+
+    // Accounts can be created on the fly when this WebID exists but has not used this app before.
+    return this.accountShape.create({
+      accountOf: {
+        id: user.id,
+      },
+    });
   }
 
   /**
@@ -1778,9 +1776,8 @@ export default class AuthBackendProvider extends BackendProvider {
     // Only the hash is stored, with an expiry. Writing it replaces any earlier link's token.
     const resetTokenFields = PasswordHelper.resetPasswordTokenFields(newToken);
     const normalizedEmail = email.toLowerCase();
-    let webID: string;
     try {
-      webID = Auth.webIdFor(normalizedEmail);
+      Auth.webIdFor(normalizedEmail);
     } catch (error) {
       console.error('Invalid email format during password reset request');
       return {
@@ -1788,28 +1785,31 @@ export default class AuthBackendProvider extends BackendProvider {
       };
     }
 
+    // Resolve the account by email first. Legacy OAuth accounts may have a credential attached
+    // to Auth.webIdFor(email) while their UserAccount points at a different, canonical Person.
+    // A reset must always target the Person that owns the account.
+    const account = await UserAccount.select((ua) => {
+      return [
+        ua.email,
+        ua.accountOf.select((p) => {
+          return [p.givenName, p.telephone];
+        }),
+      ];
+    })
+      .where((ua) => {
+        return ua.email.equals(normalizedEmail);
+      })
+      .one();
+
+    if (!account?.accountOf?.id) {
+      console.warn('No account found for a reset password request');
+      return true;
+    }
+
+    const webID = account.accountOf.id;
     const existingCredential = await this.getPasswordForUser({ id: webID });
 
     if (!existingCredential) {
-      const account = await UserAccount.select((ua) => {
-        return [
-          ua.email,
-          ua.accountOf.select((p) => {
-            return [p.givenName, p.telephone];
-          }),
-        ];
-      })
-        .where((ua) => {
-          return ua.email.equals(normalizedEmail);
-        })
-        .one();
-
-      if (!account?.accountOf?.id) {
-        console.warn('No account found for a reset password request');
-        return true;
-      }
-
-      webID = account.accountOf.id;
       await AuthCredential.create({
         credentialOf: {
           id: webID,
