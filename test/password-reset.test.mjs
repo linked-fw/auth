@@ -141,6 +141,29 @@ test('a fresh reset link also works for an account that had no password yet', as
   assert.equal(await passwordIs('new-pass-1'), true);
 });
 
+test('a reset targets the account Person instead of a stale derived WebID credential', async () => {
+  const stalePersonId = 'https://legacy.test/webid/ada';
+  mock.method(Auth, 'webIdFor', () => stalePersonId);
+  const staleCredential = credentials.insert({
+    credentialOf: { id: stalePersonId },
+    email: EMAIL,
+    passwordHash: COST_4_HASH,
+  });
+
+  const token = await requestResetLink();
+
+  assert.equal(
+    credentials.rows.get(staleCredential.id).forgotPasswordToken,
+    undefined,
+    'the reset token was written to the stale credential'
+  );
+  assert.ok(storedCredential().forgotPasswordToken, 'no token was written to the account Person');
+
+  const result = await provider.resetPassword('new-pass-1', 'new-pass-1', token);
+  assert.equal(result, SIGNED_IN);
+  assert.equal(await passwordIs('new-pass-1'), true);
+});
+
 test('a reset link works only once', async () => {
   existingPassword();
   const token = await requestResetLink();
@@ -331,6 +354,20 @@ test('a failed sign-in does not re-hash', async () => {
   assert.ok(result?.error, JSON.stringify(result));
   assert.equal(storedCredential().passwordHash, COST_4_HASH);
   assert.deepEqual(credentials.updates, []);
+});
+
+test('password sign-in loads the account email into the session', async () => {
+  existingPassword();
+  provider.accountShape = {
+    select: () => ({
+      where: () => ({ one: async () => ({ ...ACCOUNT }) }),
+    }),
+  };
+  provider.getOrCreateAccount = AuthBackendProvider.prototype.getOrCreateAccount;
+
+  assert.equal(await provider.signinWithPassword(EMAIL, OLD_PASSWORD), SIGNED_IN);
+  const account = Auth.onSigninSuccessful.mock.calls.at(-1).arguments[2];
+  assert.equal(account.email, EMAIL);
 });
 
 test('a hash already at cost 10 is not rewritten by a sign-in', async () => {

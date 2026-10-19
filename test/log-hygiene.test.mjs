@@ -26,6 +26,7 @@ const { default: AppleHelper } = await import(new URL('helpers/apple.js', libDir
 const { default: GoogleHelper } = await import(new URL('helpers/google.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
 const { AuthCredential } = await import(new URL('shapes/AuthCredential.js', libDir));
+const { UserAccount } = await import('@_linked/sioc/shapes/UserAccount');
 const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 const { OAuth2Client } = await import('google-auth-library');
 
@@ -121,6 +122,11 @@ test('a reset email that fails to send logs neither the address nor the token', 
       return { id: 'c1', passwordHash: 'hash' };
     }
   }
+  mock.method(UserAccount, 'select', () => ({
+    where: () => ({
+      one: async () => ({ email: EMAIL, accountOf: { id: 'p1', givenName: 'Ada' } }),
+    }),
+  }));
   mock.method(AuthCredential, 'update', () => ({ for: async () => {}, where: async () => {} }));
   let token;
   // a provider whose error message repeats what it was asked to send
