@@ -19,10 +19,20 @@
  * server's resolved prefix. Allowed characters: letters, digits, `_`, `.` and `-`.
  */
 
+import { sharedState } from '@_linked/core/utils/sharedState';
+
 const VALID_PREFIX = /^[A-Za-z0-9_.-]*$/;
 
-let configured: string | undefined;
-let fromEnv: string | undefined;
+/**
+ * The prefix set in code and the one read from the environment, shared by every copy of this
+ * module in the runtime: the backend setup sets `Auth.cookiePrefix` through one copy, and the
+ * session middleware or a cookie writer may run on another. See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const prefixState = sharedState('@_linked/auth', 'cookieNames', () => ({
+  configured: undefined as string | undefined,
+  fromEnv: undefined as string | undefined,
+}));
 
 /**
  * `AUTH_COOKIE_PREFIX` and `APP_PREFIX`, written out as `process.env.AUTH_COOKIE_PREFIX` and
@@ -81,9 +91,9 @@ export function resolveCookiePrefix(env: {
 
 /** The cookie-name prefix in effect ('' when none is set). */
 export function getCookiePrefix(): string {
-  if (configured !== undefined) return configured;
-  if (fromEnv === undefined) fromEnv = resolveCookiePrefix(readEnv());
-  return fromEnv;
+  if (prefixState.configured !== undefined) return prefixState.configured;
+  if (prefixState.fromEnv === undefined) prefixState.fromEnv = resolveCookiePrefix(readEnv());
+  return prefixState.fromEnv;
 }
 
 /**
@@ -92,7 +102,7 @@ export function getCookiePrefix(): string {
  * `undefined` returns to the environment's prefix.
  */
 export function setCookiePrefix(prefix: string | undefined): void {
-  configured = prefix === undefined ? undefined : checked(prefix, 'the cookie prefix');
+  prefixState.configured = prefix === undefined ? undefined : checked(prefix, 'the cookie prefix');
 }
 
 /** The name a cookie of this package has under the current prefix. */

@@ -7,6 +7,7 @@
  * runs without configuration, and warn about it once.
  */
 import crypto from 'node:crypto';
+import { brandLinkedError } from '@_linked/core/utils/linkedError';
 
 /** The fallback JWT secret used in development and test only. */
 export const DEV_JWT_SECRET = 'jwt-secret';
@@ -23,6 +24,9 @@ export class FatalConfigError extends Error {
     this.name = 'FatalConfigError';
   }
 }
+// Branded so a host matches it from any copy of this package: `isLinkedError(err, FatalConfigError)`
+// from `@_linked/core/utils/linkedError`.
+brandLinkedError(FatalConfigError, '@_linked/auth', 'FatalConfigError');
 
 const GENERATE_HINT = 'Generate one with: openssl rand -base64 48';
 

@@ -35,11 +35,11 @@
     "web3"
   ],
   "dependencies": {
-    "@_linked/core": "^2.27.0",
+    "@_linked/core": "^2.36.0",
     "@_linked/primitives": "^1.8.0",
     "@_linked/react": "^2.0.0",
     "@_linked/schema": "^1.5.0",
-    "@_linked/server-utils": "^1.9.0",
+    "@_linked/server-utils": "^1.13.0",
     "@_linked/sioc": "^1.4.0",
     "@_linked/xsd": "^1.0",
     "@capacitor/dialog": "^7.0.2",

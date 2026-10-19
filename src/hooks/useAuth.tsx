@@ -5,6 +5,7 @@ import { Authentication } from '../shapes/Authentication.js';
 import { Person as SchemaPerson } from '@_linked/schema/shapes/Person';
 import { UserAccount } from '@_linked/sioc/shapes/UserAccount';
 import { Shape } from '@_linked/core/shapes/Shape';
+import { sharedState } from '@_linked/core/utils/sharedState';
 import { useQueryContext } from '@_linked/react/utils/useQueryContext';
 import {
   ACCESS_TOKEN,
@@ -65,9 +66,17 @@ export function keepIfUnchanged<T>(previous: T, next: T): T {
   }
 }
 
-const AuthContext = createContext(null);
-// Separate from AuthContext so the auth value is not rebuilt for it
-const AuthLoadingContext = createContext<(() => React.ReactElement) | undefined>(undefined);
+/**
+ * The context objects, shared by every copy of this module in the runtime: `ProvideAuth` from one
+ * copy must be seen by `useAuth` from another, which with a context per copy gets `null` and no
+ * error. This holds while both copies use one React. See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const { AuthContext, AuthLoadingContext } = sharedState('@_linked/auth', 'contexts', () => ({
+  AuthContext: createContext(null),
+  // Separate from AuthContext so the auth value is not rebuilt for it
+  AuthLoadingContext: createContext<(() => React.ReactElement) | undefined>(undefined),
+}));
 
 /** The loading element `ProvideAuth` was given, for `RequireAuth` to show while validating. */
 export const useAuthRenderLoading = () => useContext(AuthLoadingContext);

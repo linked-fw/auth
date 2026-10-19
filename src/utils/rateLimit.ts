@@ -27,6 +27,7 @@
  *
  * `configureRateLimits` overrides the same values in code; the environment wins over it.
  */
+import { sharedState } from '@_linked/core/utils/sharedState';
 
 /** A limit: at most `max` attempts in any `windowSeconds`. */
 export type RateLimit = { max: number; windowSeconds: number };
@@ -186,16 +187,23 @@ export class MemoryRateLimitStore implements RateLimitStore {
   }
 }
 
-let store: RateLimitStore = new MemoryRateLimitStore();
-let overrides: Partial<Record<RateLimitRuleName, RateLimitRule>> = {};
+/**
+ * The store and the limits set in code, shared by every copy of this module in the runtime: the
+ * app configures them through one copy, and a request may be counted by another. See
+ * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
+ */
+const limitState = sharedState('@_linked/auth', 'rateLimit', () => ({
+  store: new MemoryRateLimitStore() as RateLimitStore,
+  overrides: {} as Partial<Record<RateLimitRuleName, RateLimitRule>>,
+}));
 
 /** Use `next` for every counter from now on (e.g. a store shared by every instance). */
 export function setRateLimitStore(next: RateLimitStore): void {
-  store = next;
+  limitState.store = next;
 }
 
 export function getRateLimitStore(): RateLimitStore {
-  return store;
+  return limitState.store;
 }
 
 /**
@@ -205,13 +213,13 @@ export function getRateLimitStore(): RateLimitStore {
 export function configureRateLimits(
   next: Partial<Record<RateLimitRuleName, RateLimitRule>> = {}
 ): void {
-  overrides = next;
+  limitState.overrides = next;
 }
 
 /** Forget every override and start over with an empty in-memory store. For tests. */
 export function resetRateLimits(): void {
-  overrides = {};
-  store = new MemoryRateLimitStore();
+  limitState.overrides = {};
+  limitState.store = new MemoryRateLimitStore();
 }
 
 /** False when `AUTH_RATE_LIMIT` turns limiting off. */
@@ -249,7 +257,7 @@ export function resolveRateLimit(
 ): RateLimit | null {
   const fromEnv = parseRateLimit(process.env[envName(rule, kind)]);
   if (fromEnv !== undefined) return fromEnv;
-  const override = overrides[rule];
+  const override = limitState.overrides[rule];
   if (override && kind in override) return override[kind] ?? null;
   return RATE_LIMIT_DEFAULTS[rule][kind] ?? null;
 }
@@ -313,8 +321,8 @@ export async function consumeRateLimit(
     const elapsedMs = now - windowIndex * windowMs;
     const base = `auth:${rule}:${kind}:${limit.windowSeconds}:${id}`;
     // a counter is read during its own window and the next one
-    const current = await store.increment(`${base}:${windowIndex}`, windowMs * 2);
-    const previous = await store.get(`${base}:${windowIndex - 1}`);
+    const current = await limitState.store.increment(`${base}:${windowIndex}`, windowMs * 2);
+    const previous = await limitState.store.get(`${base}:${windowIndex - 1}`);
     const count = slidingWindowCount(previous, current, elapsedMs / windowMs);
     if (count > limit.max) {
       const retryAfter = secondsUntilAllowed(previous, current, limit.max, windowMs, elapsedMs);

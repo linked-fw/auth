@@ -444,12 +444,18 @@ test('a link from an earlier release is followed when the email gives no WebID',
   verifiedGoogle();
   links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false }];
   existingAccount = ADA_ACCOUNT;
-  mock.method(Auth, 'webIdFor', () => {
+  // an accessor (shared by every copy of the module), so assigned rather than mocked
+  const webIdFor = Auth.webIdFor;
+  Auth.webIdFor = () => {
     throw new Error('no WebID for this email');
-  });
-  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
-  assert.equal(onSignin.mock.calls[0].arguments[2], ADA_ACCOUNT);
-  assert.equal(removeLink.mock.callCount(), 0);
+  };
+  try {
+    assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+    assert.equal(onSignin.mock.calls[0].arguments[2], ADA_ACCOUNT);
+    assert.equal(removeLink.mock.callCount(), 0);
+  } finally {
+    Auth.webIdFor = webIdFor;
+  }
 });
 
 test('a link from an earlier release follows the email: kept and recorded when it still matches', async () => {
