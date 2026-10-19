@@ -1,7 +1,7 @@
 // The RPC surface of auth's providers: which methods the server may dispatch over HTTP
 // (`/call/@_linked/auth/<method>` and `/call/@_linked/auth/<shape>/<method>`).
 //
-// - callable: declared with a level. 'public' runs without a session; 'user' answers 401 first.
+// - callable: declared with a level. 'public' runs without a session; 'signed-in' answers 401 first.
 // - internal: answers 501 in every exposure mode; backend code can still call it.
 // - anything else a provider defines is undeclared, which a server in `rpcExposure: 'enforce'`
 //   answers with 501. auth declares every method, so an app needs no declarations of its own.
@@ -68,10 +68,10 @@ const SURFACE = {
       verifyEmail: 'public',
       validateToken: 'public',
       signout: 'public',
-      linkOAuthIdentity: 'user',
-      resendEmailVerification: 'user',
-      getReauthenticationMethods: 'user',
-      removeAccount: 'user',
+      linkOAuthIdentity: 'signed-in',
+      resendEmailVerification: 'signed-in',
+      getReauthenticationMethods: 'signed-in',
+      removeAccount: 'signed-in',
     },
     internal: [
       'upgradePasswordHash',
@@ -89,8 +89,8 @@ const SURFACE = {
   },
   AuthCredentialProvider: {
     callable: {
-      userHasAuthCredential: 'user',
-      userHasPassword: 'user',
+      userHasAuthCredential: 'signed-in',
+      userHasPassword: 'signed-in',
     },
     internal: ['createNewCredential', 'hasAuthCredential'],
   },

@@ -82,8 +82,8 @@ export class AuthCredentialProvider extends ShapeProvider {
  * `userHasAuthCredential` and `userHasPassword` answer for the signed-in user only.
  */
 declareCallable(AuthCredentialProvider, {
-  userHasAuthCredential: 'user',
-  userHasPassword: 'user',
+  userHasAuthCredential: 'signed-in',
+  userHasPassword: 'signed-in',
 });
 
 /**
