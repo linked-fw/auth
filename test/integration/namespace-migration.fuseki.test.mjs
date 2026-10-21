@@ -73,9 +73,9 @@ before(async () => {
   const res = await fetch(`${FUSEKI}/$/datasets`, {
     method: 'POST',
     headers: { authorization: authHeader, 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ dbName: DATASET, dbType: 'mem' }),
+    body: new URLSearchParams({ dbName: DATASET, dbType: 'tdb2' }),
   });
-  assert.equal(res.status, 200, `could not create test dataset: ${await res.text()}`);
+  assert.ok(res.ok, `could not create test dataset: ${res.status} ${await res.text()}`);
   store = new FusekiStore({
     endpoint: `${FUSEKI}/${DATASET}`,
     credentials: { username: USER, password: PASSWORD },
@@ -88,7 +88,7 @@ after(async () => {
     method: 'DELETE',
     headers: { authorization: authHeader },
   });
-  assert.equal(res.status, 200, `could not drop test dataset ${DATASET}`);
+  assert.ok(res.ok, `could not drop test dataset ${DATASET}: ${res.status}`);
 });
 
 const email = `legacy-${crypto.randomBytes(4).toString('hex')}@example.test`;

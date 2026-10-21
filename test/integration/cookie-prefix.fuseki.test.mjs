@@ -6,8 +6,11 @@
 // Each app runs in its own process (the prefix is per process, as in real apps) on one throwaway
 // Fuseki dataset. One cookie jar stands in for the browser: keyed by name and path, ports ignored.
 //
-//   AUTH_TEST_FUSEKI_URL=http://localhost:3030 AUTH_TEST_FUSEKI_USER=admin \
-//   AUTH_TEST_FUSEKI_PASSWORD=... npm run test:integration
+//   AUTH_TEST_FUSEKI_URL=http://localhost:3940 AUTH_TEST_FUSEKI_USER=admin \
+//   AUTH_TEST_FUSEKI_PASSWORD=admin npm run test:integration
+//
+// against the inferring Fuseki image started from docker-compose.yml here (its datasets are
+// TDB2, created through the admin form).
 //
 // Runs against the BUILT package in lib/ (build first).
 import { test, before, after } from 'node:test';

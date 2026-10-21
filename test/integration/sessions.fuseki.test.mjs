@@ -5,8 +5,11 @@
 // Needs a Fuseki server. Creates a throwaway dataset and drops it afterwards; no other dataset is
 // read or written.
 //
-//   AUTH_TEST_FUSEKI_URL=http://localhost:3030 AUTH_TEST_FUSEKI_USER=admin \
-//   AUTH_TEST_FUSEKI_PASSWORD=... npm run test:integration
+//   AUTH_TEST_FUSEKI_URL=http://localhost:3940 AUTH_TEST_FUSEKI_USER=admin \
+//   AUTH_TEST_FUSEKI_PASSWORD=admin npm run test:integration
+//
+// against the inferring Fuseki image started from docker-compose.yml here (its datasets are
+// TDB2, created through the admin form).
 //
 // Runs against the BUILT package in lib/ (build first).
 import { test, before, after, beforeEach, afterEach, mock } from 'node:test';
@@ -69,9 +72,9 @@ before(async () => {
   const res = await fetch(`${FUSEKI}/$/datasets`, {
     method: 'POST',
     headers: { authorization: authHeader, 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ dbName: DATASET, dbType: 'mem' }),
+    body: new URLSearchParams({ dbName: DATASET, dbType: 'tdb2' }),
   });
-  assert.equal(res.status, 200, `could not create test dataset: ${await res.text()}`);
+  assert.ok(res.ok, `could not create test dataset: ${res.status} ${await res.text()}`);
   LinkedStorage.setDefaultDataset(
     new FusekiStore({
       endpoint: `${FUSEKI}/${DATASET}`,
@@ -85,7 +88,7 @@ after(async () => {
     method: 'DELETE',
     headers: { authorization: authHeader },
   });
-  assert.equal(res.status, 200, `could not drop test dataset ${DATASET}`);
+  assert.ok(res.ok, `could not drop test dataset ${DATASET}: ${res.status}`);
 });
 
 afterEach(() => mock.timers.reset());

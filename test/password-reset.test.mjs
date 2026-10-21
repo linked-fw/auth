@@ -143,7 +143,7 @@ test('a fresh reset link also works for an account that had no password yet', as
 
 test('a reset targets the account Person instead of a stale derived WebID credential', async () => {
   const stalePersonId = 'https://legacy.test/webid/ada';
-  mock.method(Auth, 'webIdFor', () => stalePersonId);
+  mock.getter(Auth, 'webIdFor', () => () => stalePersonId);
   const staleCredential = credentials.insert({
     credentialOf: { id: stalePersonId },
     email: EMAIL,
