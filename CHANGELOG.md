@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.15.8
+
+### Patch Changes
+
+- [#157](https://github.com/linked-fw/auth/pull/157) [`37a8115`](https://github.com/linked-fw/auth/commit/37a81151b74cefdf9be491570eedf744e9c19690) Thanks [@abdipramana](https://github.com/abdipramana)! - Use the account shape configured by `AUTH_ACCOUNT_TYPE` throughout password recovery. Applications whose accounts use a custom RDF target class can now request and redeem password-reset links, and reset-email input is trimmed before normalization.
+
 ## 3.15.7
 
 ### Patch Changes
