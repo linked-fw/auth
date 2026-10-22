@@ -2972,7 +2972,8 @@ export default class AuthBackendProvider extends BackendProvider {
  *   `signout` must also answer a caller whose access token has expired: `validateToken` is the
  *   refresh-token exchange, and a 401 there would only send the client into another refresh.
  *   `resetPassword` without a reset token checks the session itself.
- * - `'signed-in'`: the server answers 401 before the method runs when the request has no session.
+ * - `'user'`: the server answers 401 before the method runs when the request has no session.
+ *   This is the compatible declaration name for supported server releases.
  *
  * A subclass that overrides one of these keeps its level (the strictest one declared up the class
  * chain). A method a subclass adds is undeclared until the subclass declares it.
@@ -2994,10 +2995,10 @@ declareCallable(AuthBackendProvider, {
   verifyEmail: 'public',
   validateToken: 'public',
   signout: 'public',
-  linkOAuthIdentity: 'signed-in',
-  resendEmailVerification: 'signed-in',
-  getReauthenticationMethods: 'signed-in',
-  removeAccount: 'signed-in',
+  linkOAuthIdentity: 'user',
+  resendEmailVerification: 'user',
+  getReauthenticationMethods: 'user',
+  removeAccount: 'user',
 });
 
 /**
