@@ -983,7 +983,7 @@ import { declareCallable } from '@_linked/server-utils/utils/callable';
 export default class AppAuthProvider extends AuthBackendProvider {
   async myExtraMethod() { /* ... */ }
 }
-declareCallable(AppAuthProvider, { myExtraMethod: 'signed-in' });
+declareCallable(AppAuthProvider, { myExtraMethod: 'user' });
 ```
 
 An app that used to declare auth's methods itself can drop those declarations. Declaring the same

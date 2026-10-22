@@ -143,25 +143,33 @@ test('a fresh reset link also works for an account that had no password yet', as
 
 test('a reset targets the account Person instead of a stale derived WebID credential', async () => {
   const stalePersonId = 'https://legacy.test/webid/ada';
-  mock.method(Auth, 'webIdFor', () => stalePersonId);
-  const staleCredential = credentials.insert({
-    credentialOf: { id: stalePersonId },
-    email: EMAIL,
-    passwordHash: COST_4_HASH,
-  });
+  const defaultWebIdFor = Auth.webIdFor;
+  Auth.webIdFor = () => stalePersonId;
+  try {
+    const staleCredential = credentials.insert({
+      credentialOf: { id: stalePersonId },
+      email: EMAIL,
+      passwordHash: COST_4_HASH,
+    });
 
-  const token = await requestResetLink();
+    const token = await requestResetLink();
 
-  assert.equal(
-    credentials.rows.get(staleCredential.id).forgotPasswordToken,
-    undefined,
-    'the reset token was written to the stale credential'
-  );
-  assert.ok(storedCredential().forgotPasswordToken, 'no token was written to the account Person');
+    assert.equal(
+      credentials.rows.get(staleCredential.id).forgotPasswordToken,
+      undefined,
+      'the reset token was written to the stale credential'
+    );
+    assert.ok(
+      storedCredential().forgotPasswordToken,
+      'no token was written to the account Person'
+    );
 
-  const result = await provider.resetPassword('new-pass-1', 'new-pass-1', token);
-  assert.equal(result, SIGNED_IN);
-  assert.equal(await passwordIs('new-pass-1'), true);
+    const result = await provider.resetPassword('new-pass-1', 'new-pass-1', token);
+    assert.equal(result, SIGNED_IN);
+    assert.equal(await passwordIs('new-pass-1'), true);
+  } finally {
+    Auth.webIdFor = defaultWebIdFor;
+  }
 });
 
 test('a reset link works only once', async () => {
