@@ -1,0 +1,199 @@
+@prefix auth: <https://linked.cm/ont/auth/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix schema: <http://schema.org/> .
+
+auth:
+    a owl:Ontology ;
+    dcterms:description "Terms of sign-in: credentials, identity tokens, refresh tokens and used nonces."@en ;
+    dcterms:title "Linked auth"@en ;
+    owl:versionInfo "3.15.6" .
+
+auth:AuthCredential
+    a owl:Class ;
+    rdfs:comment "A person's sign-in credential: their email, password hash and the outstanding reset, verification and sign-in codes."@en ;
+    rdfs:label "auth credential"@en .
+
+auth:Authentication
+    a owl:Class ;
+    rdfs:comment "A sign-in of a user account; the shape is registered but no code reads or writes it."@en ;
+    rdfs:label "authentication"@en .
+
+auth:IdentityToken
+    a owl:Class ;
+    rdfs:comment "The link between an OAuth or phone identity (provider plus subject) and the user account it signs in."@en ;
+    rdfs:label "identity token"@en .
+
+auth:Password
+    a owl:Class ;
+    rdfs:comment "A legacy password record of a user account, no longer used since the move to AuthCredential."@en ;
+    rdfs:label "password"@en .
+
+auth:RefreshToken
+    a owl:Class ;
+    rdfs:comment "One issued refresh token, stored by its hash so it can be validated, rotated and revoked."@en ;
+    rdfs:label "refresh token"@en .
+
+auth:UsedOAuthNonce
+    a owl:Class ;
+    rdfs:comment "A sign-in nonce that has been used, kept until it expires so it cannot be replayed."@en ;
+    rdfs:label "used OAuth nonce"@en .
+
+auth:account
+    a owl:ObjectProperty ;
+    rdfs:comment "The user account an identity token, password or refresh token belongs to."@en ;
+    rdfs:label "account"@en .
+
+auth:createdAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When a refresh token was issued."@en ;
+    rdfs:label "created at"@en .
+
+auth:credentialOf
+    a owl:ObjectProperty ;
+    rdfs:comment "The person an auth credential belongs to."@en ;
+    rdfs:label "credential of"@en .
+
+auth:email
+    a owl:DatatypeProperty ;
+    rdfs:comment "The email address of an identity token or auth credential."@en ;
+    rdfs:label "email"@en .
+
+auth:emailVerificationConsumeMarker
+    a owl:DatatypeProperty ;
+    rdfs:comment "The marker an atomic email-verification-token consume writes."@en ;
+    rdfs:label "email verification consume marker"@en .
+
+auth:emailVerificationToken
+    a owl:DatatypeProperty ;
+    rdfs:comment "The SHA-256 hash of the outstanding email verification token, if there is one."@en ;
+    rdfs:label "email verification token"@en .
+
+auth:emailVerificationTokenExpiresAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When the outstanding email verification token stops working."@en ;
+    rdfs:label "email verification token expires at"@en .
+
+auth:emailVerifiedAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When the person proved control of the credential's email by opening a link sent to it."@en ;
+    rdfs:label "email verified at"@en .
+
+auth:expiresAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When a refresh token or used nonce stops being valid."@en ;
+    rdfs:label "expires at"@en .
+
+auth:forgotPasswordToken
+    a owl:DatatypeProperty ;
+    rdfs:comment "The SHA-256 hash of the outstanding password reset token, if there is one."@en ;
+    rdfs:label "password reset token"@en .
+
+auth:forgotPasswordTokenExpiresAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When the outstanding password reset token stops working."@en ;
+    rdfs:label "password reset token expires at"@en .
+
+auth:hash
+    a owl:DatatypeProperty ;
+    rdfs:comment "The hash stored in a legacy password record."@en ;
+    rdfs:label "hash"@en .
+
+auth:identityProvider
+    a owl:DatatypeProperty ;
+    rdfs:comment "The OAuth provider (google, apple, facebook) an identity token's subject belongs to."@en ;
+    rdfs:label "identity provider"@en .
+
+auth:lastUsedAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When a refresh token was last presented."@en ;
+    rdfs:label "last used at"@en .
+
+auth:nonceHash
+    a owl:DatatypeProperty ;
+    rdfs:comment "The SHA-256 hash (hex) of a used raw nonce."@en ;
+    rdfs:label "nonce hash"@en .
+
+auth:passwordHash
+    a owl:DatatypeProperty ;
+    rdfs:comment "The hash of the credential's password, absent for an OAuth-only account."@en ;
+    rdfs:label "password hash"@en .
+
+auth:passwordResetConsumeMarker
+    a owl:DatatypeProperty ;
+    rdfs:comment "A random marker an atomic reset-token consume writes, so only the request whose update matched finds it."@en ;
+    rdfs:label "password reset consume marker"@en .
+
+auth:phoneIdentifier
+    a owl:DatatypeProperty ;
+    rdfs:comment "The phone number an identity token was issued for."@en ;
+    rdfs:label "phone identifier"@en .
+
+auth:replacedBy
+    a owl:DatatypeProperty ;
+    rdfs:comment "The token hash of the refresh token that replaced this one when it was rotated."@en ;
+    rdfs:label "replaced by"@en .
+
+auth:revokedAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When a refresh token was rotated, signed out or otherwise revoked."@en ;
+    rdfs:label "revoked at"@en .
+
+auth:sessionId
+    a owl:DatatypeProperty ;
+    rdfs:comment "The sign-in session (token family) a refresh token belongs to, shared by every rotation."@en ;
+    rdfs:label "session id"@en .
+
+auth:sessionStartedAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When the sign-in that started a refresh token's family began, copied to every rotation."@en ;
+    rdfs:label "session started at"@en .
+
+auth:signinCode
+    a owl:DatatypeProperty ;
+    rdfs:comment "The keyed hash of the outstanding emailed sign-in code, bound to the email it was sent to."@en ;
+    rdfs:label "sign-in code"@en .
+
+auth:signinCodeConsumeMarker
+    a owl:DatatypeProperty ;
+    rdfs:comment "The marker an atomic sign-in-code consume writes."@en ;
+    rdfs:label "sign-in code consume marker"@en .
+
+auth:signinCodeEmailHash
+    a owl:DatatypeProperty ;
+    rdfs:comment "On a pending credential of nobody yet, the hash of the email it holds sign-in codes for."@en ;
+    rdfs:label "sign-in code email hash"@en .
+
+auth:signinCodeExpiresAt
+    a owl:DatatypeProperty ;
+    rdfs:comment "When the outstanding sign-in code stops working."@en ;
+    rdfs:label "sign-in code expires at"@en .
+
+auth:subject
+    a owl:DatatypeProperty ;
+    rdfs:comment "The OIDC sub claim that identifies the user at their identity provider."@en ;
+    rdfs:label "subject"@en .
+
+auth:telephone
+    a owl:DatatypeProperty ;
+    rdfs:comment "The credential holder's telephone number."@en ;
+    rdfs:label "telephone"@en .
+
+auth:token
+    a owl:DatatypeProperty ;
+    rdfs:comment "The raw identity token, no longer written because a stored token is a credential."@en ;
+    rdfs:label "token"@en .
+
+auth:tokenHash
+    a owl:DatatypeProperty ;
+    rdfs:comment "The SHA-256 hash (base64url) of a raw refresh token."@en ;
+    rdfs:label "token hash"@en .
+
+auth:userAccount
+    a owl:ObjectProperty ;
+    rdfs:comment "The user account an authentication is for."@en ;
+    rdfs:label "user account"@en .

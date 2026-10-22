@@ -11,7 +11,7 @@
  * From a sibling module the same import is ordinary and survives.
  */
 import * as terms from './auth.js';
-import {ns} from './auth.js';
+import {dataFiles, loadData, ns} from './auth.js';
 import {linkedOntology} from '../package.js';
 
-linkedOntology(terms, ns, 'auth');
+linkedOntology(terms, ns, 'auth', loadData, dataFiles);
