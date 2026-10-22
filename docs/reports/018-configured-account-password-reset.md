@@ -85,3 +85,5 @@ recovery were removed, explanatory comments were added at the configuration boun
 scope-related dead code remains. The branch is ready for a patch pull request.
 
 No scope-specific plan or consumed backlog document existed, so none was removed during wrapup.
+
+Pull request: [linked-fw/auth#157](https://github.com/linked-fw/auth/pull/157)
