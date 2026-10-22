@@ -1,5 +1,13 @@
 # @\_linked/auth
 
+## 3.15.7
+
+### Patch Changes
+
+- [#155](https://github.com/linked-fw/auth/pull/155) [`0c14f49`](https://github.com/linked-fw/auth/commit/0c14f49a9f0a813dc1f95dcc29ba032327cdbf2c) Thanks [@abdipramana](https://github.com/abdipramana)! - Wait for native access and refresh tokens to be removed before completing sign-out.
+
+- [#155](https://github.com/linked-fw/auth/pull/155) [`ca00172`](https://github.com/linked-fw/auth/commit/ca001721f94e088ba57ff1869ef7358232ffc277) Thanks [@abdipramana](https://github.com/abdipramana)! - Keep signed-in auth RPCs protected when used with supported server releases.
+
 ## 3.15.6
 
 ### Patch Changes
