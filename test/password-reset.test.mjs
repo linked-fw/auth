@@ -33,7 +33,6 @@ const { emailToWebID } = await import(new URL('utils/webID.js', libDir));
 const sessions = await import(new URL('utils/sessions.js', libDir));
 const { default: PasswordHelper } = await import(new URL('helpers/password.js', libDir));
 const { default: AuthBackendProvider } = await import(new URL('backend.js', libDir));
-const { UserAccount } = await import('@_linked/sioc/shapes/UserAccount');
 const { default: bcrypt } = await import('bcrypt');
 const { LinkedEmail } = await import('@_linked/server-utils/utils/LinkedEmail');
 const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
@@ -48,6 +47,11 @@ const fakeLincdServer = { callGenericBackendProvidersMethod: async () => {} };
 
 /** The provider with the account lookups and the person shape replaced by fixtures. */
 class TestProvider extends AuthBackendProvider {
+  accountShape = {
+    select: () => ({
+      where: () => ({ one: () => Promise.resolve({ ...ACCOUNT, accountOf: { id: PERSON_ID } }) }),
+    }),
+  };
   userShape = {
     select: () => ({ for: () => ({ one: async () => ({ id: PERSON_ID, givenName: 'Ada' }) }) }),
   };
@@ -70,11 +74,6 @@ beforeEach(() => {
   mock.method(LinkedEmail, 'send', async (options) => {
     sentEmails.push(options);
   });
-  // the email lookup of resetPassword, and the account lookup of a link for an account without
-  // a password yet
-  mock.method(UserAccount, 'select', () => ({
-    where: () => ({ one: () => Promise.resolve({ ...ACCOUNT, accountOf: { id: PERSON_ID } }) }),
-  }));
   mock.method(Auth, 'onSigninSuccessful', async () => SIGNED_IN);
   sessions.setRefreshSessionStore(new sessions.MemoryRefreshSessionStore());
   mock.method(console, 'log', () => {});
@@ -139,6 +138,34 @@ test('a fresh reset link also works for an account that had no password yet', as
   const result = await provider.resetPassword('new-pass-1', 'new-pass-1', token);
   assert.equal(result, SIGNED_IN);
   assert.equal(await passwordIs('new-pass-1'), true);
+});
+
+test('password recovery uses the configured account shape and trims the email', async () => {
+  let comparedEmail;
+  const configuredAccountShape = {
+    select: () => ({
+      where: (predicate) => {
+        predicate({
+          email: {
+            equals: (value) => {
+              comparedEmail = value;
+              return true;
+            },
+          },
+        });
+        return {
+          one: async () => ({ ...ACCOUNT, accountOf: { id: PERSON_ID } }),
+        };
+      },
+    }),
+  };
+  provider.accountShape = configuredAccountShape;
+
+  const result = await provider.sendResetPasswordLink(`  ${EMAIL.toUpperCase()}  `);
+
+  assert.equal(result, true);
+  assert.equal(comparedEmail, EMAIL);
+  assert.equal(sentEmails.length, 1);
 });
 
 test('a reset targets the account Person instead of a stale derived WebID credential', async () => {
@@ -432,7 +459,9 @@ test('two concurrent resets with the same link: exactly one succeeds', async () 
 // --- the answer never tells whether an account exists ---
 
 test('an unknown email gets the same answer, and no email is sent', async () => {
-  mock.method(UserAccount, 'select', () => ({ where: () => ({ one: async () => null }) }));
+  provider.accountShape = {
+    select: () => ({ where: () => ({ one: async () => null }) }),
+  };
   assert.equal(await provider.sendResetPasswordLink('nobody@example.test'), true);
   assert.equal(sentEmails.length, 0, 'an email was sent');
   assert.equal(credentials.rows.size, 0, 'a credential was created');

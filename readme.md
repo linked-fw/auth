@@ -152,6 +152,10 @@ import { PaidAccountTier1 } from 'lincd-dating/lib/shapes/PaidAccountTier1';
 
 2. Set the environment variables `AUTH_ACCOUNT_TYPE` and `AUTH_USER_TYPE` to match the types imported in the `ProvideAuth` component.
 
+The backend uses these configured shapes for password recovery as well as sign-in. A custom
+account type must expose `email` and `accountOf`; reset requests and reset-token redemption resolve
+the account through that type instead of assuming the base SIOC `UserAccount` target class.
+
 ```json
 "AUTH_ACCOUNT_TYPE": "lincd-dating/lib/shapes/FreeAccount",
 "AUTH_USER_TYPE": "lincd-dating/lib/shapes/Person",
