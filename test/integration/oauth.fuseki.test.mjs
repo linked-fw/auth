@@ -105,6 +105,26 @@ test('a Google sign-in does not reach a password account registered for that ema
   assert.equal(result.action, 'sign_in_to_link');
 });
 
+test('AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS=true: Google and the password both reach the password account', async () => {
+  process.env.AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS = 'true';
+  try {
+    const email = newEmail();
+    const created = await provider().createAccount({ firstName: 'Ada', email, password: 'ada-Passw0rd!' });
+    assert.equal(created.error, undefined, created.error);
+
+    googleSays(email, newSub());
+    const google = await provider().signinOAuth('google', GOOGLE);
+    assert.equal(google.error, undefined, google.error);
+    assert.equal(google.auth.userAccount.id, created.auth.userAccount.id);
+
+    const password = await provider().signinWithPassword(email, 'ada-Passw0rd!');
+    assert.equal(password.error, undefined, password.error);
+    assert.equal(password.auth.userAccount.id, created.auth.userAccount.id);
+  } finally {
+    delete process.env.AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS;
+  }
+});
+
 test('the owner of the password account can link Google from inside the session', async () => {
   const email = newEmail();
   const sub = newSub();
