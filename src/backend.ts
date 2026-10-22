@@ -1682,13 +1682,11 @@ export default class AuthBackendProvider extends BackendProvider {
     //find or create the account of the user
     const account = await this.getOrCreateAccount(user);
 
-    // Phase 1.1: WebID is one-way (UUID v5 of email). Recover email by
-    // looking up UserAccount.email keyed on the WebID rather than reversing.
-    const emailLookup = await UserAccount.select((ua) => [ua.email])
-      .where((ua) => ua.accountOf.equals({ id: user.id } as any))
-      .one()
-      .catch(() => null);
-    const email = (emailLookup as any)?.email ?? null;
+    // WebIDs are one-way identifiers. getOrCreateAccount loads the configured
+    // account shape's stored email, including applications whose account type
+    // is not the base SIOC UserAccount.
+    const email = (account as (UserAccountData & { email?: string }) | null)
+      ?.email ?? null;
 
     if (!email) {
       console.warn(
@@ -1775,7 +1773,7 @@ export default class AuthBackendProvider extends BackendProvider {
     const newToken = PasswordHelper.generateToken();
     // Only the hash is stored, with an expiry. Writing it replaces any earlier link's token.
     const resetTokenFields = PasswordHelper.resetPasswordTokenFields(newToken);
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
     try {
       Auth.webIdFor(normalizedEmail);
     } catch (error) {
@@ -1788,7 +1786,9 @@ export default class AuthBackendProvider extends BackendProvider {
     // Resolve the account by email first. Legacy OAuth accounts may have a credential attached
     // to Auth.webIdFor(email) while their UserAccount points at a different, canonical Person.
     // A reset must always target the Person that owns the account.
-    const account = await UserAccount.select((ua) => {
+    // Applications may configure a UserAccount subclass with its own RDF target class.
+    // Querying the base SIOC shape would make valid accounts invisible to password recovery.
+    const account = await this.accountShape.select((ua) => {
       return [
         ua.email,
         ua.accountOf.select((p) => {
