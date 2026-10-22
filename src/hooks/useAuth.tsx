@@ -46,7 +46,11 @@ import type {
   VerifyEmailResult,
 } from '../types/auth.js';
 import { QResult } from '@_linked/core/queries/SelectQuery';
-import type { UserData, UserAccountData, LinkOAuthIdentityResult } from '../types/auth.js';
+import type {
+  UserData,
+  UserAccountData,
+  LinkOAuthIdentityResult,
+} from '../types/auth.js';
 import { useNavigate } from 'react-router-dom';
 
 export const ENFORCE_SIGNED_IN = 'ENFORCE_SIGNIN';
@@ -72,11 +76,17 @@ export function keepIfUnchanged<T>(previous: T, next: T): T {
  * error. This holds while both copies use one React. See
  * https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md.
  */
-const { AuthContext, AuthLoadingContext } = sharedState('@_linked/auth', 'contexts', () => ({
-  AuthContext: createContext(null),
-  // Separate from AuthContext so the auth value is not rebuilt for it
-  AuthLoadingContext: createContext<(() => React.ReactElement) | undefined>(undefined),
-}));
+const { AuthContext, AuthLoadingContext } = sharedState(
+  '@_linked/auth',
+  'contexts',
+  () => ({
+    AuthContext: createContext(null),
+    // Separate from AuthContext so the auth value is not rebuilt for it
+    AuthLoadingContext: createContext<(() => React.ReactElement) | undefined>(
+      undefined
+    ),
+  })
+);
 
 /** The loading element `ProvideAuth` was given, for `RequireAuth` to show while validating. */
 export const useAuthRenderLoading = () => useContext(AuthLoadingContext);
@@ -110,7 +120,9 @@ export function ProvideAuth({
   const auth = useProvideAuth(signinRoute);
   return (
     <AuthContext.Provider value={auth}>
-      <AuthLoadingContext.Provider value={renderLoading}>{children}</AuthLoadingContext.Provider>
+      <AuthLoadingContext.Provider value={renderLoading}>
+        {children}
+      </AuthLoadingContext.Provider>
     </AuthContext.Provider>
   );
 }
@@ -119,7 +131,7 @@ export function ProvideAuth({
 // ... and re-render when it changes.
 export const useAuth = <
   UserType extends UserData = UserData,
-  AccountType extends UserAccountData = UserAccountData
+  AccountType extends UserAccountData = UserAccountData,
 >(): {
   user: UserType;
   userAccount: AccountType;
@@ -151,7 +163,10 @@ export const useAuth = <
    * Sign in with an emailed code. Resolves to the signed-in auth response, or to
    * `{error, action?, retryAfter?}` (`action: 'invalid_code'` for a wrong, expired or used code).
    */
-  signinWithCode: (email: string, code: string) => Promise<AuthenticationResponse | SigninCodeError>;
+  signinWithCode: (
+    email: string,
+    code: string
+  ) => Promise<AuthenticationResponse | SigninCodeError>;
   /**
    * Native apps: sign in through the user's Solid-OIDC issuer in the system browser (see
    * `utils/nativeOidcSignin`). Resolves to the signed-in answer (with `outcome`) when the browser
@@ -176,14 +191,19 @@ export const useAuth = <
   signinOAuth: (
     provider: OAuthProvider,
     whatelse?: any
-  ) => Promise<AuthenticationResponse | { error: string; action?: string } | any>;
+  ) => Promise<
+    AuthenticationResponse | { error: string; action?: string } | any
+  >;
   /**
    * A one-time nonce for a provider sign-in: hand it (or its SHA-256, hex) to the provider and
    * send it back as `nonce` with the identity token.
    */
   createOAuthNonce: () => Promise<{ nonce: string; expiresAt: string }>;
   /** Connect a provider identity to the signed-in account. */
-  linkOAuthIdentity: (provider: OAuthProvider, whatelse?: any) => Promise<LinkOAuthIdentityResult>;
+  linkOAuthIdentity: (
+    provider: OAuthProvider,
+    whatelse?: any
+  ) => Promise<LinkOAuthIdentityResult>;
   createAccount: (data) => Promise<any>;
   signinTemporary: () => Promise<any>;
   signout: () => Promise<any>;
@@ -196,7 +216,9 @@ export const useAuth = <
    */
   removeAccount: (proof?: RemoveAccountProof) => Promise<RemoveAccountResult>;
   /** What `removeAccount` will ask this account to confirm with; `[]`: the session is enough. */
-  getReauthenticationMethods: () => Promise<{ methods: ReauthenticationMethod[] }>;
+  getReauthenticationMethods: () => Promise<{
+    methods: ReauthenticationMethod[];
+  }>;
   /**
    * Whether the signed-in person has proved control of their email. From the session, so it
    * can lag behind until the next refresh; re-check on the server before a sensitive action.
@@ -284,7 +306,12 @@ function useProvideAuth(signinRoute: string = '') {
     const exp = (defaultAuth as any)?.exp;
     const iat = (defaultAuth as any)?.iat;
     if (typeof exp === 'number' && getAccessTokenExpiresAt() === undefined) {
-      scheduleRefreshAt(exp * 1000, Date.now(), undefined, typeof iat === 'number' ? iat * 1000 : undefined);
+      scheduleRefreshAt(
+        exp * 1000,
+        Date.now(),
+        undefined,
+        typeof iat === 'number' ? iat * 1000 : undefined
+      );
     }
 
     const init = async () => {
@@ -343,7 +370,9 @@ function useProvideAuth(signinRoute: string = '') {
       refreshToken,
       refreshTokenExpiresIn,
       refreshTokenExpiresAt,
-    }).catch((err) => console.warn('@_linked/auth: could not store tokens', err));
+    }).catch((err) =>
+      console.warn('@_linked/auth: could not store tokens', err)
+    );
 
     if (accessToken) {
       // sent as the Authorization header; schedules the next refresh before its exp
@@ -407,11 +436,15 @@ function useProvideAuth(signinRoute: string = '') {
     );
   };
 
-  const sendSigninCode = async (email: string): Promise<true | SigninCodeError> => {
+  const sendSigninCode = async (
+    email: string
+  ): Promise<true | SigninCodeError> => {
     const response = await Server.call(packageName, 'sendSigninCode', email);
     if (response === true) return true;
     return {
-      error: response?.error || "Sorry, we couldn't send the code, please try again later",
+      error:
+        response?.error ||
+        "Sorry, we couldn't send the code, please try again later",
       ...(response?.action ? { action: response.action } : {}),
       ...(response?.retryAfter ? { retryAfter: response.retryAfter } : {}),
     };
@@ -421,7 +454,12 @@ function useProvideAuth(signinRoute: string = '') {
     email: string,
     code: string
   ): Promise<AuthenticationResponse | SigninCodeError> => {
-    const response = await Server.call(packageName, 'signinWithCode', email, code);
+    const response = await Server.call(
+      packageName,
+      'signinWithCode',
+      email,
+      code
+    );
     if (response && response.auth) {
       return updateAuth({
         auth: response.auth,
@@ -439,7 +477,11 @@ function useProvideAuth(signinRoute: string = '') {
   };
 
   /** Apply a native Solid-OIDC answer: on success, the session becomes this hook's state. */
-  const applyNativeOidc = <T extends NativeOidcSigninAnswer | NativeOidcSigninWaiting>(answer: T): T => {
+  const applyNativeOidc = <
+    T extends NativeOidcSigninAnswer | NativeOidcSigninWaiting,
+  >(
+    answer: T
+  ): T => {
     if ('auth' in answer && answer.auth) {
       updateAuth({
         auth: answer.auth,
@@ -477,18 +519,20 @@ function useProvideAuth(signinRoute: string = '') {
     refreshToken: string;
     email?: string;
   }) => {
-    return Server.call(packageName, 'signinDev', input).then((response: any) => {
-      if (response && response.auth) {
-        return updateAuth({
-          auth: response.auth,
-          accessToken: response.accessToken,
-          refreshToken: response.refreshToken,
-          refreshTokenExpiresIn: response.refreshTokenExpiresIn,
-          refreshTokenExpiresAt: response.refreshTokenExpiresAt,
-        });
+    return Server.call(packageName, 'signinDev', input).then(
+      (response: any) => {
+        if (response && response.auth) {
+          return updateAuth({
+            auth: response.auth,
+            accessToken: response.accessToken,
+            refreshToken: response.refreshToken,
+            refreshTokenExpiresIn: response.refreshTokenExpiresIn,
+            refreshTokenExpiresAt: response.refreshTokenExpiresAt,
+          });
+        }
+        throw new Error(response?.error || "Couldn't sign in (dev)");
       }
-      throw new Error(response?.error || "Couldn't sign in (dev)");
-    });
+    );
   };
 
   const signinOAuth = (provider: string, source?: any) => {
@@ -516,11 +560,16 @@ function useProvideAuth(signinRoute: string = '') {
           ? { error: String(response.error), action: String(response.action) }
           : { error: String(response.error) };
       }
-      return { error: "Couldn't sign in. Please try again or contact support." };
+      return {
+        error: "Couldn't sign in. Please try again or contact support.",
+      };
     });
   };
 
-  const createOAuthNonce = (): Promise<{ nonce: string; expiresAt: string }> => {
+  const createOAuthNonce = (): Promise<{
+    nonce: string;
+    expiresAt: string;
+  }> => {
     return Server.call(packageName, 'createOAuthNonce');
   };
 
@@ -532,7 +581,11 @@ function useProvideAuth(signinRoute: string = '') {
       (response) =>
         response?.linked
           ? { linked: true as const }
-          : { error: String(response?.error || "Couldn't connect this sign-in method.") }
+          : {
+              error: String(
+                response?.error || "Couldn't connect this sign-in method."
+              ),
+            }
     );
   };
 
@@ -566,8 +619,12 @@ function useProvideAuth(signinRoute: string = '') {
       : undefined;
 
     resetAuthClient();
-    removeAuthToken(ACCESS_TOKEN);
-    removeAuthToken(REFRESH_TOKEN);
+    // Capacitor Preferences is asynchronous. Do not reload until both values
+    // are gone, otherwise iOS can restore the refresh token on the next mount.
+    await Promise.all([
+      removeAuthToken(ACCESS_TOKEN),
+      removeAuthToken(REFRESH_TOKEN),
+    ]);
 
     const result = await Server.call(packageName, 'signout', refreshToken);
     if (result) {
@@ -674,16 +731,22 @@ function useProvideAuth(signinRoute: string = '') {
     return getAuthToken(ACCESS_TOKEN);
   };
 
-  const removeAccount = (proof?: RemoveAccountProof): Promise<RemoveAccountResult> => {
+  const removeAccount = (
+    proof?: RemoveAccountProof
+  ): Promise<RemoveAccountResult> => {
     return proof === undefined
       ? Server.call(packageName, 'removeAccount')
       : Server.call(packageName, 'removeAccount', proof);
   };
 
-  const getReauthenticationMethods = (): Promise<{ methods: ReauthenticationMethod[] }> => {
-    return Server.call(packageName, 'getReauthenticationMethods').then((response) => ({
-      methods: Array.isArray(response?.methods) ? response.methods : [],
-    }));
+  const getReauthenticationMethods = (): Promise<{
+    methods: ReauthenticationMethod[];
+  }> => {
+    return Server.call(packageName, 'getReauthenticationMethods').then(
+      (response) => ({
+        methods: Array.isArray(response?.methods) ? response.methods : [],
+      })
+    );
   };
 
   /**
@@ -692,9 +755,16 @@ function useProvideAuth(signinRoute: string = '') {
    * `emailVerified` turns true without waiting for the next scheduled refresh.
    */
   const verifyEmail = async (token: string): Promise<VerifyEmailResult> => {
-    const response: VerifyEmailResult | null = await Server.call(packageName, 'verifyEmail', token);
+    const response: VerifyEmailResult | null = await Server.call(
+      packageName,
+      'verifyEmail',
+      token
+    );
     if (!response) {
-      return { error: "Couldn't verify your email. Please try again or contact support." };
+      return {
+        error:
+          "Couldn't verify your email. Please try again or contact support.",
+      };
     }
     if ('verified' in response && response.verified === true && userAccount) {
       await refreshAccessToken();
@@ -707,19 +777,22 @@ function useProvideAuth(signinRoute: string = '') {
    * verified elsewhere, e.g. in another tab), the session is refreshed the same way as in
    * `verifyEmail`, so `emailVerified` turns true here too.
    */
-  const resendEmailVerification = async (): Promise<ResendEmailVerificationResult> => {
-    const response: ResendEmailVerificationResult | null = await Server.call(
-      packageName,
-      'resendEmailVerification'
-    );
-    if (!response) {
-      return { error: "Sorry, we couldn't send the email, please try again later" };
-    }
-    if ('verified' in response && response.verified === true && userAccount) {
-      await refreshAccessToken();
-    }
-    return response;
-  };
+  const resendEmailVerification =
+    async (): Promise<ResendEmailVerificationResult> => {
+      const response: ResendEmailVerificationResult | null = await Server.call(
+        packageName,
+        'resendEmailVerification'
+      );
+      if (!response) {
+        return {
+          error: "Sorry, we couldn't send the email, please try again later",
+        };
+      }
+      if ('verified' in response && response.verified === true && userAccount) {
+        await refreshAccessToken();
+      }
+      return response;
+    };
 
   // Return the user object and auth methods
   return {

@@ -74,6 +74,7 @@ const { LincdServerProxy } = await import('@_linked/server-utils/utils/LincdServ
 const libDir = new URL('../lib/esm/', import.meta.url);
 const { ProvideAuth, useAuth } = await import(new URL('hooks/useAuth.js', libDir));
 const client = await import(new URL('utils/authClient.js', libDir));
+const tokens = await import(new URL('utils/token.js', libDir));
 
 let current;
 function Probe() {
@@ -98,6 +99,7 @@ after(async () => {
   await act(async () => root.unmount());
   server.close();
   client.resetAuthClient();
+  tokens.setAuthTokenStorageMethods(undefined, undefined, undefined);
 });
 
 async function signIn() {
@@ -200,4 +202,37 @@ test('removeAccount(proof) sends the proof as its argument', async () => {
   const [call] = callsTo('removeAccount');
   assert.ok(call, 'removeAccount was called');
   assert.ok(call.body.includes('secret-pw'), `the proof is in the request: ${call.body}`);
+});
+
+test('native sign-out waits for both stored tokens to be removed', async () => {
+  await signIn();
+  calls.length = 0;
+  const removals = [];
+  let releaseRemovals;
+  const removed = new Promise((resolve) => {
+    releaseRemovals = resolve;
+  });
+  tokens.setAuthTokenStorageMethods(
+    async () => undefined,
+    async () => {},
+    async (key) => {
+      removals.push(key);
+      await removed;
+    }
+  );
+
+  let signout;
+  await act(async () => {
+    signout = current.signout();
+    await Promise.resolve();
+  });
+  assert.equal(callsTo('signout').length, 0, 'server sign-out waits for storage');
+  assert.deepEqual(removals.sort(), ['accessToken', 'refreshToken']);
+
+  releaseRemovals();
+  await act(async () => {
+    await signout;
+  });
+  assert.equal(callsTo('signout').length, 1);
+  tokens.setAuthTokenStorageMethods(undefined, undefined, undefined);
 });
