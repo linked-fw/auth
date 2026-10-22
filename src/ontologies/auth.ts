@@ -1,16 +1,6 @@
 import { createNameSpace } from '@_linked/core/utils/NameSpace';
 
 /**
- * Load the data of this ontology into memory, thus adding the properties of the entities of this ontology to the local graph.
- */
-export var loadData = () => {
-  //@ts-ignore
-  return import('../data/auth.json', { with: { type: 'json' } }).then(
-    (data) => data.default
-  );
-};
-
-/**
  * The namespace of this ontology, which can be used to create NamedNodes with URI's not listed in this file.
  *
  * First-party ontologies live on linked.cm: `https://linked.cm/ont/{ontologySlug}/`, and a
