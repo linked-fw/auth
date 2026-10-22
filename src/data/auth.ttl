@@ -11,7 +11,7 @@ auth:
     a owl:Ontology ;
     dcterms:description "Terms of sign-in: credentials, identity tokens, refresh tokens and used nonces."@en ;
     dcterms:title "Linked auth"@en ;
-    owl:versionInfo "3.15.6" .
+    owl:versionInfo "3.16.0" .
 
 auth:AuthCredential
     a owl:Class ;
