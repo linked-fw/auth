@@ -1,0 +1,26 @@
+# The integration tests' store: the inferring Fuseki image (every dataset created with
+# dbType=tdb2 is `lf:DatasetRDFSLive` over TDB2). Before the image is published, run it locally
+# with LINKED_FUSEKI_IMAGE=linked-fuseki:dev (built from linked-fw/fuseki's server/Dockerfile).
+#
+#   docker compose -p linked-auth-test -f test/integration/docker-compose.yml up -d --wait
+#   AUTH_TEST_FUSEKI_URL=http://localhost:3940 AUTH_TEST_FUSEKI_USER=admin \
+#   AUTH_TEST_FUSEKI_PASSWORD=admin npm run test:integration
+#   docker compose -p linked-auth-test -f test/integration/docker-compose.yml down
+services:
+  fuseki:
+    image: ${LINKED_FUSEKI_IMAGE:-ghcr.io/linked-fw/fuseki:6.2.0-1}
+    environment:
+      - ADMIN_PASSWORD=admin
+      - ENABLE_UPDATE=true
+      - ENABLE_DATA_WRITE=true
+    ports:
+      - '${AUTH_TEST_FUSEKI_PORT:-3940}:3030'
+    # Throwaway datasets: TDB2 commits on a container filesystem are slow (an fsync per commit),
+    # and the datasets go with the container anyway.
+    tmpfs:
+      - /fuseki-base/databases:uid=9008,gid=0,mode=0775
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3030/ >/dev/null 2>&1 || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 10

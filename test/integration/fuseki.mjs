@@ -1,8 +1,11 @@
 // A throwaway Fuseki dataset for one integration test file: created before the file's tests and
 // dropped after them. No other dataset is read or written.
 //
-//   AUTH_TEST_FUSEKI_URL=http://localhost:3030 AUTH_TEST_FUSEKI_USER=admin \
-//   AUTH_TEST_FUSEKI_PASSWORD=... npm run test:integration
+//   AUTH_TEST_FUSEKI_URL=http://localhost:3940 AUTH_TEST_FUSEKI_USER=admin \
+//   AUTH_TEST_FUSEKI_PASSWORD=admin npm run test:integration
+//
+// against the inferring Fuseki image started from docker-compose.yml here (its datasets are
+// TDB2, created through the admin form).
 import { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -28,9 +31,9 @@ export function useThrowawayDataset() {
     const res = await fetch(`${FUSEKI}/$/datasets`, {
       method: 'POST',
       headers: { authorization: authHeader, 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ dbName: DATASET, dbType: 'mem' }),
+      body: new URLSearchParams({ dbName: DATASET, dbType: 'tdb2' }),
     });
-    assert.equal(res.status, 200, `could not create test dataset: ${await res.text()}`);
+    assert.ok(res.ok, `could not create test dataset: ${res.status} ${await res.text()}`);
     LinkedStorage.setDefaultDataset(
       new FusekiStore({
         endpoint: `${FUSEKI}/${DATASET}`,
@@ -43,7 +46,7 @@ export function useThrowawayDataset() {
       method: 'DELETE',
       headers: { authorization: authHeader },
     });
-    assert.equal(res.status, 200, `could not drop test dataset ${DATASET}`);
+    assert.ok(res.ok, `could not drop test dataset ${DATASET}: ${res.status}`);
   });
 }
 
