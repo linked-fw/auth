@@ -1,7 +1,9 @@
 // The RPC surface of auth's providers: which methods the server may dispatch over HTTP
 // (`/call/@_linked/auth/<method>` and `/call/@_linked/auth/<shape>/<method>`).
 //
-// - callable: declared with a level. 'public' runs without a session; 'user' answers 401 first.
+// - callable: declared with a level. 'public' runs without a session. 'user' is the
+//   session-requiring name older servers understand; servers since 3.5.0 report that
+//   alias as 'signed-in' and answer 401 before the method runs.
 // - internal: answers 501 in every exposure mode; backend code can still call it.
 // - anything else a provider defines is undeclared, which a server in `rpcExposure: 'enforce'`
 //   answers with 501. auth declares every method, so an app needs no declarations of its own.
@@ -36,7 +38,9 @@ const { default: AuthBackendProvider } = await import(new URL('backend.js', libD
 const { AuthCredentialProvider } = await import(
   new URL('shapes/AuthCredentialProvider.js', libDir)
 );
-const { isDeclaredInternal } = await import('@_linked/server-utils/utils/callable');
+const { getOwnCallableLevel, isDeclaredInternal } = await import(
+  '@_linked/server-utils/utils/callable'
+);
 const { BackendProvider } = await import('@_linked/server-utils/utils/BackendProvider');
 const { ShapeProvider } = await import('@_linked/server-utils/utils/ShapeProvider');
 const { resolveCallable, setRpcExposureMode, getReservedNames } = await import(
@@ -161,6 +165,11 @@ function rpcCallsInSource() {
 // exposure gates). Each must be internal and have no caller outside the backend.
 const BACKEND_ONLY_WRAPPERS = { 'shapes/AuthCredential.ts': ['createNewCredential'] };
 
+/** What `resolveCallable` reports. Server 3.5+ reads the `'user'` alias as `'signed-in'`. */
+function reportedLevel(level) {
+  return level === 'user' ? 'signed-in' : level;
+}
+
 for (const [className, { callable, internal }] of Object.entries(SURFACE)) {
   const cls = CLASSES[className];
 
@@ -168,9 +177,10 @@ for (const [className, { callable, internal }] of Object.entries(SURFACE)) {
     test(`${className}.${method} is callable at '${level}' under enforce`, () => {
       assert.equal(typeof cls.prototype[method], 'function');
       const provider = providerOf(cls);
+      assert.equal(getOwnCallableLevel(cls, method), level);
       assert.deepEqual(
         { ...resolveCallable(provider, method), owner: undefined },
-        { status: 'callable', level, owner: undefined }
+        { status: 'callable', level: reportedLevel(level), owner: undefined }
       );
       assert.equal(dispatch(provider, method, SIGNED_IN), 'runs');
       assert.equal(dispatch(provider, method, NO_SESSION), level === 'public' ? 'runs' : 401);
