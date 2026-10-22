@@ -260,6 +260,21 @@ test('a verified email does NOT reach an existing account that has a password', 
   assert.equal(createLink.mock.callCount(), 0);
 });
 
+test('AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS=true: a verified email reaches the password account', async () => {
+  process.env.AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS = 'true';
+  try {
+    verifiedGoogle();
+    existingAccount = ADA_ACCOUNT;
+    personHasPassword = true;
+    const result = await provider.signinOAuth('google', GOOGLE);
+    assert.equal(result.error, undefined, result.error);
+    assert.equal(createLink.mock.callCount(), 1);
+    assert.equal(onSignin.mock.callCount() + login.mock.callCount() > 0, true);
+  } finally {
+    delete process.env.AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS;
+  }
+});
+
 test('a verified email does NOT reach a password person that has no account here yet', async () => {
   verifiedGoogle();
   existingPerson = { id: ADA_WEBID };
@@ -581,6 +596,16 @@ test('decideEmailMatchedAccount: each rule', () => {
   assert.equal(decide('google', false, none).action, 'sign_in_to_link');
   assert.equal(decide('facebook', true, none).action, 'sign_in_to_link');
   assert.equal(decide('google', true, { ...none, hasPassword: true }).action, 'sign_in_to_link');
+  // an app's opt-in lets a verified provider email reach an unverified password account
+  const decideMatching = (provider, emailVerified, existing) =>
+    decideEmailMatchedAccount({ provider, emailVerified, existing, matchPasswordAccounts: true });
+  assert.deepEqual(decideMatching('google', true, { ...none, hasPassword: true }), { link: true });
+  assert.equal(decideMatching('google', false, { ...none, hasPassword: true }).action, 'sign_in_to_link');
+  assert.equal(decideMatching('facebook', true, { ...none, hasPassword: true }).action, 'sign_in_to_link');
+  assert.equal(
+    decideMatching('google', true, { ...none, hasPassword: true, linkedProviders: ['google'] }).action,
+    'sign_in_to_link'
+  );
   assert.equal(decide('google', true, { ...none, linkedProviders: ['google'] }).action, 'sign_in_to_link');
   assert.equal(decide('google', true, { ...none, linkedProviders: ['facebook'] }).action, 'sign_in_to_link');
 });

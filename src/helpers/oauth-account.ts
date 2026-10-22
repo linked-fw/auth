@@ -41,11 +41,17 @@ export type EmailMatchedAccountFacts = {
  *   and no different identity at this same provider.
  *
  * Everything else fails closed with `action: 'sign_in_to_link'`.
+ *
+ * `matchPasswordAccounts` lets the provider's verified email reach an unverified account that has
+ * a password, as sign-in by email did before the pre-account hijacking rule. It is an app's
+ * opt-in (see {@link matchPasswordAccountsFromEnv}) for accounts created before emails were
+ * verified; it reopens that risk, so it is off by default.
  */
 export function decideEmailMatchedAccount(input: {
   provider: OAuthProvider;
   emailVerified: boolean;
   existing: EmailMatchedAccountFacts;
+  matchPasswordAccounts?: boolean;
 }): { link: true } | { error: string; action: string } {
   const refuse = (reason: string) => ({
     error:
@@ -60,7 +66,7 @@ export function decideEmailMatchedAccount(input: {
   if (input.existing.emailVerified) {
     return { link: true };
   }
-  if (input.existing.hasPassword) {
+  if (input.existing.hasPassword && !input.matchPasswordAccounts) {
     return refuse(' and has a password');
   }
   if (input.existing.linkedProviders.includes(input.provider)) {
@@ -74,6 +80,14 @@ export function decideEmailMatchedAccount(input: {
     return refuse('');
   }
   return { link: true };
+}
+
+/**
+ * `AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS=true` turns on `matchPasswordAccounts` for
+ * {@link decideEmailMatchedAccount}.
+ */
+export function matchPasswordAccountsFromEnv(env: Record<string, string | undefined> = process.env) {
+  return env.AUTH_OAUTH_MATCH_PASSWORD_ACCOUNTS === 'true';
 }
 
 /**

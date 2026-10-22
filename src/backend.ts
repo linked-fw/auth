@@ -96,7 +96,7 @@ import PasswordHelper, {
   isAcceptablePassword,
 } from './helpers/password.js';
 import { IdentityToken } from './shapes/IdentityToken.js';
-import { decideEmailMatchedAccount } from './helpers/oauth-account.js';
+import { decideEmailMatchedAccount, matchPasswordAccountsFromEnv } from './helpers/oauth-account.js';
 import { OAuthIdentityStore, normalizeLinkEmail } from './utils/oauthIdentities.js';
 import { checkAppleNonce, issueOAuthNonce } from './utils/oauthNonce.js';
 import type { OAuthIdentityLink } from './utils/oauthIdentities.js';
@@ -2331,6 +2331,7 @@ export default class AuthBackendProvider extends BackendProvider {
             ? await OAuthIdentityStore.findLinkedProviders(existing.account.id)
             : [],
         },
+        matchPasswordAccounts: matchPasswordAccountsFromEnv(),
       });
       if ('error' in decision) return decision;
 
