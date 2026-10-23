@@ -1,5 +1,15 @@
 # @\_linked/auth
 
+## 3.17.0
+
+### Minor Changes
+
+- [#162](https://github.com/linked-fw/auth/pull/162) [`3bde440`](https://github.com/linked-fw/auth/commit/3bde4404def1f2f5ce579f951d1f3c15239623b0) Thanks [@flyon](https://github.com/flyon)! - Requires `@_linked/core` ^2.38.0 and `@_linked/server-utils` ^1.16.0.
+  
+  Breaking changes (from core 2.38.0):
+  - Requires `ghcr.io/linked-fw/fuseki:6.2.0-2`, or a store that builds its class hierarchy from the registry. The integration tests now run on that image.
+  - `IDataset.graphQuery` is required. Auth has no dataset implementation of its own, so nothing else changes here.
+
 ## 3.16.0
 
 ### Minor Changes
