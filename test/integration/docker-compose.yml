@@ -8,7 +8,7 @@
 #   docker compose -p linked-auth-test -f test/integration/docker-compose.yml down
 services:
   fuseki:
-    image: ${LINKED_FUSEKI_IMAGE:-ghcr.io/linked-fw/fuseki:6.2.0-1}
+    image: ${LINKED_FUSEKI_IMAGE:-ghcr.io/linked-fw/fuseki:6.2.0-2}
     environment:
       - ADMIN_PASSWORD=admin
       - ENABLE_UPDATE=true
