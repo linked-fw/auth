@@ -915,6 +915,23 @@ function emailProvesWebId(
 }
 
 /**
+ * Fills a person's empty given and family name from the issuer's name claims. A name the person
+ * already has is never replaced: the issuer only supplies what is missing.
+ */
+async function fillEmptyNames(
+  provider: AuthBackendProvider,
+  webId: string,
+  person: { givenName?: string | null; familyName?: string | null },
+  identity: VerifiedOidcIdentity
+): Promise<void> {
+  const fields: { givenName?: string; familyName?: string } = {};
+  if (!person.givenName && identity.givenName) fields.givenName = identity.givenName;
+  if (!person.familyName && identity.familyName) fields.familyName = identity.familyName;
+  if (!fields.givenName && !fields.familyName) return;
+  await provider.userShape.update(fields).for({ id: webId });
+}
+
+/**
  * The last step of a Solid-OIDC sign-in: the person whose IRI is the verified WebID, its account,
  * and a session, as the other methods end. The issuer's tokens are not kept.
  *
@@ -933,8 +950,9 @@ async function signInVerifiedWebId(
   const email = identity.email ? normalizeSigninEmail(identity.email) : undefined;
   const emailProven = emailProvesWebId(identity, email, defaultIssuer);
 
-  const person = await provider.userShape.select((p) => [p.givenName]).for(webId);
+  const person = await provider.userShape.select((p) => [p.givenName, p.familyName]).for(webId);
   if (person) {
+    await fillEmptyNames(provider, webId, person, identity);
     if (emailProven) {
       await dropUnprovenAccess(provider, webId);
       await markEmailVerified(webId, email);
@@ -957,7 +975,12 @@ async function signInVerifiedWebId(
     async () => null,
     async () => {
       const user = await (provider.userShape as any)
-        .create({ __id: webId, givenName: '', familyName: '', telephone: '' })
+        .create({
+          __id: webId,
+          givenName: identity.givenName || '',
+          familyName: identity.familyName || '',
+          telephone: '',
+        })
         .catch((err) => {
           console.error(`Error creating user ${webId}:`, err);
           throw new Error(`Could not create user ${webId}`);

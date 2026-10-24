@@ -217,3 +217,40 @@ test('a dev sign-in, then an issuer sign-in of the same WebID: one account', asy
     }`);
   assert.deepEqual(emails.map((row) => row.email.value), [email]);
 });
+
+const SCHEMA = 'http://schema.org/';
+
+/** The person's given and family names, from any graph. */
+async function namesOf(webId) {
+  const rows = await sparql(`
+    SELECT ?given ?family WHERE {
+      { <${webId}> <${SCHEMA}givenName> ?given ; <${SCHEMA}familyName> ?family }
+      UNION { GRAPH ?g { <${webId}> <${SCHEMA}givenName> ?given ; <${SCHEMA}familyName> ?family } }
+    }`);
+  return rows.map((row) => [row.given.value, row.family.value]);
+}
+
+test('the issuer names a new person; a later sign-in fills empty names and keeps the others', async () => {
+  try {
+    const email = newEmail();
+    const webId = issuer.webIdFor(email);
+    issuer.claims = (c) => ({ ...c, given_name: 'Ada', family_name: 'Lovelace' });
+    await signIn(email);
+    assert.deepEqual(await namesOf(webId), [['Ada', 'Lovelace']]);
+
+    issuer.claims = (c) => ({ ...c, given_name: 'Augusta', family_name: 'King' });
+    await signIn(email);
+    assert.deepEqual(await namesOf(webId), [['Ada', 'Lovelace']], 'a name the person has is kept');
+
+    const unnamed = newEmail();
+    const unnamedId = issuer.webIdFor(unnamed);
+    issuer.claims = (c) => c;
+    await signIn(unnamed);
+    assert.deepEqual(await namesOf(unnamedId), [['', '']]);
+    issuer.claims = (c) => ({ ...c, given_name: 'Grace', family_name: 'Hopper' });
+    await signIn(unnamed);
+    assert.deepEqual(await namesOf(unnamedId), [['Grace', 'Hopper']], 'empty names are filled');
+  } finally {
+    issuer.claims = (c) => c;
+  }
+});
