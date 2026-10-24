@@ -95,6 +95,20 @@ test('a full sign-in: the code is exchanged with a DPoP proof and the identity i
   assert.equal(issuer.profileRequests, 0);
 });
 
+test('given_name and family_name are part of the identity when the issuer sends them', async () => {
+  issuer.claims = (c) => ({ ...c, given_name: ' Ada ', family_name: 'Lovelace' });
+  const { result } = await signIn();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.identity.givenName, 'Ada');
+  assert.equal(result.identity.familyName, 'Lovelace');
+
+  issuer.claims = (c) => ({ ...c, given_name: '', family_name: 42 });
+  const second = await signIn();
+  assert.equal(second.result.ok, true);
+  assert.equal('givenName' in second.result.identity, false);
+  assert.equal('familyName' in second.result.identity, false);
+});
+
 test('a wrong nonce is refused', async () => {
   issuer.claims = (c) => ({ ...c, nonce: 'another-nonce' });
   const { result } = await signIn();

@@ -101,6 +101,9 @@ export interface VerifiedOidcIdentity {
   authTime: number;
   email?: string;
   emailVerified?: boolean;
+  /** The ID token's `given_name` and `family_name`, when the issuer sends them. */
+  givenName?: string;
+  familyName?: string;
 }
 
 export type OidcSigninError =
@@ -182,6 +185,10 @@ const errorCodeOf = (error: unknown): string | undefined => {
 };
 
 /** The first cause in the chain, for a log line. Never includes a token. */
+/** A name claim as a trimmed string, or undefined when it is missing, empty or not a string. */
+const nameClaim = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
 const describe = (error: unknown): string => {
   const parts: string[] = [];
   for (let e = error as { message?: unknown; cause?: unknown } | undefined, i = 0; e && i < 4; e = e.cause as typeof e, i++) {
@@ -396,6 +403,8 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
       return { ok: false, error: 'issuer_refused' };
     }
 
+    const givenName = nameClaim(claims.given_name);
+    const familyName = nameClaim(claims.family_name);
     return {
       ok: true,
       identity: {
@@ -405,6 +414,8 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
         authTime,
         ...(email ? { email } : {}),
         ...(typeof claims.email_verified === 'boolean' ? { emailVerified: claims.email_verified } : {}),
+        ...(givenName ? { givenName } : {}),
+        ...(familyName ? { familyName } : {}),
       },
     };
   };
