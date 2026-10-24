@@ -17,7 +17,7 @@
  * graph passes go to the store as one SPARQL UPDATE request, which Fuseki applies in a single
  * transaction.
  */
-import { ns } from '../ontologies/auth.js';
+import { ns } from '../ontologies/auth.data.js';
 
 /** The namespace auth's terms lived in before 2.0. */
 export const LEGACY_AUTH_NAMESPACE = 'http://lincd.org/ont/auth/';

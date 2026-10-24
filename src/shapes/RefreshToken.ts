@@ -1,9 +1,9 @@
 import { Shape } from '@_linked/core/shapes/Shape';
 import { linkedShape } from '../package.js';
-import { auth } from '../ontologies/auth.js';
+import * as auth from '../ontologies/auth.js';
 import { UserAccount } from '@_linked/sioc/shapes/UserAccount';
 import { literalProperty, objectProperty } from '@_linked/core/shapes/SHACL';
-import { xsd } from '@_linked/core/ontologies/xsd';
+import * as xsd from '@_linked/xsd/ontologies/xsd';
 
 /**
  * One issued refresh token, stored server-side so it can be validated, rotated and revoked.

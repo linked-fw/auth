@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 
 const libDir = new URL('../lib/esm/', import.meta.url);
 const { RefreshToken } = await import(new URL('shapes/RefreshToken.js', libDir));
-const { auth, ns } = await import(new URL('ontologies/auth.js', libDir));
+const auth = await import(new URL('ontologies/auth.js', libDir));
+const { ns } = await import(new URL('ontologies/auth.data.js', libDir));
 
 
 const NS = 'https://linked.cm/ont/auth/';
