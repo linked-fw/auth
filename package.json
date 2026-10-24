@@ -13,6 +13,11 @@
   "version": "3.18.0",
   "packageManager": "npm@12.2.0",
   "linkedPackage": true,
+  "linkedOntologies": {
+    "auth": {
+      "namespace": "https://linked.cm/ont/auth/"
+    }
+  },
   "main": "lib/esm/index.js",
   "types": "lib/esm/index.d.ts",
   "files": [
@@ -66,7 +71,7 @@
     "react-router-dom": "^6.14.2"
   },
   "devDependencies": {
-    "@_linked/cli": "^1.57.0",
+    "@_linked/cli": "^1.57.1",
     "@_linked/fuseki": "^3.7.0",
     "@_linked/server": "^3.9.0",
     "@changesets/changelog-github": "^1.0.0",

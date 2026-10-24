@@ -1,8 +1,8 @@
 import { Shape } from '@_linked/core/shapes/Shape';
 import { linkedShape } from '../package.js';
-import { auth } from '../ontologies/auth.js';
+import * as auth from '../ontologies/auth.js';
 import { literalProperty } from '@_linked/core/shapes/SHACL';
-import { xsd } from '@_linked/core/ontologies/xsd';
+import * as xsd from '@_linked/xsd/ontologies/xsd';
 
 /**
  * A sign-in nonce that has been used. Nonces are issued without storing anything (they are

@@ -8,7 +8,6 @@ import session from 'express-session';
 
 import { Auth } from './utils/auth.js';
 import { AuthCredential } from './shapes/AuthCredential.js';
-import { auth } from './ontologies/auth.js';
 import { expressjwt, Request } from 'express-jwt';
 import cookieParser from 'cookie-parser';
 import type {
