@@ -1,5 +1,18 @@
 # @\_linked/auth
 
+## 3.19.0
+
+### Minor Changes
+
+- [#170](https://github.com/linked-fw/auth/pull/170) [`c4ae90e`](https://github.com/linked-fw/auth/commit/c4ae90ececaa513464a1c9f6bc89bee8e38ec278) Thanks [@flyon](https://github.com/flyon)! - Auth's ontology module is generated from `src/data/auth.ttl` by `linked generate-ontology`.
+  
+  **Breaking:** the aggregated `auth` object is gone. Import the module as a namespace:
+  `import * as auth from '@_linked/auth/ontologies/auth'` (`auth.RefreshToken`, `auth.tokenHash`, …).
+  `ns`, `dataFiles` and `loadData` move to `@_linked/auth/ontologies/auth.data`, and `_self` is now
+  `_ontologyResource` there.
+  
+  The shapes take `xsd` from `@_linked/xsd/ontologies/xsd` instead of core's internal module.
+
 ## 3.18.0
 
 ### Minor Changes
