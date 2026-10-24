@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.18.0
+
+### Minor Changes
+
+- [#168](https://github.com/linked-fw/auth/pull/168) [`ba06a9a`](https://github.com/linked-fw/auth/commit/ba06a9aee1ee2bb96b200fff0f1cb1a3e12b016a) Thanks [@flyon](https://github.com/flyon)! - Solid-OIDC sign-in reads the ID token's `given_name` and `family_name` into the verified identity (`givenName`, `familyName`). A new person is created with them, and a later sign-in fills a person's empty names from them; a name the person already has is kept.
+
 ## 3.17.2
 
 ### Patch Changes
