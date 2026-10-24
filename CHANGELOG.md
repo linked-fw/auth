@@ -1,5 +1,14 @@
 # @\_linked/auth
 
+## 3.17.2
+
+### Patch Changes
+
+- [#166](https://github.com/linked-fw/auth/pull/166) [`6de15e4`](https://github.com/linked-fw/auth/commit/6de15e4459667f34915725f622abf383e22531f5) Thanks [@flyon](https://github.com/flyon)! - Vocabulary ranges raised to the releases with generated accessor modules: `@_linked/schema`
+  ^1.8.0, `@_linked/sioc` ^1.6.0, `@_linked/xsd` ^1.4.0 (and `@_linked/core` ^2.41.0, which they
+  require). Auth imports only their shapes (`schema/shapes/Person`, `sioc/shapes/UserAccount`), whose
+  exports are unchanged, so no source changed.
+
 ## 3.17.1
 
 ### Patch Changes
