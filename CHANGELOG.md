@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.17.1
+
+### Patch Changes
+
+- [#164](https://github.com/linked-fw/auth/pull/164) [`df6c297`](https://github.com/linked-fw/auth/commit/df6c297e81da06c2741d970fac5f39a46c01dc07) Thanks [@flyon](https://github.com/flyon)! - Ships `lib/esm/data/shapes.ttl`; core range raised.
+
 ## 3.17.0
 
 ### Minor Changes
