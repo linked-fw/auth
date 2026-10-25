@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.19.1
+
+### Patch Changes
+
+- [#172](https://github.com/linked-fw/auth/pull/172) [`68e7133`](https://github.com/linked-fw/auth/commit/68e713355f3488ff5cb30b1a0acb41abe037359a) Thanks [@flyon](https://github.com/flyon)! - License: MIT (data under its original license)
+
 ## 3.19.0
 
 ### Minor Changes
