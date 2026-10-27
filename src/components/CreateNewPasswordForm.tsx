@@ -99,7 +99,7 @@ export function CreateNewPasswordForm({
 
   return (
     <div {...restProps}>
-      <form>
+      <form method="post">
         <h2>Set A New Password</h2>
         <div className={style.FormGroup}>
           {!token && (
