@@ -43,7 +43,20 @@ handlers still call `preventDefault`.
 - `npm test`: `# tests 611`, `# pass 611`, `# fail 0` (15.5 s).
 - CN worktree (port 4062) on this build: `POST /signin` with a form body answers `404`, so a
   pre-hydration submit sends nothing in the URL.
-- CN `npm run test:regular`: see Details.
+- CN `npm run test:regular` in the worktree (`CN_TEST_PORT=4162`, under the shared run lock),
+  `real 312.52`:
+
+  ```
+  typecheck:gate                                   PASS   14s
+  unit (vitest)                                    PASS   39s
+  packages                                         PASS    7s
+  playwright (integration + sign-in e2e)           PASS  252s
+  total                                            PASS  312s
+  ```
+
+  Playwright: `342 passed (4.2m)`, `14 skipped`; the dev sign-in e2e (`signin.spec.ts` T10.1 to
+  T10.4) passes. Earlier runs while several sets ran at once failed on Fuseki `Java heap space`
+  and a stale `@_linked/access` build, not on this change.
 
 ### Deviations
 
@@ -60,6 +73,9 @@ handlers still call `preventDefault`.
   backlog 001, trimmed to that).
 
 ## Details
+
+The CN regular run above covers both this package and `@_linked/server-utils` report 005.
+
 
 The three ways the webid.email backlog named were `method="post"`, disabling until hydrated, or
 an always-`preventDefault` `onSubmit`. The last does nothing before hydration (React attaches the
