@@ -78,7 +78,7 @@
     "@changesets/changelog-github": "^1.0.0",
     "@changesets/cli": "^3.0.0",
     "@types/n3": "^1.26.4",
-    "cookie": "^0.7.2",
+    "cookie": "^2.0.0",
     "express": "^4.22.3",
     "jsdom": "^30.0.0",
     "react-dom": "^19.3.0",
