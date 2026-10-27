@@ -47,8 +47,8 @@ verifies token and proof with this package's verifier.
   `IssuerUnavailableError`. Keys from the discovery document's `jwks_uri` (its `issuer` must be
   the token's), refetched once on an unknown `kid` (at most every 30 s); the WebID's issuers by
   `fetchOidcIssuers`, cached 5 minutes; a verified token cached by hash until `exp` (at most
-  5 minutes); proof `jti`s remembered 5 minutes (per key thumbprint); everything through the
-  guarded fetch.
+  5 minutes); proof `jti`s remembered 5 minutes (per key thumbprint); keys or a profile that
+  could not be read are not asked again for 30 s; everything through the guarded fetch.
 - `src/utils/clientIdDocument.ts`: comment (the access token is kept, no refresh grant).
 - `package.json`, `package-lock.json`: `jose` ^6.2.12 (already installed through
   `openid-client`).
@@ -78,8 +78,23 @@ $ node --test test/issuer-tokens.test.mjs
 With webid.email's real tokens (its e2e harness on port 4452, a probe spec not committed): a token
 from webid.email's code flow verified with `createSolidAccessTokenVerifier` from this build and a
 proof from `dpopProofFor`; another `expectedClientId` answered `wrong-client`, another URL `proof`,
-the same proof twice `replay` (CN report 151 quotes the run). `npx changeset status` and CN's
-gateway spec against this checkout: CN report 151 §Verification.
+the same proof twice `replay`:
+
+```
+[probe] verified a real webid.email token: {"webId":"http://localhost:4452/id/12010a8c4c4dad223ce7ce823908c26d#me","issuer":"http://localhost:4452","clientId":"http://localhost:61493/client.jsonld","expiresAt":1793090795000}
+  1 passed (17.6s)
+```
+
+`npx changeset status --since=origin/dev`, in a plain clone of this branch (in the worktree,
+changesets finds Create Now's workspace root first):
+
+```
+Packages to be bumped:
+- minor
+  - @_linked/auth
+```
+
+CN's gateway spec and regular set against this checkout: CN report 151 §Verification.
 
 ### Deviations
 
