@@ -677,8 +677,9 @@ neither Express nor Node built-ins.
 An app can sign users in with their WebID: the user types an email or a WebID, the browser goes to
 their issuer (webid.email by default, or the one their WebID or email domain names), and comes back
 signed in. It is a method next to the others, ending in the same step: the verified WebID is the
-Person's IRI, which gets a `UserAccount` and a session. The issuer's tokens are not kept.
-Opt in with `Auth.oidcSignin`, next to `Auth.signinClient` (the Client ID Document above):
+Person's IRI, which gets a `UserAccount` and a session. The issuer's access token is kept
+server-side for data servers when it is a DPoP-bound JWT (see "The user's token for data servers"
+below); nothing else of the issuer's is kept. Opt in with `Auth.oidcSignin`, next to `Auth.signinClient` (the Client ID Document above):
 
 ```ts
 import { Auth } from '@_linked/auth/utils/auth';
@@ -789,6 +790,57 @@ localhost).
 The exchange itself is `createOidcRelyingParty({clientId, redirectUri, …})` from
 `@_linked/auth/utils/oidcSignin`, with `begin` and `complete`. It is free of Express and the
 store, and its results are returned, never thrown.
+
+#### The user's token for data servers
+
+When the issuer gives a DPoP-bound JWT access token (a Solid-OIDC access token: webid.email
+does), the sign-in keeps it with its DPoP key under the new session's id (`sid`), web and native
+alike. It lives server-side only, never in a cookie or a log: in `IssuerTokenStore`
+(`@_linked/auth/utils/issuerTokens`), in memory by default, `setIssuerTokenStore(store)` for one
+of the app's own; a store only ever sees records sealed with a key derived from `JWT_SECRET`. It
+goes with its session (sign-out, `revokeSession`, `revokeAllSessionsForAccount`, account removal)
+and when it expires (its `exp`, an hour at webid.email). There is no refresh: after that, and after
+a restart with the memory store, the user's queries go without it until they sign in again. An
+opaque or bearer access token is not kept, and sessions from the other methods (password, email
+code, Google, Apple, guest, dev) have none.
+
+At start the backend provider installs a hook on
+`globalThis[Symbol.for('@_linked/auth:userTokenHeaders')]`,
+`(request, {method, url}) => Promise<{'x-linked-user-token', DPoP} | undefined>`.
+`@_linked/server`'s `RemoteDataset` calls it for each request it sends a data server: for a request
+whose session has a token with at least 30 seconds left, it answers the token and a fresh DPoP
+proof for that method and URL (RFC 9449: `htm`, `htu`, `iat`, `jti`, `ath`); otherwise `undefined`.
+
+A data server verifies both with `verifySolidAccessToken`
+(`@_linked/auth/utils/solidAccessToken`):
+
+```ts
+import {
+  verifySolidAccessToken,
+  InvalidUserTokenError,
+  IssuerUnavailableError,
+} from '@_linked/auth/utils/solidAccessToken';
+
+const { webId, issuer, clientId, expiresAt } = await verifySolidAccessToken({
+  accessToken: req.headers['x-linked-user-token'],
+  dpop: req.headers.dpop,
+  method: 'POST',
+  url: 'https://data.example/call/@_linked/server/selectQuery', // the URL the app called
+  expectedClientId: 'https://app.example/.well-known/linked-client.jsonld',
+  allowLocalhost: false,
+});
+```
+
+The token's signature must verify with its issuer's keys (the `jwks_uri` of its discovery
+document), `aud` contain `solid`, `exp` be ahead, the `webid`'s profile name the issuer as a
+`solid:oidcIssuer`, and `client_id` be `expectedClientId`. The proof must be a `dpop+jwt` signed
+with the key the token is bound to (`cnf.jkt`), for this method and URL (query and fragment
+ignored), made within 60 seconds, carry the token's hash (`ath`), and a `jti` not seen in the last
+5 minutes. A refusal throws `InvalidUserTokenError` with a `reason` (`malformed`, `signature`,
+`expired`, `audience`, `issuer`, `wrong-client`, `proof`, `binding`, `replay`); keys or a profile
+that cannot be read throw `IssuerUnavailableError`. A verified token is kept (by its hash) until
+its `exp`, at most 5 minutes; the proof and the client are checked on every call.
+`createSolidAccessTokenVerifier(options)` makes a verifier with its own caches.
 
 #### Native apps (Capacitor)
 

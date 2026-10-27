@@ -1,7 +1,9 @@
 /**
  * The Solid-OIDC relying party: the redirect to an issuer and the exchange on the way back
- * (arch-08 §Protocol, in the Create Now repo). Login only: the issuer's tokens are read and
- * discarded, and the app starts its own session from the verified identity.
+ * (arch-08 §Protocol, in the Create Now repo). The app starts its own session from the verified
+ * identity. The issuer's access token is handed back with its DPoP key (`IssuerGrant`) when it is
+ * one a data server can verify (a DPoP-bound JWT), for the app to keep server-side and send to
+ * data servers on the user's behalf (`issuerTokens.ts`); any other access token is discarded.
  *
  * - **begin:** authorization code flow with PKCE (`S256`), `state`, `nonce`, a fresh DPoP key whose
  *   thumbprint goes along as `dpop_jkt` (RFC 9449 §10), `login_hint`, optional `prompt=none` and a
@@ -91,6 +93,18 @@ export type BeginOidcSigninResult =
   /** `invalid_issuer`: not a URL this server fetches; `issuer_unreachable`: no usable metadata. */
   | { ok: false; error: 'invalid_issuer' | 'issuer_unreachable' };
 
+/**
+ * The issuer's access token for the user and the DPoP key it is bound to, as JWKs: what a data
+ * server verifies (a Solid-OIDC access token, `aud` `solid`). Secret: kept server-side only.
+ */
+export interface IssuerGrant {
+  accessToken: string;
+  /** Milliseconds since the epoch: the token's `exp`, or the token response's `expires_in`. */
+  expiresAt: number;
+  dpopPublicJwk: JsonWebKey;
+  dpopPrivateJwk: JsonWebKey;
+}
+
 /** What a completed sign-in proves. The issuer's tokens are not part of it. */
 export interface VerifiedOidcIdentity {
   webId: string;
@@ -125,7 +139,8 @@ export type OidcSigninError =
   | 'failed';
 
 export type CompleteOidcSigninResult =
-  | { ok: true; identity: VerifiedOidcIdentity }
+  /** `grant`: only for a DPoP-bound JWT access token that has not expired. */
+  | { ok: true; identity: VerifiedOidcIdentity; grant?: IssuerGrant }
   | { ok: false; error: OidcSigninError; detail?: string };
 
 export interface OidcRelyingParty {
@@ -137,6 +152,42 @@ export interface OidcRelyingParty {
   complete(pending: PendingOidcSignin, callbackQuery: string | URLSearchParams): Promise<CompleteOidcSigninResult>;
   clearCache(): void;
 }
+
+/** The `exp` of a JWT's payload, read without checking the signature; `undefined` if not a JWT. */
+const jwtExpiry = (token: string): number | undefined => {
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return typeof payload?.exp === 'number' && Number.isFinite(payload.exp) ? payload.exp : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The access token to keep: a DPoP-bound JWT with an `exp` still ahead, which a data server can
+ * verify on its own. An opaque or bearer token is left out.
+ */
+const grantOf = (
+  tokens: client.TokenEndpointResponse,
+  pending: PendingOidcSignin,
+  nowMs: number
+): IssuerGrant | undefined => {
+  const accessToken = tokens.access_token;
+  if (typeof accessToken !== 'string' || tokens.token_type?.toLowerCase() !== 'dpop') return undefined;
+  const exp = jwtExpiry(accessToken);
+  if (exp === undefined) return undefined;
+  const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : undefined;
+  const expiresAt = Math.min(exp * 1000, expiresIn !== undefined ? nowMs + expiresIn * 1000 : Infinity);
+  if (!(expiresAt > nowMs)) return undefined;
+  return {
+    accessToken,
+    expiresAt,
+    dpopPublicJwk: pending.dpopPublicJwk,
+    dpopPrivateJwk: pending.dpopPrivateJwk,
+  };
+};
 
 /** The authorization errors that are answers, passed to the app as they are. */
 const ANSWERED_ERRORS: Record<string, OidcSigninError> = {
@@ -345,6 +396,7 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
     }
 
     let claims: Record<string, unknown> | undefined;
+    let grant: IssuerGrant | undefined;
     try {
       const keyPair = {
         publicKey: await subtle.importKey('jwk', pending.dpopPublicJwk, DPOP_KEY_ALGORITHM, true, ['verify']),
@@ -363,6 +415,7 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
         { DPoP: client.getDPoPHandle(config, keyPair) }
       );
       claims = tokens.claims() as Record<string, unknown> | undefined;
+      grant = grantOf(tokens, pending, now());
     } catch (error) {
       const code = errorCodeOf(error);
       if (error instanceof client.AuthorizationResponseError && code) {
@@ -417,6 +470,7 @@ export const createOidcRelyingParty = (options: OidcRelyingPartyOptions): OidcRe
         ...(givenName ? { givenName } : {}),
         ...(familyName ? { familyName } : {}),
       },
+      ...(grant ? { grant } : {}),
     };
   };
 

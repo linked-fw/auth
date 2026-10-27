@@ -37,6 +37,7 @@ const { default: AuthBackendProvider } = await import(new URL('backend.js', libD
 const { resetRateLimits } = await import(new URL('utils/rateLimit.js', libDir));
 const { FatalConfigError } = await import(new URL('utils/secrets.js', libDir));
 const sessions = await import(new URL('utils/sessions.js', libDir));
+const issuerTokens = await import(new URL('utils/issuerTokens.js', libDir));
 const { UserAccount } = await import('@_linked/sioc/shapes/UserAccount');
 
 const ADA = 'ada@example.test';
@@ -193,6 +194,38 @@ test('an email signs in through the default issuer: person, account, session, re
     isNewAccount: true,
     returnTo: '/projects?tab=1',
   });
+});
+
+test("a DPoP-bound JWT access token is kept under the new session, and the hook answers it", async () => {
+  const kept = new issuerTokens.MemoryIssuerTokenStore();
+  issuerTokens.setIssuerTokenStore(kept);
+  issuer.accessTokenFormat = 'jwt';
+  const { base } = await startApp();
+  const { response } = await signIn(browser(base));
+  assert.equal(response.status, 302);
+
+  const [session] = [...sessionStore.records.values()];
+  assert.equal(kept.records.size, 1);
+  assert.ok(kept.records.has(session.sessionId), 'keyed by the session id');
+  const grant = await issuerTokens.issuerGrantOf(session.sessionId);
+  assert.equal(grant.accessToken.split('.').length, 3);
+
+  const hook = globalThis[Symbol.for('@_linked/auth:userTokenHeaders')];
+  const headers = await hook({ linkedAuth: { sid: session.sessionId } }, { method: 'POST', url: 'https://data.test/q' });
+  assert.equal(headers['x-linked-user-token'], grant.accessToken);
+  assert.ok(headers.DPoP);
+
+  await sessions.revokeSession(session.sessionId);
+  assert.equal(kept.records.size, 0, 'dropped with the session');
+});
+
+test('an opaque access token is not kept', async () => {
+  const kept = new issuerTokens.MemoryIssuerTokenStore();
+  issuerTokens.setIssuerTokenStore(kept);
+  const { base } = await startApp();
+  const { response } = await signIn(browser(base));
+  assert.equal(response.status, 302);
+  assert.equal(kept.records.size, 0);
 });
 
 test('an existing person signs in to its account; no second person or account', async () => {

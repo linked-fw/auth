@@ -67,12 +67,19 @@ function listen(server) {
  * - `signWithOtherKey`: sign the ID token with a key that is not in the JWKS.
  * - `profiles`: path → Turtle body of the profile host; `profileRequests` counts its requests.
  * - `webIdFor(email)`: the WebID put in the token (default: on the issuer's origin).
+ * - `accessTokenFormat`: `'opaque'` (default) or `'jwt'`, a Solid-OIDC access token
+ *   (`mintAccessToken`) bound to the token request's DPoP key.
+ * - `tokenType`: the token response's `token_type` (default `DPoP`).
+ * - `rotateKey()`: sign from now on with a new key `k2`, published beside `k1`.
+ * - `jwksDown`: the JWKS endpoint answers 500.
  */
 export async function startMockIssuer() {
   const signingKey = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const otherKey = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const publicJwk = { ...signingKey.publicKey.export({ format: 'jwk' }), kid: 'k1', alg: 'ES256', use: 'sig' };
 
+  let currentKey = { privateKey: signingKey.privateKey, kid: 'k1' };
+  const published = [publicJwk];
   const codes = new Map();
   const mock = {
     /** The issuer's origin; `issuer` is this plus `issuerPath`. */
@@ -94,6 +101,10 @@ export async function startMockIssuer() {
     authorizeError: undefined,
     claims: (defaults) => defaults,
     signWithOtherKey: false,
+    accessTokenFormat: 'opaque',
+    tokenType: 'DPoP',
+    jwksDown: false,
+    jwksRequests: 0,
     email: 'ada@example.test',
     emailVerified: true,
     webIdFor: (email) => `${mock.issuer}/id/${crypto.createHash('sha256').update(email).digest('hex').slice(0, 32)}#me`,
@@ -110,6 +121,10 @@ export async function startMockIssuer() {
       mock.authorizeError = undefined;
       mock.claims = (defaults) => defaults;
       mock.signWithOtherKey = false;
+      mock.accessTokenFormat = 'opaque';
+      mock.tokenType = 'DPoP';
+      mock.jwksDown = false;
+      mock.jwksRequests = 0;
       mock.email = 'ada@example.test';
       mock.emailVerified = true;
       mock.webIdFor = (email) =>
@@ -147,7 +162,10 @@ export async function startMockIssuer() {
         ...(mock.metadataPadding ? { filler: 'x'.repeat(mock.metadataPadding) } : {}),
       });
     }
-    if (url.pathname === '/jwks') return json(200, { keys: [publicJwk] });
+    if (url.pathname === '/jwks') {
+      mock.jwksRequests++;
+      return mock.jwksDown ? json(500, { error: 'down' }) : json(200, { keys: published });
+    }
 
     if (url.pathname === '/authorize') {
       const params = Object.fromEntries(url.searchParams);
@@ -210,7 +228,11 @@ export async function startMockIssuer() {
       for (const key of Object.keys(claims)) if (claims[key] === undefined) delete claims[key];
       const key = mock.signWithOtherKey ? otherKey.privateKey : signingKey.privateKey;
       const idToken = signJwt({ alg: 'ES256', kid: 'k1', typ: 'JWT' }, claims, key);
-      return json(200, { access_token: 'issuer-access-token', token_type: 'DPoP', expires_in: 300, id_token: idToken });
+      const accessToken =
+        mock.accessTokenFormat === 'jwt'
+          ? mock.mintAccessToken({ webId: claims.webid, clientId: authorized.client_id, jkt })
+          : 'issuer-access-token';
+      return json(200, { access_token: accessToken, token_type: mock.tokenType, expires_in: 300, id_token: idToken });
     }
 
     res.writeHead(404);
@@ -242,6 +264,36 @@ export async function startMockIssuer() {
       } .\n`
     );
     return webId;
+  };
+
+  /**
+   * A Solid-OIDC access token (`typ` `at+jwt`) for `webId`, issued to `clientId`, bound to the DPoP
+   * key whose thumbprint is `jkt`. `claims` overrides or (with `undefined`) removes claims.
+   */
+  mock.mintAccessToken = ({ webId, clientId, jkt, claims = {}, otherKey: useOtherKey = false }) => {
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: mock.issuer,
+      aud: 'solid',
+      sub: webId,
+      webid: webId,
+      client_id: clientId,
+      cnf: { jkt },
+      scope: 'webid',
+      iat: now,
+      exp: now + 300,
+      jti: crypto.randomUUID(),
+      ...claims,
+    };
+    for (const key of Object.keys(payload)) if (payload[key] === undefined) delete payload[key];
+    const key = useOtherKey ? otherKey.privateKey : currentKey.privateKey;
+    return signJwt({ alg: 'ES256', kid: currentKey.kid, typ: 'at+jwt' }, payload, key);
+  };
+
+  mock.rotateKey = () => {
+    const next = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    published.push({ ...next.publicKey.export({ format: 'jwk' }), kid: 'k2', alg: 'ES256', use: 'sig' });
+    currentKey = { privateKey: next.privateKey, kid: 'k2' };
   };
 
   /**

@@ -86,13 +86,37 @@ test('a full sign-in: the code is exchanged with a DPoP proof and the identity i
   assert.equal(result.identity.emailVerified, true);
   assert.equal(typeof result.identity.authTime, 'number');
   assert.equal(result.identity.subject, 'sub-ada@example.test');
-  assert.equal('accessToken' in result.identity, false, 'issuer tokens are discarded');
+  assert.equal('accessToken' in result.identity, false, 'issuer tokens are not part of the identity');
+  assert.equal('grant' in result, false, 'an opaque access token is not kept');
   const [token] = issuer.tokenRequests;
   assert.equal(token.error, null);
   assert.equal(token.dpop.jkt, jwkThumbprint(begun.pending.dpopPublicJwk));
   assert.equal(token.form.code_verifier, begun.pending.codeVerifier);
   // the WebID is on the issuer's origin: no profile fetch
   assert.equal(issuer.profileRequests, 0);
+});
+
+test('a DPoP-bound JWT access token is handed back with its DPoP key, for data servers', async () => {
+  issuer.accessTokenFormat = 'jwt';
+  const before = Date.now();
+  const { begun, result } = await signIn();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const { grant } = result;
+  assert.ok(grant, 'the grant is returned');
+  assert.equal(grant.accessToken.split('.').length, 3);
+  assert.deepEqual(grant.dpopPublicJwk, begun.pending.dpopPublicJwk);
+  assert.deepEqual(grant.dpopPrivateJwk, begun.pending.dpopPrivateJwk);
+  const exp = JSON.parse(Buffer.from(grant.accessToken.split('.')[1], 'base64url').toString()).exp;
+  assert.ok(grant.expiresAt <= exp * 1000 && grant.expiresAt >= before + 290_000, String(grant.expiresAt));
+  assert.equal(JSON.stringify(result.identity).includes(grant.accessToken), false);
+});
+
+test('a JWT access token that is not DPoP-bound is not kept', async () => {
+  issuer.accessTokenFormat = 'jwt';
+  issuer.tokenType = 'Bearer';
+  const bearer = await signIn();
+  assert.equal(bearer.result.ok, true, JSON.stringify(bearer.result));
+  assert.equal('grant' in bearer.result, false);
 });
 
 test('given_name and family_name are part of the identity when the issuer sends them', async () => {
