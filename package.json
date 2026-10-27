@@ -12,7 +12,9 @@
   },
   "version": "3.19.1",
   "packageManager": "npm@12.2.0",
-  "linkedPackage": true,
+  "linked": {
+    "kind": "library"
+  },
   "linkedOntologies": {
     "auth": {
       "namespace": "https://linked.cm/ont/auth/"
