@@ -116,3 +116,7 @@ The proof key never leaves the server and the store holds sealed records only, s
 app's own sees no secret. The seal binds the session id (additional data), so a record copied to
 another session does not open. `refreshSession` keeps the `sid`, so the grant stays reachable for
 the token's own lifetime; reuse detection revokes the session and with it the grant.
+
+## Review addendum
+
+The review fixes of this step are in Create Now report 151 §Review addendum (`docs/reports/151-user-token-at-the-gateway.md`).
