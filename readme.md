@@ -831,16 +831,21 @@ const { webId, issuer, clientId, expiresAt } = await verifySolidAccessToken({
 });
 ```
 
-The token's signature must verify with its issuer's keys (the `jwks_uri` of its discovery
-document), `aud` contain `solid`, `exp` be ahead, the `webid`'s profile name the issuer as a
-`solid:oidcIssuer`, and `client_id` be `expectedClientId`. The proof must be a `dpop+jwt` signed
-with the key the token is bound to (`cnf.jkt`), for this method and URL (query and fragment
-ignored), made within 60 seconds, carry the token's hash (`ath`), and a `jti` not seen in the last
-5 minutes. A refusal throws `InvalidUserTokenError` with a `reason` (`malformed`, `signature`,
-`expired`, `audience`, `issuer`, `wrong-client`, `proof`, `binding`, `replay`); keys or a profile
-that cannot be read throw `IssuerUnavailableError`. A verified token is kept (by its hash) until
-its `exp`, at most 5 minutes; the proof and the client are checked on every call. Keys or a
-profile that could not be read are not asked for again for 30 seconds.
+The token must be an `at+jwt` whose signature verifies with its issuer's keys (the `jwks_uri` of
+its discovery document), `aud` contain `solid`, `exp` be ahead, the `webid`'s profile name the
+issuer as a `solid:oidcIssuer`, and `client_id` be `expectedClientId`. The proof must be a
+`dpop+jwt` signed with the key the token is bound to (`cnf.jkt`), for this method and URL (query
+and fragment ignored), made within 60 seconds, carry the token's hash (`ath`), and a `jti` not seen
+while a proof with that `iat` could still be accepted. A refusal throws `InvalidUserTokenError`
+with a `reason` (`malformed`, `signature`, `expired`, `audience`, `issuer`, `wrong-client`, `proof`,
+`binding`, `replay`); keys or a profile that cannot be read throw `IssuerUnavailableError`, as does
+a `requester` (pass the credential the request came with) that made the verifier fetch more than 5
+issuers it had not seen in the last minute. When the `jti` memory is full of proofs still in their
+window, a new proof throws `ProofCacheFullError` instead of a live `jti` being forgotten. A verified
+token is kept (by its hash) until its `exp`, at most 5 minutes; the proof and the client are checked
+on every call. Concurrent requests share one fetch of an issuer's keys; an unknown `kid` refetches
+them once the last fetch is 5 seconds old; keys or a profile that could not be read are not asked
+for again for 30 seconds.
 `createSolidAccessTokenVerifier(options)` makes a verifier with its own caches.
 
 #### Native apps (Capacitor)

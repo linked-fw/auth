@@ -19,6 +19,7 @@ const {
   verifySolidAccessToken,
   InvalidUserTokenError,
   IssuerUnavailableError,
+  ProofCacheFullError,
 } = await import(new URL('utils/solidAccessToken.js', libDir));
 const { dpopProofFor } = await import(new URL('utils/issuerTokens.js', libDir));
 
@@ -43,11 +44,11 @@ beforeEach(() => {
 });
 
 /** A DPoP key, the token bound to it, and a proof maker. */
-async function holder({ claims, otherKey, keyFor } = {}) {
+async function holder({ claims, otherKey, keyFor, typ } = {}) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const publicJwk = publicKey.export({ format: 'jwk' });
   const jkt = await calculateJwkThumbprint(publicJwk);
-  const accessToken = issuer.mintAccessToken({ webId: keyFor ?? webId, clientId: CLIENT_ID, jkt, claims, otherKey });
+  const accessToken = issuer.mintAccessToken({ webId: keyFor ?? webId, clientId: CLIENT_ID, jkt, claims, otherKey, typ });
   const grant = { accessToken, expiresAt: Date.now() + 300_000, dpopPublicJwk: publicJwk, dpopPrivateJwk: privateKey.export({ format: 'jwk' }) };
   return {
     accessToken,
@@ -205,7 +206,7 @@ test('a key the cached set lacks refetches the issuer keys once', async () => {
   await verifier.verify(input(first, await first.proof()));
   const fetched = issuer.jwksRequests;
   issuer.rotateKey();
-  clock += 31_000;
+  clock += 6_000;
   const rotated = await holder();
   await verifier.verify(input(rotated, await rotated.proof()));
   assert.equal(issuer.jwksRequests, fetched + 1);
@@ -234,4 +235,37 @@ test('verifySolidAccessToken uses the shared verifier', async () => {
   const h = await holder();
   const verified = await verifySolidAccessToken({ ...input(h, await h.proof(undefined, Date.now())), allowLocalhost: true });
   assert.equal(verified.webId, webId);
+});
+
+test('a token whose typ is not at+jwt is refused', async () => {
+  const h = await holder({ typ: 'JWT' });
+  await refused(verifier.verify(input(h, await h.proof())), 'malformed');
+});
+
+test("concurrent requests for one issuer's keys share one fetch", async () => {
+  const [a, b, c] = [await holder(), await holder(), await holder()];
+  await Promise.all([a, b, c].map(async (h) => verifier.verify(input(h, await h.proof()))));
+  assert.equal(issuer.jwksRequests, 1);
+});
+
+test('one requester makes the verifier fetch at most 5 new issuers a minute', async () => {
+  const strictNew = createSolidAccessTokenVerifier({ allowLocalhost: true, now: () => clock, newIssuersPerMinute: 1 });
+  issuer.jwksDown = true; // the first fetch fails, so the issuer stays new
+  const h = await holder();
+  await assert.rejects(strictNew.verify({ ...input(h, await h.proof()), requester: 'app-1' }), IssuerUnavailableError);
+  issuer.jwksDown = false;
+  clock += 31_000; // past the unavailable memory
+  await assert.rejects(strictNew.verify({ ...input(h, await h.proof()), requester: 'app-1' }), /too many new issuers/);
+  // another requester is not held back by app-1
+  assert.equal((await strictNew.verify({ ...input(h, await h.proof()), requester: 'app-2' })).webId, webId);
+});
+
+test('a full jti memory refuses a new proof rather than forgetting a live one; expired ones make room', async () => {
+  const small = createSolidAccessTokenVerifier({ allowLocalhost: true, now: () => clock, maxEntries: 1 });
+  const h = await holder();
+  for (let i = 0; i < 10; i++) await small.verify(input(h, await h.proof()));
+  await assert.rejects(small.verify(input(h, await h.proof())), ProofCacheFullError);
+  clock += 62_000; // every remembered proof is past its window
+  const later = await holder();
+  assert.equal((await small.verify(input(later, await later.proof()))).webId, webId);
 });

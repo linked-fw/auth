@@ -2,23 +2,28 @@
  * The verifier a data server uses for a user's Solid-OIDC access token and its DPoP proof (what
  * `issuerTokens.ts`' hook sends as `x-linked-user-token` and `DPoP`).
  *
- * The token: a JWT signed with a key of its issuer's JWKS (the `jwks_uri` of the issuer's
+ * The token: a JWT (`typ` `at+jwt`) signed with a key of its issuer's JWKS (the `jwks_uri` of the issuer's
  * discovery document, whose `issuer` must be the token's `iss`), `aud` containing `solid`, `exp`
  * ahead, a `webid` whose profile names `iss` as a `solid:oidcIssuer`, `client_id` the one the data
  * server expects, and `cnf.jkt`. The proof (RFC 9449): `typ` `dpop+jwt`, signed with the public
  * key in its header, whose thumbprint is `cnf.jkt`; `htm` and `htu` the request's method and URL
  * (without query and fragment), `iat` within 60 seconds, `ath` the token's hash, and a `jti` not
- * seen in the last 5 minutes.
+ * seen while a proof with that `iat` could still be accepted.
  *
  * A verified token is kept by its hash until its `exp`, at most 5 minutes, so a steady stream of
  * queries costs no fetch; the proof and the client are checked on every call. An issuer whose keys,
- * or a WebID whose profile, could not be read is not asked again for 30 seconds. Issuers and
+ * or a WebID whose profile, could not be read is not asked again for 30 seconds; concurrent
+ * requests for one issuer's keys share one fetch, an unknown `kid` refetches them once the last
+ * fetch is 5 seconds old, and one requester (`VerifySolidAccessTokenInput.requester`) makes the
+ * verifier fetch at most 5 issuers it has not seen per minute. Issuers and
  * profiles are fetched through the guarded fetch (`guardedFetch.ts`); loopback and `http:` only
  * with `allowLocalhost`.
  *
  * Failures are typed: {@link InvalidUserTokenError} (with a reason; `wrong-client` when only the
- * client differs) and {@link IssuerUnavailableError} (the issuer's keys or the WebID's profile
- * could not be read, so nothing can be said).
+ * client differs), {@link IssuerUnavailableError} (the issuer's keys or the WebID's profile could
+ * not be read, or the requester asked for too many new issuers, so nothing can be said) and
+ * {@link ProofCacheFullError} (the `jti` memory is full of proofs still in their window: a proof
+ * is refused rather than a live `jti` forgotten).
  */
 import { createHash } from 'node:crypto';
 import {
@@ -75,6 +80,15 @@ export class IssuerUnavailableError extends Error {
   }
 }
 
+/** The `jti` memory holds only proofs still in their window and is full: try again. */
+export class ProofCacheFullError extends Error {
+  readonly code = 'proof-cache-full';
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProofCacheFullError';
+  }
+}
+
 export interface VerifySolidAccessTokenInput {
   accessToken: string;
   /** The `DPoP` header. */
@@ -87,6 +101,11 @@ export interface VerifySolidAccessTokenInput {
   expectedClientId: string;
   /** Fetch `http:` and loopback issuers and WebIDs. Default: the verifier's setting. */
   allowLocalhost?: boolean;
+  /**
+   * Who sent the token (for a data server, the credential the request came with): it may make the
+   * verifier fetch at most `newIssuersPerMinute` issuers it has not seen per minute.
+   */
+  requester?: string;
 }
 
 export interface VerifiedSolidAccessToken {
@@ -108,8 +127,10 @@ export interface SolidAccessTokenVerifierOptions {
   jwksTtlMs?: number;
   /** How long a WebID's issuers are reused. Default 5 minutes. */
   profileTtlMs?: number;
-  /** Most entries per cache; the oldest goes first. Default 1000 (proof `jti`s: 10 000). */
+  /** Most entries per cache; the oldest goes first. Default 1000 (proof `jti`s: 10 000, never live ones). */
   maxEntries?: number;
+  /** Issuers not seen before one requester may make the verifier fetch per minute. Default 5. */
+  newIssuersPerMinute?: number;
   /** Replaces the guarded fetch (tests). */
   fetch?: typeof fetch;
   /** Clock in ms. Default `Date.now`. */
@@ -124,10 +145,8 @@ export interface SolidAccessTokenVerifier {
 
 /** How far a proof's `iat` may be from now, in seconds. */
 export const DPOP_IAT_WINDOW_S = 60;
-/** How long a proof's `jti` is remembered. */
-export const DPOP_JTI_TTL_MS = 5 * 60_000;
 /** An unknown `kid` refetches the issuer's keys at most this often. */
-const JWKS_REFETCH_MIN_MS = 30_000;
+const JWKS_REFETCH_MIN_MS = 5_000;
 /** How long an issuer whose keys or a profile that could not be read is not asked again. */
 const UNAVAILABLE_TTL_MS = 30_000;
 const PROOF_ALGORITHMS = ['ES256', 'ES384', 'ES512', 'RS256', 'PS256', 'EdDSA'];
@@ -150,6 +169,18 @@ class ExpiringMap<V> {
     this.entries.delete(key);
     while (this.entries.size >= this.maxEntries) this.entries.delete(this.entries.keys().next().value as string);
     this.entries.set(key, { value, until });
+  }
+  /**
+   * Like `set`, but only expired entries make room: when every entry is still live, nothing is
+   * dropped and the answer is `false`.
+   */
+  setKeepingLive(key: string, value: V, until: number, now: number): boolean {
+    if (this.entries.size >= this.maxEntries) {
+      for (const [k, entry] of this.entries) if (entry.until <= now) this.entries.delete(k);
+    }
+    if (this.entries.size >= this.maxEntries && !this.entries.has(key)) return false;
+    this.entries.set(key, { value, until });
+    return true;
   }
   clear() {
     this.entries.clear();
@@ -191,6 +222,7 @@ export function createSolidAccessTokenVerifier(
   const jwksTtlMs = options.jwksTtlMs ?? 10 * 60_000;
   const profileTtlMs = options.profileTtlMs ?? 5 * 60_000;
   const maxEntries = options.maxEntries ?? 1000;
+  const newIssuersPerMinute = options.newIssuersPerMinute ?? 5;
   const fetches = new Map<boolean, typeof fetch>();
   const fetchFor = (allowLocalhost: boolean): typeof fetch => {
     if (options.fetch) return options.fetch;
@@ -206,6 +238,19 @@ export function createSolidAccessTokenVerifier(
   const issuerKeys = new ExpiringMap<IssuerKeys>(maxEntries);
   const profiles = new ExpiringMap<string[]>(maxEntries);
   const seenJtis = new ExpiringMap<true>(maxEntries * 10);
+  /** The fetch of each issuer's keys under way, shared by concurrent requests. */
+  const keysInFlight = new Map<string, Promise<IssuerKeys>>();
+  /** Per requester, when it last made the verifier fetch an issuer it had not seen. */
+  const newIssuerFetches = new ExpiringMap<number[]>(maxEntries);
+  const countNewIssuer = (requester: string, issuer: string) => {
+    const since = now() - 60_000;
+    const recent = (newIssuerFetches.get(requester, now()) ?? []).filter((at) => at > since);
+    if (recent.length >= newIssuersPerMinute) {
+      throw new IssuerUnavailableError(`${requester} asked for too many new issuers this minute (${issuer} refused)`);
+    }
+    recent.push(now());
+    newIssuerFetches.set(requester, recent, now() + 60_000);
+  };
   /** Issuers and WebIDs that could not be read, so a stream of requests does not refetch them. */
   const unavailable = new ExpiringMap<string>(maxEntries);
   const remembered = async <T>(key: string, read: () => Promise<T>): Promise<T> => {
@@ -237,8 +282,16 @@ export function createSolidAccessTokenVerifier(
     }
   };
 
-  const loadKeys = (issuer: string, allowLocalhost: boolean): Promise<IssuerKeys> =>
-    remembered(`issuer ${issuer}`, () => fetchKeys(issuer, allowLocalhost));
+  const loadKeys = (issuer: string, allowLocalhost: boolean): Promise<IssuerKeys> => {
+    let pending = keysInFlight.get(issuer);
+    if (!pending) {
+      pending = remembered(`issuer ${issuer}`, () => fetchKeys(issuer, allowLocalhost)).finally(() =>
+        keysInFlight.delete(issuer)
+      );
+      keysInFlight.set(issuer, pending);
+    }
+    return pending;
+  };
 
   const fetchKeys = async (issuer: string, allowLocalhost: boolean): Promise<IssuerKeys> => {
     const discoveryUrl = `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`;
@@ -272,7 +325,7 @@ export function createSolidAccessTokenVerifier(
     return profile.issuers;
   };
 
-  const verifyToken = async (accessToken: string, allowLocalhost: boolean): Promise<VerifiedToken> => {
+  const verifyToken = async (accessToken: string, allowLocalhost: boolean, requester: string): Promise<VerifiedToken> => {
     const hash = tokenHash(accessToken);
     const cached = tokens.get(hash, now());
     if (cached) return cached;
@@ -289,11 +342,16 @@ export function createSolidAccessTokenVerifier(
       throw invalid('issuer', `the token's issuer is not one this server fetches: ${String(issuer)}`);
     }
 
-    let keys = issuerKeys.get(issuer, now()) ?? (await loadKeys(issuer, allowLocalhost));
+    let keys = issuerKeys.get(issuer, now());
+    if (!keys) {
+      if (!keysInFlight.has(issuer) && !unavailable.get(`issuer ${issuer}`, now())) countNewIssuer(requester, issuer);
+      keys = await loadKeys(issuer, allowLocalhost);
+    }
     const check = (set: IssuerKeys) =>
       jwtVerify(accessToken, set.keys, {
         issuer: [issuer],
         audience: 'solid',
+        typ: 'at+jwt',
         algorithms: TOKEN_ALGORITHMS,
         currentDate: new Date(now()),
         requiredClaims: ['exp', 'webid', 'client_id'],
@@ -316,6 +374,7 @@ export function createSolidAccessTokenVerifier(
       if (err instanceof joseErrors.JWTExpired) throw invalid('expired', 'the access token has expired');
       if (err instanceof joseErrors.JWTClaimValidationFailed) {
         if (err.claim === 'aud') throw invalid('audience', 'the access token is not for solid');
+        if (err.claim === 'typ') throw invalid('malformed', 'the access token is not an at+jwt');
         throw invalid('malformed', `the access token's ${err.claim} claim is not valid`);
       }
       throw invalid('signature', `the access token does not verify with the keys of ${issuer}`);
@@ -372,7 +431,11 @@ export function createSolidAccessTokenVerifier(
     if (typeof jti !== 'string' || !jti || jti.length > 256) throw invalid('proof', 'the DPoP proof has no jti');
     const jtiKey = `${token.jkt}:${jti}`;
     if (seenJtis.get(jtiKey, now())) throw invalid('replay', 'the DPoP proof was used before');
-    seenJtis.set(jtiKey, true, now() + DPOP_JTI_TTL_MS);
+    // Remembered while a proof with this `iat` could still be accepted; after that the `iat`
+    // check refuses a replay.
+    if (!seenJtis.setKeepingLive(jtiKey, true, (iat + DPOP_IAT_WINDOW_S) * 1000 + 1000, now())) {
+      throw new ProofCacheFullError('too many recent DPoP proofs to remember another; try again');
+    }
   };
 
   return {
@@ -381,7 +444,7 @@ export function createSolidAccessTokenVerifier(
         throw invalid('malformed', 'no access token');
       }
       const allowLocalhost = input.allowLocalhost ?? options.allowLocalhost ?? false;
-      const token = await verifyToken(input.accessToken, allowLocalhost);
+      const token = await verifyToken(input.accessToken, allowLocalhost, input.requester ?? '');
       if (token.expiresAt <= now()) throw invalid('expired', 'the access token has expired');
       if (token.clientId !== input.expectedClientId) {
         throw invalid('wrong-client', `the access token was issued to ${token.clientId}, not ${input.expectedClientId}`);
@@ -393,6 +456,7 @@ export function createSolidAccessTokenVerifier(
       tokens.clear();
       issuerKeys.clear();
       unavailable.clear();
+      newIssuerFetches.clear();
       profiles.clear();
       seenJtis.clear();
     },

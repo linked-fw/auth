@@ -270,7 +270,7 @@ export async function startMockIssuer() {
    * A Solid-OIDC access token (`typ` `at+jwt`) for `webId`, issued to `clientId`, bound to the DPoP
    * key whose thumbprint is `jkt`. `claims` overrides or (with `undefined`) removes claims.
    */
-  mock.mintAccessToken = ({ webId, clientId, jkt, claims = {}, otherKey: useOtherKey = false }) => {
+  mock.mintAccessToken = ({ webId, clientId, jkt, claims = {}, otherKey: useOtherKey = false, typ = 'at+jwt' }) => {
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: mock.issuer,
@@ -287,7 +287,7 @@ export async function startMockIssuer() {
     };
     for (const key of Object.keys(payload)) if (payload[key] === undefined) delete payload[key];
     const key = useOtherKey ? otherKey.privateKey : currentKey.privateKey;
-    return signJwt({ alg: 'ES256', kid: currentKey.kid, typ: 'at+jwt' }, payload, key);
+    return signJwt({ alg: 'ES256', kid: currentKey.kid, typ }, payload, key);
   };
 
   mock.rotateKey = () => {
