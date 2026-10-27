@@ -211,10 +211,17 @@ test('a key the cached set lacks refetches the issuer keys once', async () => {
   assert.equal(issuer.jwksRequests, fetched + 1);
 });
 
-test('an issuer whose keys cannot be read is unavailable, not a refusal', async () => {
+test('an issuer whose keys cannot be read is unavailable, not a refusal, and not asked again for 30 s', async () => {
   issuer.jwksDown = true;
   const h = await holder();
   await assert.rejects(verifier.verify(input(h, await h.proof())), (err) => err instanceof IssuerUnavailableError);
+  const asked = issuer.jwksRequests;
+  issuer.jwksDown = false;
+  await assert.rejects(verifier.verify(input(h, await h.proof())), (err) => err instanceof IssuerUnavailableError);
+  assert.equal(issuer.jwksRequests, asked);
+  clock += 31_000;
+  const later = await holder();
+  assert.equal((await verifier.verify(input(later, await later.proof()))).webId, webId);
 });
 
 test('loopback issuers only with allowLocalhost', async () => {

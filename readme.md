@@ -839,7 +839,8 @@ ignored), made within 60 seconds, carry the token's hash (`ath`), and a `jti` no
 5 minutes. A refusal throws `InvalidUserTokenError` with a `reason` (`malformed`, `signature`,
 `expired`, `audience`, `issuer`, `wrong-client`, `proof`, `binding`, `replay`); keys or a profile
 that cannot be read throw `IssuerUnavailableError`. A verified token is kept (by its hash) until
-its `exp`, at most 5 minutes; the proof and the client are checked on every call.
+its `exp`, at most 5 minutes; the proof and the client are checked on every call. Keys or a
+profile that could not be read are not asked for again for 30 seconds.
 `createSolidAccessTokenVerifier(options)` makes a verifier with its own caches.
 
 #### Native apps (Capacitor)

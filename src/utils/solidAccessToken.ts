@@ -11,7 +11,8 @@
  * seen in the last 5 minutes.
  *
  * A verified token is kept by its hash until its `exp`, at most 5 minutes, so a steady stream of
- * queries costs no fetch; the proof and the client are checked on every call. Issuers and
+ * queries costs no fetch; the proof and the client are checked on every call. An issuer whose keys,
+ * or a WebID whose profile, could not be read is not asked again for 30 seconds. Issuers and
  * profiles are fetched through the guarded fetch (`guardedFetch.ts`); loopback and `http:` only
  * with `allowLocalhost`.
  *
@@ -127,6 +128,8 @@ export const DPOP_IAT_WINDOW_S = 60;
 export const DPOP_JTI_TTL_MS = 5 * 60_000;
 /** An unknown `kid` refetches the issuer's keys at most this often. */
 const JWKS_REFETCH_MIN_MS = 30_000;
+/** How long an issuer whose keys or a profile that could not be read is not asked again. */
+const UNAVAILABLE_TTL_MS = 30_000;
 const PROOF_ALGORITHMS = ['ES256', 'ES384', 'ES512', 'RS256', 'PS256', 'EdDSA'];
 const TOKEN_ALGORITHMS = ['ES256', 'ES384', 'ES512', 'RS256', 'RS384', 'RS512', 'PS256', 'EdDSA'];
 
@@ -203,6 +206,18 @@ export function createSolidAccessTokenVerifier(
   const issuerKeys = new ExpiringMap<IssuerKeys>(maxEntries);
   const profiles = new ExpiringMap<string[]>(maxEntries);
   const seenJtis = new ExpiringMap<true>(maxEntries * 10);
+  /** Issuers and WebIDs that could not be read, so a stream of requests does not refetch them. */
+  const unavailable = new ExpiringMap<string>(maxEntries);
+  const remembered = async <T>(key: string, read: () => Promise<T>): Promise<T> => {
+    const failed = unavailable.get(key, now());
+    if (failed) throw new IssuerUnavailableError(failed);
+    try {
+      return await read();
+    } catch (err) {
+      if (err instanceof IssuerUnavailableError) unavailable.set(key, err.message, now() + UNAVAILABLE_TTL_MS);
+      throw err;
+    }
+  };
 
   const fetchJson = async (url: string, allowLocalhost: boolean): Promise<unknown> => {
     let response: Response;
@@ -222,7 +237,10 @@ export function createSolidAccessTokenVerifier(
     }
   };
 
-  const loadKeys = async (issuer: string, allowLocalhost: boolean): Promise<IssuerKeys> => {
+  const loadKeys = (issuer: string, allowLocalhost: boolean): Promise<IssuerKeys> =>
+    remembered(`issuer ${issuer}`, () => fetchKeys(issuer, allowLocalhost));
+
+  const fetchKeys = async (issuer: string, allowLocalhost: boolean): Promise<IssuerKeys> => {
     const discoveryUrl = `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`;
     const metadata = (await fetchJson(discoveryUrl, allowLocalhost)) as { issuer?: unknown; jwks_uri?: unknown };
     if (typeof metadata?.issuer !== 'string' || !sameIssuer(metadata.issuer, issuer)) {
@@ -242,11 +260,14 @@ export function createSolidAccessTokenVerifier(
   const issuersOf = async (webId: string, allowLocalhost: boolean): Promise<string[]> => {
     const cached = profiles.get(webId, now());
     if (cached) return cached;
-    const profile = await fetchOidcIssuers(webId, { allowLocalhost, timeoutMs, fetch: fetchFor(allowLocalhost) });
-    if (profile.ok === false) {
-      if (profile.reason === 'unreachable') throw new IssuerUnavailableError(`the profile of ${webId} could not be read`);
-      throw invalid('issuer', `the WebID ${webId} is not one this server reads`);
-    }
+    const profile = await remembered(`profile ${webId}`, async () => {
+      const read = await fetchOidcIssuers(webId, { allowLocalhost, timeoutMs, fetch: fetchFor(allowLocalhost) });
+      if (read.ok === false && read.reason === 'unreachable') {
+        throw new IssuerUnavailableError(`the profile of ${webId} could not be read`);
+      }
+      return read;
+    });
+    if (profile.ok === false) throw invalid('issuer', `the WebID ${webId} is not one this server reads`);
     profiles.set(webId, profile.issuers, now() + profileTtlMs);
     return profile.issuers;
   };
@@ -371,6 +392,7 @@ export function createSolidAccessTokenVerifier(
     clear() {
       tokens.clear();
       issuerKeys.clear();
+      unavailable.clear();
       profiles.clear();
       seenJtis.clear();
     },
