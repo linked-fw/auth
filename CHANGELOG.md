@@ -1,5 +1,29 @@
 # @\_linked/auth
 
+## 3.20.0
+
+### Minor Changes
+
+- [#178](https://github.com/linked-fw/auth/pull/178) [`425b542`](https://github.com/linked-fw/auth/commit/425b5425d6ca5e1612a97b194b969b9dd2e84fca) Thanks [@flyon](https://github.com/flyon)! - A Solid-OIDC sign-in keeps the issuer's access token for data servers when it is a DPoP-bound JWT:
+  sealed, server-side, under the session's id, dropped with the session or at its `exp`
+  (`@_linked/auth/utils/issuerTokens`, `setIssuerTokenStore` for a store of the app's own). The
+  backend provider installs the hook `globalThis[Symbol.for('@_linked/auth:userTokenHeaders')]`, which
+  `@_linked/server`'s `RemoteDataset` calls to send the user's token as `x-linked-user-token` with a
+  fresh `DPoP` proof. Data servers verify both with `verifySolidAccessToken`
+  (`@_linked/auth/utils/solidAccessToken`). Adds `jose` as a dependency.
+
+### Patch Changes
+
+- [#178](https://github.com/linked-fw/auth/pull/178) [`02774d1`](https://github.com/linked-fw/auth/commit/02774d15dd08b0e6a45890edbea79e85b8f01163) Thanks [@flyon](https://github.com/flyon)! - Every auth form (SigninWithPasswordForm, SigninWithCodeForm, CreateAccountForm, ForgotPasswordForm, CreateNewPasswordForm) renders `method="post"`, so a submit before React hydrates posts to the page instead of putting the email and password in the URL. Hydrated behaviour is unchanged.
+
+- [#178](https://github.com/linked-fw/auth/pull/178) [`d2b71a7`](https://github.com/linked-fw/auth/commit/d2b71a7ad00b9a7ff86aa635166a857383643d27) Thanks [@flyon](https://github.com/flyon)! - `package.json` says what this package is in `"linked": {"kind": "library"}` instead of `"linkedPackage": true`, which the CLI and server no longer read.
+
+- [#178](https://github.com/linked-fw/auth/pull/178) [`a30fe67`](https://github.com/linked-fw/auth/commit/a30fe67df139ad57cdf3024bec2848397c52f62f) Thanks [@flyon](https://github.com/flyon)! - `verifySolidAccessToken` requires `typ` `at+jwt`; shares one fetch of an issuer's keys among
+  concurrent requests, refetches them on an unknown `kid` once the last fetch is 5 s old, and caps
+  the new issuers one `requester` makes it fetch at 5 a minute (`IssuerUnavailableError`); remembers a
+  proof's `jti` only while its `iat` is in the window and refuses a new proof with
+  `ProofCacheFullError` when the memory is full of live ones.
+
 ## 3.19.1
 
 ### Patch Changes
