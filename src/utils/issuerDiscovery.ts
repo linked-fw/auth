@@ -351,11 +351,25 @@ const normaliseIri = (iri: string): string | null => {
   }
 };
 
+/** What a profile value is read as: an IRI (`solid:oidcIssuer`) or a plain string literal (`foaf:name`). */
+type ValueKind = 'iri' | 'literal';
+
+const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
+const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
+
 /**
  * Turtle or N-Triples, never TriG or N3: a statement inside a named graph or a formula is quoted,
- * not asserted, so only default-graph triples count.
+ * not asserted, so only default-graph triples count. A literal counts only as a plain or
+ * language-tagged string.
  */
-const readTurtleIssuers = (body: string, mediaType: string, documentUrl: string, webId: string): string[] => {
+const readTurtleValues = (
+  body: string,
+  mediaType: string,
+  documentUrl: string,
+  webId: string,
+  predicate: string,
+  kind: ValueKind,
+): string[] => {
   const format = mediaType === 'application/n-triples' ? 'N-Triples' : 'Turtle';
   const quads = new Parser({ baseIRI: documentUrl, format }).parse(body);
   return quads
@@ -364,8 +378,11 @@ const readTurtleIssuers = (body: string, mediaType: string, documentUrl: string,
         quad.graph.termType === 'DefaultGraph' &&
         quad.subject.termType === 'NamedNode' &&
         normaliseIri(quad.subject.value) === webId &&
-        quad.predicate.value === SOLID_OIDC_ISSUER &&
-        quad.object.termType === 'NamedNode',
+        quad.predicate.value === predicate &&
+        (kind === 'iri'
+          ? quad.object.termType === 'NamedNode'
+          : quad.object.termType === 'Literal' &&
+            [XSD_STRING, RDF_LANG_STRING].includes(quad.object.datatype.value)),
     )
     .map((quad) => quad.object.value);
 };
@@ -501,22 +518,57 @@ const hasTypeScopedContext = (node: Record<string, unknown>, context: JsonLdCont
   return types.some((type) => typeof type === 'string' && context.terms.get(type)?.scoped);
 };
 
+/** A string node value as a literal: only where its term is not coerced, or coerced to `xsd:string`. */
+const literalOf = (item: unknown, term: JsonLdTerm | undefined, context: JsonLdContext): string | null => {
+  if (typeof item === 'string') {
+    if (!term?.type) {
+      return item;
+    }
+    return expandKey(term.type, context) === XSD_STRING || term.type === XSD_STRING ? item : null;
+  }
+  if (isRecord(item) && typeof item['@value'] === 'string') {
+    const type = item['@type'];
+    if (type === undefined) {
+      return item['@value'];
+    }
+    return typeof type === 'string' && (type === XSD_STRING || expandKey(type, context) === XSD_STRING)
+      ? item['@value']
+      : null;
+  }
+  return null;
+};
+
+/** A node value as an IRI: an `{"@id"}` object, or a string where its term is coerced with `@type: @id`. */
+const iriOf = (item: unknown, term: JsonLdTerm | undefined, context: JsonLdContext): string | null => {
+  if (typeof item === 'string') {
+    return term?.type === '@id' ? expandId(item, context) : null;
+  }
+  return isRecord(item) && typeof item['@id'] === 'string' ? expandId(item['@id'], context) : null;
+};
+
 /**
- * Reads `solid:oidcIssuer` of `webId` from a JSON-LD document without a JSON-LD processor: full
- * and compact IRIs, terms from inline contexts, `@vocab`, `@base`, `@graph` and nested nodes. It
- * may miss an issuer but never reads one the document does not assert: a remote `@context` is never
+ * Reads `predicate` of `webId` from a JSON-LD document without a JSON-LD processor: full and
+ * compact IRIs, terms from inline contexts, `@vocab`, `@base`, `@graph` and nested nodes. It may
+ * miss a value but never reads one the document does not assert: a remote `@context` is never
  * fetched (terms only it defines are not understood), values under a scoped context are skipped, a
- * plain string counts as an IRI only where its term is coerced with `@type: @id`, and a document that costs
- * more than `JSON_LD_BUDGET` to read has no issuers.
+ * plain string counts as an IRI only where its term is coerced with `@type: @id` (and as a literal
+ * only where it is not coerced to anything but `xsd:string`), and a document that costs more than
+ * `JSON_LD_BUDGET` to read has no values.
  */
-const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): string[] => {
+const readJsonLdValues = (
+  body: string,
+  documentUrl: string,
+  webId: string,
+  predicate: string,
+  kind: ValueKind,
+): string[] => {
   let document: unknown;
   try {
     document = JSON.parse(body);
   } catch {
     return [];
   }
-  const issuers: string[] = [];
+  const values: string[] = [];
   const budget: Budget = { remaining: JSON_LD_BUDGET };
   const visit = (node: unknown, inherited: JsonLdContext, depth: number) => {
     if (depth > MAX_JSON_DEPTH) {
@@ -545,19 +597,12 @@ const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): st
       if (key.startsWith('@') || context.terms.get(key)?.scoped) {
         continue;
       }
-      if (subject === webId && expandKey(key, context) === SOLID_OIDC_ISSUER) {
-        const coerced = context.terms.get(key)?.type === '@id';
+      if (subject === webId && expandKey(key, context) === predicate) {
+        const term = context.terms.get(key);
         for (const item of Array.isArray(value) ? value : [value]) {
-          const iri =
-            typeof item === 'string'
-              ? coerced
-                ? expandId(item, context)
-                : null
-              : isRecord(item) && typeof item['@id'] === 'string'
-                ? expandId(item['@id'], context)
-                : null;
-          if (iri) {
-            issuers.push(iri);
+          const read = kind === 'iri' ? iriOf(item, term, context) : literalOf(item, term, context);
+          if (read !== null) {
+            values.push(read);
           }
         }
       }
@@ -572,8 +617,50 @@ const readJsonLdIssuers = (body: string, documentUrl: string, webId: string): st
     }
     throw error;
   }
-  return issuers;
+  return values;
 };
+
+/**
+ * The `predicate` values of `webId` in a profile document: Turtle or N-Triples (the default,
+ * parsed with `n3`) or JSON-LD (by content type). Statements about other subjects, and statements
+ * in named graphs, are ignored. An unreadable document has no values.
+ */
+const readProfileValues = (
+  body: string,
+  contentType: string,
+  documentUrl: string,
+  webId: string,
+  predicate: string,
+  kind: ValueKind,
+): string[] => {
+  const subject = normaliseIri(webId);
+  if (!subject) {
+    return [];
+  }
+  const mediaType = contentType.split(';')[0].trim().toLowerCase();
+  const isJson = mediaType === 'application/json' || mediaType.endsWith('+json');
+  try {
+    const values = isJson
+      ? readJsonLdValues(body, documentUrl, subject, predicate, kind)
+      : readTurtleValues(body, mediaType, documentUrl, subject, predicate, kind);
+    return [...new Set(values)];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * The string literals of `predicate` (a full IRI, e.g. `foaf:name`'s) that a profile document
+ * states about `webId`, read as `readOidcIssuers` reads issuers: Turtle or N-Triples, or JSON-LD by
+ * content type; other subjects, named graphs, typed non-string literals and IRIs are ignored.
+ */
+export const readProfileLiterals = (
+  body: string,
+  contentType: string,
+  documentUrl: string,
+  webId: string,
+  predicate: string,
+): string[] => readProfileValues(body, contentType, documentUrl, webId, predicate, 'literal');
 
 /**
  * The `solid:oidcIssuer` values of `webId` in a profile document: Turtle or N-Triples (the default,
@@ -585,22 +672,7 @@ export const readOidcIssuers = (
   contentType: string,
   documentUrl: string,
   webId: string,
-): string[] => {
-  const subject = normaliseIri(webId);
-  if (!subject) {
-    return [];
-  }
-  const mediaType = contentType.split(';')[0].trim().toLowerCase();
-  const isJson = mediaType === 'application/json' || mediaType.endsWith('+json');
-  try {
-    const issuers = isJson
-      ? readJsonLdIssuers(body, documentUrl, subject)
-      : readTurtleIssuers(body, mediaType, documentUrl, subject);
-    return [...new Set(issuers)];
-  } catch {
-    return [];
-  }
-};
+): string[] => readProfileValues(body, contentType, documentUrl, webId, SOLID_OIDC_ISSUER, 'iri');
 
 /** A typed WebID as a normalised http(s) IRI, or `null`. */
 const parseWebId = (input: string): string | null => {

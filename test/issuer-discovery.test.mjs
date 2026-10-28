@@ -12,6 +12,7 @@ const {
   createIssuerDiscovery,
   fetchOidcIssuers,
   readOidcIssuers,
+  readProfileLiterals,
   isFetchableUrl,
   WEBID_EMAIL_ISSUER,
   DEFAULT_SKIP_DOMAINS,
@@ -522,5 +523,46 @@ describe('createIssuerDiscovery', () => {
     assert.throws(() => createIssuerDiscovery({ defaultIssuer: 'http://webid.example' }), /defaultIssuer/);
     assert.throws(() => createIssuerDiscovery({ defaultIssuer: 'http://localhost:4050' }), /defaultIssuer/);
     assert.doesNotThrow(() => createIssuerDiscovery({ defaultIssuer: 'http://localhost:4050', allowLocalhost: true }));
+  });
+});
+
+describe('readProfileLiterals', () => {
+  const doc = 'https://pod.example/profile/card';
+  const webId = `${doc}#me`;
+  const FOAF_NAME = 'http://xmlns.com/foaf/0.1/name';
+
+  test('Turtle: plain and language strings of the WebID; other subjects, IRIs and typed literals ignored', () => {
+    const body = `@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<#me> foaf:name "Ada Lovelace", "Ada"@en, <https://not-a-name.test/>, "42"^^xsd:integer .
+<#other> foaf:name "Mallory" .`;
+    assert.deepEqual(readProfileLiterals(body, 'text/turtle', doc, webId, FOAF_NAME), ['Ada Lovelace', 'Ada']);
+  });
+
+  test('JSON-LD: a plain string, an @value object and an xsd:string coercion; an @id coercion is no literal', () => {
+    const body = JSON.stringify({
+      '@context': {
+        foaf: 'http://xmlns.com/foaf/0.1/',
+        xsd: 'http://www.w3.org/2001/XMLSchema#',
+        name: 'foaf:name',
+        nick: { '@id': 'foaf:name', '@type': 'xsd:string' },
+        link: { '@id': 'foaf:name', '@type': '@id' },
+      },
+      '@id': '#me',
+      name: ['Ada Lovelace', { '@value': 'Ada', '@language': 'en' }, { '@value': 7, '@type': 'xsd:integer' }],
+      nick: 'Countess',
+      link: 'https://not-a-name.test/',
+      knows: { '@id': 'https://friend.example/#me', name: 'Mallory' },
+    });
+    assert.deepEqual(readProfileLiterals(body, 'application/ld+json', doc, webId, FOAF_NAME), [
+      'Ada Lovelace',
+      'Ada',
+      'Countess',
+    ]);
+  });
+
+  test('an unreadable document has no values', () => {
+    assert.deepEqual(readProfileLiterals('<#me> foaf:name', 'text/turtle', doc, webId, FOAF_NAME), []);
+    assert.deepEqual(readProfileLiterals('{', 'application/ld+json', doc, webId, FOAF_NAME), []);
   });
 });

@@ -230,7 +230,7 @@ async function namesOf(webId) {
   return rows.map((row) => [row.given.value, row.family.value]);
 }
 
-test('the issuer names a new person; a later sign-in fills empty names and keeps the others', async () => {
+test('the issuer names a new person; every later sign-in writes its name claims, none clears one', async () => {
   try {
     const email = newEmail();
     const webId = issuer.webIdFor(email);
@@ -240,16 +240,19 @@ test('the issuer names a new person; a later sign-in fills empty names and keeps
 
     issuer.claims = (c) => ({ ...c, given_name: 'Augusta', family_name: 'King' });
     await signIn(email);
-    assert.deepEqual(await namesOf(webId), [['Ada', 'Lovelace']], 'a name the person has is kept');
+    assert.deepEqual(await namesOf(webId), [['Augusta', 'King']], 'a changed name is written');
+
+    issuer.claims = (c) => c;
+    await signIn(email);
+    assert.deepEqual(await namesOf(webId), [['Augusta', 'King']], 'a sign-in without claims keeps them');
 
     const unnamed = newEmail();
     const unnamedId = issuer.webIdFor(unnamed);
-    issuer.claims = (c) => c;
     await signIn(unnamed);
-    assert.deepEqual(await namesOf(unnamedId), [['', '']]);
+    assert.deepEqual(await namesOf(unnamedId), [], 'no empty literal for a person without names');
     issuer.claims = (c) => ({ ...c, given_name: 'Grace', family_name: 'Hopper' });
     await signIn(unnamed);
-    assert.deepEqual(await namesOf(unnamedId), [['Grace', 'Hopper']], 'empty names are filled');
+    assert.deepEqual(await namesOf(unnamedId), [['Grace', 'Hopper']], 'names are added later');
   } finally {
     issuer.claims = (c) => c;
   }
