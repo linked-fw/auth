@@ -35,7 +35,8 @@ the app; and every create path wrote `""` literals for names it did not have.
   JSON-LD).
 - `npm run test:integration` against Fuseki: `# pass 49`, `# fail 0` (the name test now expects a
   changed name to be written and a claimless sign-in to keep it, and no literal for an unnamed
-  person).
+  person; a code sign-in's new person in Fuseki has no `givenName`, `familyName` or `telephone`
+  triple).
 
 ### Deviations
 
