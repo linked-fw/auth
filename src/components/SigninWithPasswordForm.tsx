@@ -148,7 +148,7 @@ export const SigninWithPasswordForm = ({
 
   return (
     <div className={cl(style.root, className)}>
-      <form className={style.form}>
+      <form className={style.form} method="post">
         <div className={cl(formIsHidden ? style.hidden : null)}>
           {!showInputField ? (
             <Button

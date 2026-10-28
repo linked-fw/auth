@@ -129,7 +129,7 @@ export default function SigninWithCodeForm({
 
   if (step === 'email') {
     return (
-      <form className={cl(style.root, className)} onSubmit={sendCode}>
+      <form className={cl(style.root, className)} method="post" onSubmit={sendCode}>
         <Input
           type="email"
           className={style.input}
@@ -152,7 +152,7 @@ export default function SigninWithCodeForm({
   }
 
   return (
-    <form className={cl(style.root, className)} onSubmit={submitCode}>
+    <form className={cl(style.root, className)} method="post" onSubmit={submitCode}>
       {helperText && <p className={style.HelperText}>{helperText}</p>}
       {typeEmail ? (
         <Input

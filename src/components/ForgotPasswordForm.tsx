@@ -56,7 +56,7 @@ function ForgotPasswordForm({ ...restProps }: ForgotPasswordFormProps) {
 
   restProps = useStyles(restProps, style.root);
   return (
-    <form {...restProps}>
+    <form {...restProps} method="post">
       <h2>{t(prefix + '.title', 'Reset Password')}</h2>
       <div className={style.FormGroup}>
         <Input

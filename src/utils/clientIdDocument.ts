@@ -388,8 +388,9 @@ export const buildClientIdDocument = (
     ...(config.logoUri ? { logo_uri: config.logoUri } : {}),
     ...(config.policyUri ? { policy_uri: config.policyUri } : {}),
     ...(config.tosUri ? { tos_uri: config.tosUri } : {}),
-    // A public client: code flow with PKCE, no client secret. The relying party keeps none of the
-    // issuer's tokens, so no refresh_token grant.
+    // A public client: code flow with PKCE, no client secret. The relying party keeps the
+    // issuer's access token for data servers until it expires, never a refresh token, so no
+    // refresh_token grant.
     grant_types: ['authorization_code'],
     response_types: ['code'],
     scope: 'openid webid email',

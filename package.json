@@ -12,7 +12,9 @@
   },
   "version": "3.19.1",
   "packageManager": "npm@12.2.0",
-  "linkedPackage": true,
+  "linked": {
+    "kind": "library"
+  },
   "linkedOntologies": {
     "auth": {
       "namespace": "https://linked.cm/ont/auth/"
@@ -58,6 +60,7 @@
     "express-jwt": "^8.4.1",
     "express-session": "^1.18.1",
     "google-auth-library": "^11.0.0",
+    "jose": "^6.2.12",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^4.0.0",
     "n3": "^2.13.12",

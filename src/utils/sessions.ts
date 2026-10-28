@@ -39,6 +39,7 @@ import {
   looksLikeOpaqueRefreshToken,
 } from './refreshTokenHash.js';
 import { toDate } from './date.js';
+import { dropIssuerGrants, getIssuerTokenStore } from './issuerTokens.js';
 
 export { generateRefreshToken, hashRefreshToken };
 
@@ -533,6 +534,7 @@ export async function revokeSession(
       revoked++;
     }
   }
+  await dropIssuerGrants([sessionId]);
   return revoked;
 }
 
@@ -550,6 +552,7 @@ export async function revokeAllSessionsForAccount(
       revoked++;
     }
   }
+  await dropIssuerGrants(records.map((record) => record.sessionId));
   return revoked;
 }
 
@@ -560,6 +563,7 @@ export async function deleteAllSessionsForAccount(accountId: string): Promise<nu
   for (const record of records) {
     await sessionState.store.delete(record);
   }
+  await dropIssuerGrants(records.map((record) => record.sessionId));
   return records.length;
 }
 
@@ -584,6 +588,12 @@ export async function cleanupExpiredSessions(
   if (typeof targetStore.findStale !== 'function') {
     console.warn('@_linked/auth: this refresh session store cannot be cleaned up (no findStale)');
     return 0;
+  }
+  // the issuer tokens kept for sessions expire with their own `exp`
+  try {
+    await getIssuerTokenStore().removeExpired(now.getTime());
+  } catch (err) {
+    console.warn('@_linked/auth: could not remove expired issuer tokens', (err as Error)?.message ?? err);
   }
   const cutoff = new Date(now.getTime() - olderThan * 1000);
   const stale = await targetStore.findStale(cutoff);

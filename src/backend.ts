@@ -40,6 +40,7 @@ import {
   startSessionCleanup,
   stopSessionCleanup,
 } from './utils/sessions.js';
+import { installUserTokenHeaders, keepIssuerGrant } from './utils/issuerTokens.js';
 import {
   accessCookieName,
   clearAuthCookies,
@@ -932,7 +933,7 @@ async function fillEmptyNames(
 
 /**
  * The last step of a Solid-OIDC sign-in: the person whose IRI is the verified WebID, its account,
- * and a session, as the other methods end. The issuer's tokens are not kept.
+ * and a session, as the other methods end. The issuer's access token is kept by the caller.
  *
  * The token's email is trusted only when it proves the WebID (see `emailProvesWebId`). The email
  * is how the other methods find an account, so an email that does not prove the WebID is neither
@@ -1065,6 +1066,15 @@ async function completeOidcExchange(
     console.error('[auth] OIDC sign-in: could not create the session', error);
     return failed('failed', mismatch);
   }
+  // The issuer's access token, for data servers, under the new session (`issuerTokens.ts`).
+  const sessionId = (provider.request as { linkedAuth?: AuthSession } | undefined)?.linkedAuth?.sid;
+  if (result.grant && sessionId) {
+    try {
+      await keepIssuerGrant(sessionId, result.grant);
+    } catch (error) {
+      console.warn('[auth] OIDC sign-in: could not keep the issuer token', (error as Error)?.message ?? error);
+    }
+  }
   return {
     outcome: {
       ok: true,
@@ -1188,6 +1198,9 @@ export default class AuthBackendProvider extends BackendProvider {
     // Delete long-revoked/expired refresh token records in the background (at most daily per
     // process; AUTH_SESSION_CLEANUP=false turns it off).
     startSessionCleanup();
+
+    // Data servers get the signed-in user's issuer token through this hook (RemoteDataset).
+    installUserTokenHeaders();
 
     // set the user and account shapes for auth
     Auth.userType = this.userShape;

@@ -85,7 +85,7 @@ export function CreateAccountForm({
 
   restProps = useStyles(restProps, style.root);
   return (
-    <form {...restProps}>
+    <form {...restProps} method="post">
       <h2>{t(prefix + '.title', 'Create Account')}</h2>
       {submitFeedback && !isAlertClosed ? (
         <div className={style.Alert}>
