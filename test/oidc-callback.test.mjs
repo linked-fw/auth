@@ -677,3 +677,16 @@ test('a sign-in without name claims keeps the stored names', async () => {
   assert.equal(people.rows[0].givenName, 'Ada');
   assert.equal(people.rows[0].familyName, 'Lovelace');
 });
+
+test('every successful sign-in reaches the onSignedIn listeners with the person', async () => {
+  const { onSignedIn } = await import(new URL('utils/events.js', libDir));
+  const heard = [];
+  const off = onSignedIn((personId) => heard.push(personId));
+  try {
+    const { base } = await startApp();
+    await signIn(browser(base));
+    assert.deepEqual(heard, [issuer.webIdFor(ADA)]);
+  } finally {
+    off();
+  }
+});

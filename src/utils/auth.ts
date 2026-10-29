@@ -176,6 +176,9 @@ export class Auth {
    * @param account - The user account associated with the person
    * @returns A promise that resolves to an authentication result and tokens
    */
+  /** Called with the person's id at every successful sign-in; the backend emits `onSignedIn` from it (server only). */
+  static signedIn?: (personId: string) => void;
+
   static async onSigninSuccessful(
     provider: BackendProvider,
     person: UserData,
@@ -189,6 +192,7 @@ export class Auth {
         account.id
     );
     const request: Request & { linkedAuth: AuthSession } = provider.request;
+    Auth.signedIn?.(person.id);
 
     try {
       const authentication = await Auth.buildAuthSession(

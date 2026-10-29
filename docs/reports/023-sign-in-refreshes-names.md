@@ -51,3 +51,24 @@ None.
 
 Existing people keep their `""` literals until their next sign-in with a name claim; there is no
 migration (the only installs are development stores that are reset).
+
+## Addendum — review fixes
+
+Create Now's independent review of the change (plan 226 §NM) asked for three more things, in a
+second changeset (`sign-in-names-hardening`, minor):
+
+- **Names are cleaned** before they are stored: `cleanPersonName` (`src/utils/personName.ts`,
+  exported) removes C0/C1 controls and the bidirectional controls U+200E/F, U+202A–E and
+  U+2066–9, collapses whitespace and caps a name at 200 characters. Every create and refresh goes
+  through it (`personNameFields`). Apps use the same function for names they read elsewhere.
+- **Apple only fills.** Apple's given and family name come from the client, unsigned (Apple sends
+  them to the app only on first consent), so for an existing person they fill an empty name and
+  never overwrite one. Names in a signed ID token (Solid-OIDC, Google) still overwrite.
+- **`onSignedIn(callback)`** (`src/utils/events.ts`) runs with the person's id after every
+  successful sign-in, whatever the method (`Auth.onSigninSuccessful` calls the backend's hook,
+  `Auth.signedIn`, so the browser bundle does not load the event bus). Create Now drops its cached
+  name of the person there.
+
+Verification: `npm test` `# pass 626`, `# fail 0` (new: the cleaning, Apple's fill-only names,
+cleaned names on refresh, the `onSignedIn` listener on a Solid-OIDC sign-in);
+`npm run test:integration` `# pass 49`, `# fail 0`.

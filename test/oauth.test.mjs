@@ -659,3 +659,27 @@ test('a new OAuth person is created without empty names or telephone', async () 
   assert.equal(created.length, 1);
   assert.deepEqual(Object.keys(created[0]), ['__id']);
 });
+
+test("Apple's names (unsigned client data) only fill an empty name, never overwrite one", async () => {
+  mock.method(AppleHelper, 'decodeIdentityToken', async () => ({ sub: 'apple-1', email: 'ada@example.test' }));
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' }];
+  existingAccount = ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID, givenName: 'Ada' };
+  const data = { identityToken: 'apple-token', givenName: 'Mallory', familyName: 'Lovelace' };
+  assert.equal(await provider.signinOAuth('apple', data), SIGNED_IN);
+  assert.deepEqual(nameUpdates, [[ADA_WEBID, { familyName: 'Lovelace' }]]);
+});
+
+test('names are cleaned before they are written', async () => {
+  mock.method(GoogleHelper, 'validateIdToken', async () => ({
+    sub: 'g-1',
+    email: 'ada@example.test',
+    email_verified: true,
+    given_name: 'Au‮gusta\u0000',
+  }));
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' }];
+  existingAccount = ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID, givenName: 'Ada' };
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.deepEqual(nameUpdates, [[ADA_WEBID, { givenName: 'Au gusta' }]]);
+});
