@@ -1,5 +1,13 @@
 # @\_linked/auth
 
+## 3.21.0
+
+### Minor Changes
+
+- [#180](https://github.com/linked-fw/auth/pull/180) [`ce3cd60`](https://github.com/linked-fw/auth/commit/ce3cd60dd3c0ecb00b3007246e28bf61989e777c) Thanks [@flyon](https://github.com/flyon)! - Sign-in names are cleaned before they are stored (`cleanPersonName`, `utils/personName`: control and bidirectional characters removed, whitespace collapsed, at most 200 characters). Apple's names, which the client sends unsigned, only fill an empty name; names from a signed ID token still overwrite. `onSignedIn(callback)` (`utils/events`) runs after every successful sign-in, whatever the method.
+
+- [#180](https://github.com/linked-fw/auth/pull/180) [`13a42df`](https://github.com/linked-fw/auth/commit/13a42df4c2751116494b7b1f355c2ab5942cf7fe) Thanks [@flyon](https://github.com/flyon)! - Every sign-in writes the issuer's or provider's name claims over the person's stored names (Solid-OIDC, Google, Apple; a claim the sign-in does not carry leaves the stored name, nothing is written when unchanged), instead of only filling empty ones. A new person is created without empty `givenName` / `familyName` / `telephone` literals. `readProfileLiterals` (`utils/issuerDiscovery`) reads a string property of a WebID from its profile document (Turtle or JSON-LD), as `readOidcIssuers` reads its issuers.
+
 ## 3.20.0
 
 ### Minor Changes
