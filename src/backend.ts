@@ -65,6 +65,7 @@ import {
 import { createIssuerDiscovery, WEBID_EMAIL_ISSUER } from './utils/issuerDiscovery.js';
 import type { IssuerDiscovery } from './utils/issuerDiscovery.js';
 import { createGuardedFetch } from './utils/guardedFetch.js';
+import { cleanPersonName } from './utils/personName.js';
 import {
   createOidcRelyingParty,
   defaultOidcResultLocation,
@@ -85,6 +86,7 @@ import type { NativeOidcSigninAnswer, NativeOidcStartAnswer } from './types/auth
 import { refreshTokenExpiryFields } from './utils/token.js';
 import {
   emitAccountWillBeRemovedEvent,
+  emitSignedInEvent,
   onAccountWillBeRemoved,
   offAccountWillBeRemoved,
 } from './utils/events.js';
@@ -127,6 +129,9 @@ import type { AuthSession } from './types/auth.js';
 
 import connect_sqlite3 from 'connect-sqlite3';
 import { limitRequest } from './utils/rateLimit.js';
+
+// Every successful sign-in, whatever its method, reaches the `onSignedIn` listeners.
+Auth.signedIn = emitSignedInEvent;
 
 var SQLiteStore = connect_sqlite3(session);
 
@@ -915,19 +920,44 @@ function emailProvesWebId(
 }
 
 /**
- * Fills a person's empty given and family name from the issuer's name claims. A name the person
- * already has is never replaced: the issuer only supplies what is missing.
+ * A person's given and family name, cleaned (`cleanPersonName`), each only when it has a value: a
+ * new person gets no empty literal.
  */
-async function fillEmptyNames(
+function personNameFields(names: { givenName?: string; familyName?: string }): { givenName?: string; familyName?: string } {
+  const givenName = cleanPersonName(names.givenName);
+  const familyName = cleanPersonName(names.familyName);
+  return { ...(givenName ? { givenName } : {}), ...(familyName ? { familyName } : {}) };
+}
+
+/**
+ * Writes the names a sign-in carries over the person's stored ones. Names from a signed ID token
+ * (Solid-OIDC, Google) overwrite: the sign-in is the source of a person's name, so a changed name
+ * reaches the app at the next sign-in. Names the client sends unsigned (Apple's, on first consent)
+ * only fill a name the person does not have (`fillOnly`). A name the sign-in does not carry is left
+ * as stored, never cleared. Nothing is written when the names are unchanged or the person does not
+ * exist. `current` is the person's stored names when the caller has already read them.
+ */
+async function refreshNames(
   provider: AuthBackendProvider,
   webId: string,
-  person: { givenName?: string | null; familyName?: string | null },
-  identity: VerifiedOidcIdentity
+  names: { givenName?: string; familyName?: string },
+  options: { fillOnly?: boolean; current?: { givenName?: string | null; familyName?: string | null } | null } = {}
 ): Promise<void> {
-  const fields: { givenName?: string; familyName?: string } = {};
-  if (!person.givenName && identity.givenName) fields.givenName = identity.givenName;
-  if (!person.familyName && identity.familyName) fields.familyName = identity.familyName;
-  if (!fields.givenName && !fields.familyName) return;
+  const claimed = personNameFields(names);
+  if (!claimed.givenName && !claimed.familyName) return;
+  const person =
+    options.current ?? (await provider.userShape.select((p) => [p.givenName, p.familyName]).for(webId));
+  if (!person) return;
+  const fields = options.fillOnly
+    ? {
+        ...(claimed.givenName && !person.givenName ? { givenName: claimed.givenName } : {}),
+        ...(claimed.familyName && !person.familyName ? { familyName: claimed.familyName } : {}),
+      }
+    : claimed;
+  const changed =
+    (fields.givenName !== undefined && fields.givenName !== person.givenName) ||
+    (fields.familyName !== undefined && fields.familyName !== person.familyName);
+  if (!changed) return;
   await provider.userShape.update(fields).for({ id: webId });
 }
 
@@ -952,7 +982,7 @@ async function signInVerifiedWebId(
 
   const person = await provider.userShape.select((p) => [p.givenName, p.familyName]).for(webId);
   if (person) {
-    await fillEmptyNames(provider, webId, person, identity);
+    await refreshNames(provider, webId, identity, { current: person });
     if (emailProven) {
       await dropUnprovenAccess(provider, webId);
       await markEmailVerified(webId, email);
@@ -977,9 +1007,7 @@ async function signInVerifiedWebId(
       const user = await (provider.userShape as any)
         .create({
           __id: webId,
-          givenName: identity.givenName || '',
-          familyName: identity.familyName || '',
-          telephone: '',
+          ...personNameFields(identity),
         })
         .catch((err) => {
           console.error(`Error creating user ${webId}:`, err);
@@ -1539,9 +1567,7 @@ export default class AuthBackendProvider extends BackendProvider {
         const user = await (this.userShape as any)
           .create({
             __id: webIDFromEmail,
-            givenName: firstName,
-            familyName: lastName,
-            telephone: '',
+            ...personNameFields({ givenName: firstName, familyName: lastName }),
           })
           .catch((err) => {
             console.error(`Error creating user ${webIDFromEmail}:`, err);
@@ -2015,7 +2041,7 @@ export default class AuthBackendProvider extends BackendProvider {
       async () => null,
       async () => {
         const user = await (this.userShape as any)
-          .create({ __id: personId, givenName: '', familyName: '', telephone: '' })
+          .create({ __id: personId })
           .catch((err) => {
             console.error(`Error creating user ${personId}:`, err);
             throw new Error(`Could not create user ${personId}`);
@@ -2328,6 +2354,7 @@ export default class AuthBackendProvider extends BackendProvider {
             }
           }
           await markOAuthEmailVerified(identity, account.accountOf.id);
+          await refreshNames(this, account.accountOf.id, identity, { fillOnly: provider === 'apple' });
           return Auth.onSigninSuccessful(this, account.accountOf as UserData, account);
         }
       }
@@ -2375,6 +2402,7 @@ export default class AuthBackendProvider extends BackendProvider {
       await removeStaleLinks();
       await OAuthIdentityStore.createLink(identity, account.id);
       await markOAuthEmailVerified(identity, existing.personId);
+      await refreshNames(this, existing.personId, identity, { fillOnly: provider === 'apple' });
       return Auth.onSigninSuccessful(
         this,
         (existing.account?.accountOf as UserData) ?? person,
@@ -2390,9 +2418,7 @@ export default class AuthBackendProvider extends BackendProvider {
         const user = await (this.userShape as any)
           .create({
             __id: webID,
-            givenName: identity.givenName || '',
-            familyName: identity.familyName || '',
-            telephone: '',
+            ...personNameFields(identity),
           })
           .catch((err) => {
             console.error(`Error creating ${provider} user ${webID}:`, err);
@@ -2590,9 +2616,7 @@ export default class AuthBackendProvider extends BackendProvider {
     if (limited) return limited;
 
     const person = await (this.userShape as any)
-      .create({
-        givenName: '',
-      })
+      .create({})
       .catch((err) => {
         console.error('Error creating temporary user:', err);
         throw new Error('Error creating temporary user');

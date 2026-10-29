@@ -52,6 +52,8 @@ let personHasPassword;
 let linkedProviders;
 let lookedUpWebID;
 let credentialTable;
+// the name writes `update(fields).for(node)` made: [webId, fields]
+let nameUpdates;
 
 beforeEach(() => {
   provider = new AuthBackendProvider(null, fakeLincdServer);
@@ -101,7 +103,15 @@ beforeEach(() => {
       for: async (node) => (existingAccount?.id === node.id ? existingAccount : null),
     }),
   };
-  provider.userShape = { select: () => ({ for: async () => existingPerson }) };
+  nameUpdates = [];
+  provider.userShape = {
+    select: () => ({ for: async () => existingPerson }),
+    update: (fields) => ({
+      for: async (node) => {
+        nameUpdates.push([node.id, fields]);
+      },
+    }),
+  };
 });
 
 afterEach(() => {
@@ -590,4 +600,86 @@ test('providerOfIdentityLink: a row without a provider is a legacy Apple link', 
   assert.equal(providerOfIdentityLink({ sub: 's' }), 'apple');
   assert.equal(providerOfIdentityLink({ sub: 's', identityProvider: 'github' }), undefined);
   assert.equal(providerOfIdentityLink({}), undefined);
+});
+
+// ---- names: every sign-in refreshes them from the provider's claims ----
+
+test('a Google sign-in to an existing person writes the changed names from the ID token', async () => {
+  mock.method(GoogleHelper, 'validateIdToken', async () => ({
+    sub: 'g-1',
+    email: 'ada@example.test',
+    email_verified: true,
+    given_name: 'Augusta',
+    family_name: 'King',
+  }));
+  adaVerified();
+  existingAccount = ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID, givenName: 'Ada', familyName: 'Lovelace' };
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.deepEqual(nameUpdates, [[ADA_WEBID, { givenName: 'Augusta', familyName: 'King' }]]);
+});
+
+test('a linked identity signing in refreshes the names; unchanged names write nothing', async () => {
+  verifiedGoogle();
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' }];
+  existingAccount = ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID, givenName: 'Grace' };
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.deepEqual(nameUpdates, [[ADA_WEBID, { givenName: 'Ada' }]], 'only the claim it carries');
+
+  nameUpdates.length = 0;
+  existingPerson = { id: ADA_WEBID, givenName: 'Ada' };
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.deepEqual(nameUpdates, [], 'the same name is not written again');
+});
+
+test('a sign-in without name claims keeps the stored names', async () => {
+  mock.method(AppleHelper, 'decodeIdentityToken', async () => ({ sub: 'apple-1', email: 'ada@example.test' }));
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' }];
+  existingAccount = ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID, givenName: 'Ada', familyName: 'Lovelace' };
+  assert.equal(await provider.signinOAuth('apple', { identityToken: 'apple-token' }), SIGNED_IN);
+  assert.deepEqual(nameUpdates, []);
+});
+
+test('a new OAuth person is created without empty names or telephone', async () => {
+  mock.method(GoogleHelper, 'validateIdToken', async () => ({
+    sub: 'g-9',
+    email: 'nameless@example.test',
+    email_verified: true,
+  }));
+  const created = [];
+  provider.userShape = {
+    ...provider.userShape,
+    create: async (data) => (created.push(data), { id: data.__id }),
+  };
+  provider.accountShape = { ...provider.accountShape, create: async () => ({ id: 'acc-new' }) };
+  login.mock.mockImplementation(async (_provider, _find, create) => (await create(), SIGNED_IN));
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.equal(created.length, 1);
+  assert.deepEqual(Object.keys(created[0]), ['__id']);
+});
+
+test("Apple's names (unsigned client data) only fill an empty name, never overwrite one", async () => {
+  mock.method(AppleHelper, 'decodeIdentityToken', async () => ({ sub: 'apple-1', email: 'ada@example.test' }));
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' }];
+  existingAccount = ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID, givenName: 'Ada' };
+  const data = { identityToken: 'apple-token', givenName: 'Mallory', familyName: 'Lovelace' };
+  assert.equal(await provider.signinOAuth('apple', data), SIGNED_IN);
+  assert.deepEqual(nameUpdates, [[ADA_WEBID, { familyName: 'Lovelace' }]]);
+});
+
+test('names are cleaned before they are written', async () => {
+  mock.method(GoogleHelper, 'validateIdToken', async () => ({
+    sub: 'g-1',
+    email: 'ada@example.test',
+    email_verified: true,
+    given_name: 'Au‮gusta\u0000',
+  }));
+  links = [{ id: 'link-1', accountId: ADA_ACCOUNT.id, legacy: false, email: 'ada@example.test' }];
+  existingAccount = ADA_ACCOUNT;
+  existingPerson = { id: ADA_WEBID, givenName: 'Ada' };
+  assert.equal(await provider.signinOAuth('google', GOOGLE), SIGNED_IN);
+  assert.deepEqual(nameUpdates, [[ADA_WEBID, { givenName: 'Au gusta' }]]);
 });

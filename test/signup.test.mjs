@@ -142,7 +142,7 @@ test('creates the account when nothing exists, with the normalized email', async
   assert.ok(result.created, `not created: ${JSON.stringify(result)}`);
 
   assert.equal(people.created.length, 1);
-  assert.equal(people.created[0].id, WEBID);
+  assert.deepEqual(people.created[0], { id: WEBID, givenName: 'Ada', familyName: 'Lovelace' }, 'no telephone ""');
 
   assert.equal(accounts.created.length, 1);
   assert.equal(accounts.created[0].email, EMAIL);

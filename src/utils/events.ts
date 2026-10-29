@@ -12,6 +12,27 @@ const { authEvents } = sharedState('@_linked/auth', 'events', () => ({
 
 const NEW_USER_EVENT = '@_linked/auth/new-user';
 const ACCOUNT_REMOVED_EVENT = '@_linked/auth/account-removed';
+const SIGNED_IN_EVENT = '@_linked/auth/signed-in';
+
+/** Tell the `onSignedIn` listeners that `personId` signed in (any method). Listener errors are logged, never thrown. */
+export function emitSignedInEvent(personId: string): void {
+  try {
+    authEvents.emit(SIGNED_IN_EVENT, personId);
+  } catch (error) {
+    console.warn('[auth] a signed-in listener failed', error);
+  }
+}
+
+/**
+ * Run `callback` after every successful sign-in, whatever the method, with the person's id (for an
+ * app that caches something about the person, such as a name the sign-in may have just changed).
+ *
+ * @returns a function that removes the listener again
+ */
+export function onSignedIn(callback: (personId: string) => void): () => void {
+  authEvents.on(SIGNED_IN_EVENT, callback);
+  return () => authEvents.off(SIGNED_IN_EVENT, callback);
+}
 
 export function emitNewUserEvent(person, account) {
   return new Promise<void>((resolve) => {

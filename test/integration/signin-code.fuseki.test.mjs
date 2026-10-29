@@ -76,6 +76,13 @@ test('a code for a new email creates the person, account and session, and works 
   assert.deepEqual(await credentialValues(personId, 'email'), [email]);
   assert.deepEqual(await credentialValues(personId, 'signinCodeEmailHash'), []);
   assert.deepEqual(await credentialValues(personId, 'signinCode'), []);
+  // the new person has no empty name or telephone literal (it has no name to give)
+  const literals = await sparql(`
+    SELECT ?p WHERE {
+      { <${personId}> ?p ?v FILTER(?p IN (<http://schema.org/givenName>, <http://schema.org/familyName>, <http://schema.org/telephone>)) }
+      UNION { GRAPH ?g { <${personId}> ?p ?v FILTER(?p IN (<http://schema.org/givenName>, <http://schema.org/familyName>, <http://schema.org/telephone>)) } }
+    }`);
+  assert.deepEqual(literals, []);
 
   assert.deepEqual(await provider().signinWithCode(email, code), {
     error: INVALID_SIGNIN_CODE_MESSAGE,

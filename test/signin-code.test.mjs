@@ -260,10 +260,7 @@ test('an email with no account gets the same answer, and its code creates the ac
   const result = await provider.signinWithCode(NEW_EMAIL, code);
   assert.equal(result.signedIn, NEW_PERSON_ID);
   assert.equal(result.isNew, true);
-  assert.deepEqual(
-    people.created.map((p) => p.id),
-    [NEW_PERSON_ID]
-  );
+  assert.deepEqual(people.created, [{ id: NEW_PERSON_ID }], 'no empty names or telephone');
   const account = accounts.created.at(-1);
   assert.equal(account.email, NEW_EMAIL);
   assert.equal(account.accountOf.id, NEW_PERSON_ID);

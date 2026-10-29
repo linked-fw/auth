@@ -645,3 +645,48 @@ test('the callback is rate limited per IP', async () => {
     resetRateLimits();
   }
 });
+
+// ---- names: every sign-in writes the issuer's name claims over the stored ones ----
+
+test('a new person gets the name claims it has, and no empty literal', async () => {
+  issuer.claims = (c) => ({ ...c, given_name: 'Ada' });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(people.created.length, 1);
+  const { id, ...fields } = people.created[0];
+  assert.deepEqual(fields, { givenName: 'Ada' }, 'no familyName or telephone ""');
+});
+
+test('a second sign-in with a changed given name overwrites the stored one', async () => {
+  const webId = issuer.webIdFor(ADA);
+  people.rows.push({ id: webId, givenName: 'Ada', familyName: 'Lovelace' });
+  accounts.rows.push({ id: 'https://app.test/account/ada', email: ADA, accountOf: { id: webId } });
+  issuer.claims = (c) => ({ ...c, given_name: 'Augusta', family_name: 'Lovelace' });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(people.rows[0].givenName, 'Augusta');
+  assert.equal(people.rows[0].familyName, 'Lovelace');
+});
+
+test('a sign-in without name claims keeps the stored names', async () => {
+  const webId = issuer.webIdFor(ADA);
+  people.rows.push({ id: webId, givenName: 'Ada', familyName: 'Lovelace' });
+  accounts.rows.push({ id: 'https://app.test/account/ada', email: ADA, accountOf: { id: webId } });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(people.rows[0].givenName, 'Ada');
+  assert.equal(people.rows[0].familyName, 'Lovelace');
+});
+
+test('every successful sign-in reaches the onSignedIn listeners with the person', async () => {
+  const { onSignedIn } = await import(new URL('utils/events.js', libDir));
+  const heard = [];
+  const off = onSignedIn((personId) => heard.push(personId));
+  try {
+    const { base } = await startApp();
+    await signIn(browser(base));
+    assert.deepEqual(heard, [issuer.webIdFor(ADA)]);
+  } finally {
+    off();
+  }
+});
