@@ -24,7 +24,7 @@ const {
 const { dpopProofFor } = await import(new URL('utils/issuerTokens.js', libDir));
 
 const CLIENT_ID = 'http://localhost:4010/.well-known/linked-client.jsonld';
-const URL_ = 'http://localhost:4040/gateway/call/@_linked/server/selectQuery';
+const URL_ = 'http://localhost:4040/gateway/call/@_linked/server/readQuery';
 
 let issuer;
 let webId;

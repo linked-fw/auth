@@ -825,7 +825,7 @@ const { webId, issuer, clientId, expiresAt } = await verifySolidAccessToken({
   accessToken: req.headers['x-linked-user-token'],
   dpop: req.headers.dpop,
   method: 'POST',
-  url: 'https://data.example/call/@_linked/server/selectQuery', // the URL the app called
+  url: 'https://data.example/call/@_linked/server/readQuery', // the URL the app called
   expectedClientId: 'https://app.example/.well-known/linked-client.jsonld',
   allowLocalhost: false,
 });
