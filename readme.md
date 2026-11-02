@@ -59,7 +59,7 @@ Call `setAuthTokenStorageMethods(get, set, remove)` (from `@_linked/auth/utils/t
 
 ### Two copies of the package in one runtime
 
-A module can be evaluated twice in one runtime (Vite's SSR runner and Node under `linked start`, or two browser bundles). What the app configures is kept once per runtime, so either copy sees it: the `Auth.*` statics (`userType`, `accountType`, `webIdFor`, `signinClient`, `oidcSignin`, `cookiePrefix`), the client's token, refresh handler and refresh timer, native token storage, the rate-limit store and limits, the refresh session store and limits, the native OIDC browser opener and the auth events. `ProvideAuth` from one copy is seen by `useAuth` from the other. Match a `FatalConfigError` with `isLinkedError(err, FatalConfigError)` (`@_linked/core/utils/linkedError`) rather than `instanceof`. The `Auth.*` statics are accessors: assign them (`Auth.webIdFor = fn`) rather than `mock.method(Auth, 'webIdFor')` in tests. See [shared state and error brands](https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md).
+A module can be evaluated twice in one runtime (Vite's SSR runner and Node under `linked start`, or two browser bundles). What the app configures is kept once per runtime, so either copy sees it: the `Auth.*` statics (`userType`, `accountType`, `webIdFor`, `signinClient`, `oidcSignin`, `cookiePrefix`, `signinNames`), the client's token, refresh handler and refresh timer, native token storage, the rate-limit store and limits, the refresh session store and limits, the native OIDC browser opener and the auth events. `ProvideAuth` from one copy is seen by `useAuth` from the other. Match a `FatalConfigError` with `isLinkedError(err, FatalConfigError)` (`@_linked/core/utils/linkedError`) rather than `instanceof`. The `Auth.*` statics are accessors: assign them (`Auth.webIdFor = fn`) rather than `mock.method(Auth, 'webIdFor')` in tests. See [shared state and error brands](https://github.com/linked-fw/cli/blob/main/docs/architecture/shared-state-and-error-brands.md).
 
 ## Upgrading to 3.4
 
@@ -566,6 +566,33 @@ Auth.webIdFor = hmacWebIdFor({ secret: process.env.WEBID_SECRET, issuer: 'https:
   implementation of the rule asserts.
 - Changing the derivation of an app that already has users changes their WebIDs: their existing
   Person IRIs need migrating.
+
+### Names from sign-in
+
+A person created by a sign-in gets the names it carries: an ID token's `given_name` and
+`family_name` (Solid-OIDC issuers, Google), Apple's `givenName` / `familyName` from the client (sent
+on first consent only), or the sign-up form's. Names are cleaned first (control and bidirectional
+characters removed, whitespace collapsed, at most 200 characters), and a name the sign-in does not
+carry is not written, so a person never gets an empty literal.
+
+When an existing person signs in, `Auth.signinNames` decides what the names do:
+
+| `Auth.signinNames` | Solid-OIDC, Google | Apple |
+|---|---|---|
+| `'overwrite'` (default) | written over the stored names, so a name changed at the issuer reaches the app at the next sign-in | fill an empty name only |
+| `'fillEmpty'` | fill an empty name only, never replace one | fill an empty name only |
+
+An app where people edit their names in the app (its own profile page) sets `'fillEmpty'` once in
+its backend setup, before requests are served, so a sign-in never undoes an edit:
+
+```ts
+import { Auth } from '@_linked/auth/utils/auth';
+
+Auth.signinNames = 'fillEmpty';
+```
+
+In both modes a name the sign-in does not carry is left as stored (never cleared), and unchanged
+names write nothing. Any other value throws a `TypeError`.
 
 ### Issuer discovery
 
