@@ -172,7 +172,7 @@ export const SigninWithPasswordForm = ({
             <div className={style.control}>
               {/* `endAdornment` was a prop on the legacy TextField. @_linked/primitives' Input is a
                   bare <input> with no adornment slot; the trailing control is positioned
-                  by the call site, as CN's own SigninForm already does. */}
+                  by the call site, as a host app's own sign-in form can do. */}
               <Input
                 type={'email'}
                 className={style.input}

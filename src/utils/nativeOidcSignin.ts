@@ -1,6 +1,6 @@
 /**
- * Solid-OIDC sign-in in a native app (Capacitor), on the client (RFC 8252; arch-08 §Protocol,
- * "Native apps", in the Create Now repo). No React.
+ * Solid-OIDC sign-in in a native app (Capacitor), on the client (RFC 8252, the
+ * native-app flow of Solid-OIDC). No React.
  *
  * 1. `startNativeOidcSignin` asks the server for the issuer's authorization URL and the pending
  *    sign-in, sealed by the server, and keeps that record on the device with the token storage the

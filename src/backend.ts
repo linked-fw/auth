@@ -2654,7 +2654,7 @@ export default class AuthBackendProvider extends BackendProvider {
    * After validating, find or create the Person + UserAccount, then return
    * the standard signin response shape. Workspace provisioning is done by
    * the frontend in a follow-up Server.call to avoid coupling @_linked/auth
-   * to CN-specific shapes.
+   * to app-specific shapes.
    */
   async signinDev(input: {
     webId: string;

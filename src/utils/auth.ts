@@ -74,7 +74,7 @@ export class Auth {
    * The app's Client ID Document configuration, for signing in through a Solid-OIDC issuer. When
    * set, the backend serves the document at `{SITE_ROOT}/.well-known/linked-client.jsonld`; when
    * not, nothing is served there. Set it once in the backend setup, before
-   * `setupBeforeControllers` runs, e.g. `Auth.signinClient = {clientName: 'Create.Now', theme}`.
+   * `setupBeforeControllers` runs, e.g. `Auth.signinClient = {clientName: 'My App', theme}`.
    */
   static get signinClient(): SigninClientConfig | undefined {
     return authState.signinClient;

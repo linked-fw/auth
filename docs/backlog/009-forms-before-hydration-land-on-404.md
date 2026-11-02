@@ -1,7 +1,7 @@
 ---
 summary: >
   Auth's forms now post before hydration (report 022), so credentials stay out of the URL, but the
-  post goes to the page's own URL, which an app usually does not handle (Create Now answers 404),
+  post goes to the page's own URL, which an app usually does not handle (a typical host app answers 404),
   so the typed values are lost. Consider rendering the forms disabled until hydrated.
 status: Open
 ---
@@ -10,7 +10,7 @@ status: Open
 
 Since report 022 every form in this package renders `method="post"` with no `action`. A submit
 before React hydrates is then a native POST to the page's own URL. Nothing reaches the URL, the
-history or an access log, but apps serve pages on GET only: Create Now answers
+history or an access log, but apps serve pages on GET only: a typical host app answers
 `POST /signin -> 404`, and the person sees an error page and types again.
 
 ## First questions

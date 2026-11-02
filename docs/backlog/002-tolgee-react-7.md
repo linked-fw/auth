@@ -1,8 +1,8 @@
 ---
 summary: >
   `@tolgee/react` 5 -> 7 (Renovate wants to skip 6) is deferred: we decided not to upgrade
-  Tolgee for now. Four auth components still call `useTranslate()`, but nothing in Create Now or
-  linked-fw renders a `TolgeeProvider`, and Tolgee throws without one -- so those components can
+  Tolgee for now. Four auth components still call `useTranslate()`, but no known consumer app or
+  linked-fw repo renders a `TolgeeProvider`, and Tolgee throws without one -- so those components can
   only render inside an app that sets Tolgee up itself. Moving them to LINKED translations and
   dropping Tolgee is likely the better outcome than either upgrading or deferring.
 status: Deferred -- held by the shared Renovate preset; replaces Renovate PR linked-fw/auth#55
@@ -24,8 +24,8 @@ when this is picked up.
   (all under `src/components/`), always as `t(prefix + '.key', 'English default')`.
 - **But nothing provides it.** `useTolgeeContext` in `@tolgee/react` 5 throws
   `Couldn't find tolgee instance, did you forgot to use TolgeeProvider?` when neither a
-  `TolgeeProvider` nor the global-context plugin is present. Neither Create Now's `src/` nor any
-  linked-fw repo (GitHub code search, 2026-10-02) renders a `TolgeeProvider`, and Create Now does
+  `TolgeeProvider` nor the global-context plugin is present. Neither the known consumer apps nor any
+  linked-fw repo (GitHub code search, 2026-10-02) renders a `TolgeeProvider`, and those apps do
   not import these four components. So today they work only in an app that configures Tolgee
   itself.
 
@@ -43,8 +43,7 @@ Sources: tolgee-js release notes for
 [v7.0.0](https://github.com/tolgee/tolgee-js/releases/tag/v7.0.0).
 
 So the upgrade itself is probably cheap for auth. It is deferred because Tolgee is not the
-direction: translations are moving to LINKED translations (`@_linked/translation`, arch-17 in
-Create Now).
+direction: translations are moving to LINKED translations (`@_linked/translation`).
 
 ## Recommendation: remove rather than upgrade
 

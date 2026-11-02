@@ -105,7 +105,7 @@ export const hmacWebIdFor = (options: HmacWebIdOptions): ((email: string) => str
 
 /**
  * The published test vector for `hmacWebId`, with the local dev secret and the local webid.email
- * issuer. Every implementation of the rule (webid.email, Create Now's dev sign-in) asserts it.
+ * issuer. Every implementation of the rule (webid.email, a host app's dev sign-in) asserts it.
  * The email has mixed case and surrounding spaces, so the vector covers normalisation too.
  */
 export const HMAC_WEBID_TEST_VECTOR = Object.freeze({

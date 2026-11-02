@@ -632,17 +632,17 @@ style the sign-in page. Set `Auth.signinClient` once in the backend setup, befor
 import { Auth } from '@_linked/auth/utils/auth';
 
 Auth.signinClient = {
-  clientName: 'Create.Now',
-  logoUri: 'https://create.now/logo.svg',
-  policyUri: 'https://create.now/privacy', // also clientUri (default SITE_ROOT) and tosUri
+  clientName: 'My App',
+  logoUri: 'https://example.org/logo.svg',
+  policyUri: 'https://example.org/privacy', // also clientUri (default SITE_ROOT) and tosUri
   redirectUris: ['com.example.app:/callback'], // optional, e.g. app-claimed links of native builds
   theme: {
     layout: 'two-column', // or 'card'
     colors: { primary: '#1a73e8', accent: '#ff8000', background: 'white', panel: '#0b1020', text: '#222' },
     font: 'Inter',
     scheme: 'light', // or 'dark'
-    brand: { name: 'Create.Now', logoUri: 'https://create.now/logo.svg' },
-    panelArt: 'https://create.now/art/bow.svg', // an image or animated SVG, shown as an <img>
+    brand: { name: 'My App', logoUri: 'https://example.org/logo.svg' },
+    panelArt: 'https://example.org/art/bow.svg', // an image or animated SVG, shown as an <img>
   },
 };
 ```
@@ -684,7 +684,7 @@ below); nothing else of the issuer's is kept. Opt in with `Auth.oidcSignin`, nex
 ```ts
 import { Auth } from '@_linked/auth/utils/auth';
 
-Auth.signinClient = { clientName: 'Create.Now' };
+Auth.signinClient = { clientName: 'My App' };
 Auth.oidcSignin = {
   // all optional:
   defaultIssuer: 'https://webid.email', // for emails whose domain names no issuer

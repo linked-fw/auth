@@ -5,21 +5,16 @@ summary: >
   Google/Apple/Facebook methods, which stay untouched. Configurable WebID derivation, issuer
   discovery, the redirect and callback on openid-client, the Client ID Document (with the sign-in
   theme schema), a passwordless sign-in by emailed code, the email-mismatch report, and native
-  apps. Steps A0–A5 of Create Now's master plan 065, with the contracts the other repos depend on.
+  apps. Steps A0–A5 of a cross-repo master plan, with the contracts the other repos depend on.
 status: In progress
 ---
 
 # 001 — WebID sign-in track
 
-**Design** (in the Create Now repo, `Semantu/create-now`):
-[arch-08 §Sign-in](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#sign-in)
-(protocol, claims, issuer check, Client ID Document, native apps, mismatch handling),
-[arch-08 §WebID derivation](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#webid-derivation)
-and [§Dev-mode identity](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#dev-mode-identity)
-(the HMAC rule and the shared dev derivation), and
-[plan 063](https://github.com/Semantu/create-now/blob/main/docs/plans/063-webid-signin-contract.md)
-decisions 1–7, 9 and 10.
-**Tracked by** CN's [master plan 065](https://github.com/Semantu/create-now/blob/main/docs/plans/065-webid-signin-master-plan.md);
+**Design:** the sign-in protocol, its claims, the issuer check, the Client ID Document, native
+apps and mismatch handling; the HMAC WebID rule and the shared dev derivation. The sections below
+state the parts each step needs.
+**Tracked by** a cross-repo master plan (065);
 its Rules apply (worktrees, a changeset per PR, PRs ending in an Outcome section, never "Claude" in
 commits or PRs), and its §Contracts is the cross-repo source of the [Contracts](#contracts) below.
 Each step agent works in its own plan doc (numbers assigned by 065: A0 → `002`, A1 → `003`,
@@ -27,11 +22,11 @@ A3 → `004`, A5 → `005`, A2 → `006`, A4 → `007`, A6 → `008`, A8 → `00
 ([its plan](https://github.com/Semantu/webid-email/blob/main/docs/plans/001-webid-email-service.md)).
 
 **The steps.** A0 makes the email → WebID derivation configurable and exports the HMAC rule
-(unblocks webid.email's minting and CN's dev mode). A1 finds a user's issuer (WebID profile,
+(unblocks webid.email's minting and the host app's dev mode). A1 finds a user's issuer (WebID profile,
 WebFinger, fallback). A2 is the Solid-OIDC exchange itself, on `openid-client`. A3 serves the
 app's Client ID Document and defines its theme extension. A5 adds a passwordless sign-in by
 emailed code, which webid.email's pages use. A4 makes the exchange work in native (Capacitor)
-builds. A6 prefixes auth's cookie names so two Linked apps on one host (CN and a local
+builds. A6 prefixes auth's cookie names so two Linked apps on one host (a host app and a local
 webid.email) keep separate sessions; A8 makes that prefix default to the app's `APP_PREFIX`, so
 no app has to set one. A7 lets a provider's verified email reach the existing account with that verified email
 (password or not), makes a changed provider email leave the old account, and lets a sign-in start
@@ -45,26 +40,25 @@ in by configuration; an app that doesn't sees no difference, so these are minor 
 **Tests:** `npm test` (`node --test test/*.test.mjs`, runs against the built `lib/`, so build first
 with `npx linked build`); `npm run test:integration` (`node --test test/integration/*.test.mjs`)
 against throwaway Fuseki datasets, and it throws unless `AUTH_TEST_FUSEKI_URL`,
-`AUTH_TEST_FUSEKI_USER` and `AUTH_TEST_FUSEKI_PASSWORD` are set. Consumers (Create Now) verify
-after the release reaches them.
+`AUTH_TEST_FUSEKI_USER` and `AUTH_TEST_FUSEKI_PASSWORD` are set. Consumer apps verify after the
+release reaches them.
 
 ---
 
 ## Contracts
 
-What this repo provides to, or must know from, the other repos. Copied from
-[065 §Contracts](https://github.com/Semantu/create-now/blob/main/docs/plans/065-webid-signin-master-plan.md#contracts),
-which is the cross-repo copy: a step that changes one of these updates both in the same PR and
+What this repo provides to, or must know from, the other repos. Copied from the master plan's
+§Contracts, which is the cross-repo copy: a step that changes one of these updates both in the same PR and
 says so in its Outcome. A step reads the contracts it touches before its own section.
 
-### 1. WebID derivation (A0 → webid.email W2, CN C2a)
+### 1. WebID derivation (A0 → webid.email W2, host app C2a)
 
 - `@_linked/auth` gains a configurable derivation, `Auth.webIdFor: (email: string) => string`, a
   static on `Auth` (`src/utils/auth.ts`) like `Auth.userType`; auth has no config object. Default:
   today's `emailToWebID` (UUID v5 under `https://webid.email/id/`, no `#me`), so existing apps
   keep their WebIDs. Every call site in auth goes through it, `markOAuthEmailVerified` included
-  (it compares a derived WebID with the Person IRI). CN's own two call sites (`/auth/dev`,
-  `/auth/derive-webid`) switch in C2a.
+  (it compares a derived WebID with the Person IRI). The host app's own two call sites
+  (`/auth/dev`, `/auth/derive-webid`) switch in C2a.
 - Exported from `@_linked/auth/utils/webID` (the root has no named exports): `hmacWebIdFor({secret, issuer}): (email) => string` and the
   plain function `hmacWebId(email, {secret, issuer})`. Normalisation: `trim(lowercase(email))`.
   Result: `{issuer}/id/{h}#me`, `h` = first 128 bits of `HMAC-SHA256(secret, normalised)` as 32
@@ -72,21 +66,21 @@ says so in its Outcome. A step reads the contracts it touches before its own sec
 - Exported from the same module, the test vector `HMAC_WEBID_TEST_VECTOR = {email, secret, issuer, webId}` with
   `secret = 'local-dev-webid-secret'`, `issuer = 'http://localhost:4050'` and an email with mixed
   case and surrounding spaces. W2 and C2a assert against it.
-- The dev secret value above is the one CN's `DEV_WEBID_SECRET` and webid.email's `WEBID_SECRET`
+- The dev secret value above is the one the host app's `DEV_WEBID_SECRET` and webid.email's `WEBID_SECRET`
   hold locally. *Open:* whether it is committed in both `.env.example` files (like
   `.github-app-test.pem`) or only documented.
 
 Where "backend config" and "package root" land in this codebase is in A0's
 [Pitfalls](#a0-pitfalls): the package has no config object and no root named exports today.
 
-### 2. Environment variables this repo must know (CN C0/C2a, webid.email W2)
+### 2. Environment variables this repo must know (host app C0/C2a, webid.email W2)
 
 Set by the consumers, never read by this package directly; they feed `hmacWebIdFor`:
 
 | Where | Variable | Values |
 |---|---|---|
-| CN | `DEV_WEBID_SECRET` | the dev secret; commented "must equal the local webid.email's `WEBID_SECRET`" |
-| CN | `DEV_WEBID_ISSUER` | `http://localhost:4050` |
+| host app | `DEV_WEBID_SECRET` | the dev secret; commented "must equal the local webid.email's `WEBID_SECRET`" |
+| host app | `DEV_WEBID_ISSUER` | `http://localhost:4050` |
 | webid.email | `WEBID_SECRET` | the HMAC secret; the same name in production and locally, where it holds the dev value |
 | webid.email | issuer URL | `SITE_ROOT` (`http://localhost:4050` locally, `https://webid.email` in production); no separate variable |
 
@@ -94,19 +88,19 @@ Two variables this package does read for its cookie names (A6, A8):
 
 | Variable | Meaning |
 |---|---|
-| `APP_PREFIX` | every Linked app's own identifier; gives the default cookie prefix, sanitised plus `_` (CN `cn` → `cn_`, webid.email `webid-email` → `webid-email_`); also in the app's browser bundle (Vite `define`) |
+| `APP_PREFIX` | every Linked app's own identifier; gives the default cookie prefix, sanitised plus `_` (`my-app` → `my-app_`, webid.email `webid-email` → `webid-email_`); also in the app's browser bundle (Vite `define`) |
 | `AUTH_COOKIE_PREFIX` | overrides that default when an app wants a specific name; unset or empty falls through to `APP_PREFIX` |
 
-CN and webid.email set no `AUTH_COOKIE_PREFIX`: their `APP_PREFIX` values apply, so CN's cookies
-are `cn_accessToken`, … and webid.email's issuer reads its own hint `webid-email_linkedAuthSession`.
+The host app and webid.email set no `AUTH_COOKIE_PREFIX`: their `APP_PREFIX` values apply, so the
+host app's cookies are `my-app_accessToken`, … and webid.email's issuer reads its own hint `webid-email_linkedAuthSession`.
 An app with neither variable keeps the plain names.
 
-CN's `WEBID_MODE` (`bypass` · `local` · `production`; `DEV_AUTH=true` maps to `bypass` and is
-deprecated) is CN's own and not read here. Note that this package's dev-only behaviour
+The host app's `WEBID_MODE` (`bypass` · `local` · `production`; `DEV_AUTH=true` maps to `bypass`
+and is deprecated) is the host app's own and not read here. Note that this package's dev-only behaviour
 (`signinDev`, links to the server log) is gated on `DEV_AUTH` today; see A5's
 [Pitfalls](#a5-pitfalls).
 
-### 3. Client ID Document and theme (A3 → webid.email W3, W4, CN C3)
+### 3. Client ID Document and theme (A3 → webid.email W3, W4, host app C3)
 
 - Path: `{SITE_ROOT}/.well-known/linked-client.jsonld`; `client_id` is that URL. Callback:
   `{SITE_ROOT}/auth/oidc/callback`. `http://` only for `localhost`.
@@ -151,7 +145,7 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   how webid.email's emails count in production, where the app cannot derive its WebIDs. With
   `NODE_ENV` `development` or `test` (never `production`, `staging` or unset), any issuer's
   verified email counts. Any other issuer can claim any email for its own WebIDs, so an app that
-  resolves anything by email (CN's invitations, C2b) uses the email only when the callback's
+  resolves anything by email (the host app's invitations, C2b) uses the email only when the callback's
   outcome says `emailProven`. Email-based invitations will not match users of third-party
   issuers: a product limitation, which the invite UI's "grant a WebID directly" covers.
 - (A9) A WebID has one `UserAccount` whichever method signs it in: the Solid-OIDC callback, code
@@ -159,7 +153,7 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   none), and report `isNewAccount: false`.
 - A2 tests against a **mock issuer in auth's test directory** (discovery, JWKS, token endpoint,
   a profile document); W3 tests with `openid-client` against a test Client ID Document. Neither is
-  a shared artifact; C1 is the first test across the two real processes.
+  a shared artifact; the host app's C1 is the first test across the two real processes.
 - **Native apps (A4):** the same exchange and checks, with the redirect URI an app-claimed link
   from the Client ID Document's extra `redirect_uris` (`Auth.signinClient.redirectUris`; Universal
   Link, App Link or custom scheme). RPCs `startNativeOidcSignin({input, redirectUri, prompt?,
@@ -174,7 +168,7 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   a short code and a link carrying it (single use, short expiry, rate-limited like reset links);
   `signinWithCode(email, code)` verifies the email and ends in the normal session step. With no
   email provider, the code goes to the server log, as reset links do today.
-- webid.email's sign-in pages (W4) and CN's `local`-mode test (C1) read the code from that log.
+- webid.email's sign-in pages (W4) and the host app's `local`-mode test (C1) read the code from that log.
 
 ---
 
@@ -189,9 +183,9 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
 - An exported HMAC derivation: `hmacWebId(email, {secret, issuer})` →
   `{issuer}/id/{h}#me`, `h` = first 128 bits of `HMAC-SHA256(secret, trim(lowercase(email)))` as 32
   hex characters, and its factory `hmacWebIdFor({secret, issuer})`. webid.email (production and
-  dev) and CN's `bypass` mode use this one function.
-- A published test vector (email + dev secret + issuer → WebID) that webid.email and CN reuse
-  ([contract 1](#1-webid-derivation-a0--webidemail-w2-cn-c2a)).
+  dev) and the host app's `bypass` mode use this one function.
+- A published test vector (email + dev secret + issuer → WebID) that webid.email and the host app
+  reuse ([contract 1](#1-webid-derivation-a0--webidemail-w2-host-app-c2a)).
 
 **Files**
 - `src/utils/webID.ts`: `emailToWebID` (UUID v5 under `WEBID_EMAIL_NAMESPACE`) and
@@ -216,24 +210,21 @@ deprecated) is CN's own and not read here. Note that this package's dev-only beh
   settable before `setupBeforeControllers` runs. Which one is a tasks-mode choice; it is not a
   redesign as long as the default is `emailToWebID` and every call site in `backend.ts` uses it.
 - **"Exported from the package root" contradicts the code.** The root has no named exports and
-  importing it pulls the React components in; consumers import subpaths (CN imports
-  `@_linked/auth/utils/webID`, allowed by the `./*` exports map). Export from
+  importing it pulls the React components in; consumers import subpaths (the host app
+  imports `@_linked/auth/utils/webID`, allowed by the `./*` exports map). Export from
   `src/utils/webID.ts` (subpath `@_linked/auth/utils/webID`) and say so in the Outcome; adding root
   re-exports would change what importing the root means. Reported to the master plan.
-- **CN does not subclass this provider.** `CreateNowBackendProvider extends BackendProvider` and
-  calls `emailToWebID` itself (its `/auth/dev` and `/auth/derive-webid` routes). A0 changes nothing
-  there; C2a switches CN to `hmacWebIdFor`. Keep `emailToWebID` exported and unchanged.
+- **The host app does not subclass this provider.** Its backend provider extends
+  `BackendProvider` and calls `emailToWebID` itself (its `/auth/dev` and `/auth/derive-webid`
+  routes). A0 changes nothing there; C2a switches the host app to `hmacWebIdFor`. Keep `emailToWebID` exported and unchanged.
 - `markOAuthEmailVerified` silently stops marking emails verified if it keeps calling
   `emailToWebID` while the app has configured another derivation: it must use the configured one.
 - Tests run against `lib/`: build before every test run, or a green run proves nothing.
 - The `.changeset` entry is a `minor` (new exports, no behaviour change by default).
 
-**Architecture.** [arch-08 §WebID derivation](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#webid-derivation)
-(the rule, `#me`, why a keyed hash), [§Dev-mode identity](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#dev-mode-identity)
-(`bypass` and `local` must give an email the same WebID through this one function), [§webid.email
-service](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#webidemail-service)
-("`@_linked/auth` gains a configurable `webIdFor(email)`; its default stays today's derivation"),
-063 decision 6. Parallel track: no existing method changes behaviour; the only visible change for an
+**Architecture.** The rule above, with `#me` and a keyed hash; `bypass` and `local` must give an
+email the same WebID through this one function; `@_linked/auth` gains a configurable
+`webIdFor(email)` and its default stays today's derivation. Parallel track: no existing method changes behaviour; the only visible change for an
 app that configures nothing is none.
 
 **Tests**
@@ -288,9 +279,8 @@ app that configures nothing is none.
 - Tests run against `lib/`: build first. Keep the module free of `process.env` reads at import
   time so the test file can configure it per case.
 
-**Architecture.** [arch-08 §Sign-in → Flow](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#flow)
-(the discovery diagram: WebID → profile, email → WebFinger → issuer link | WebID link | no answer
-→ webid.email), 063 decisions 1 and 2. Parallel track: nothing existing calls this module.
+**Architecture.** Discovery: WebID → profile, email → WebFinger → issuer link | WebID link | no
+answer → webid.email. Parallel track: nothing existing calls this module.
 
 **Tests**
 - Quick gate: `npx linked build && node --test test/issuer-discovery.test.mjs`.
@@ -354,7 +344,7 @@ app that configures nothing is none.
   (`{SITE_ROOT}/auth/oidc/callback`, plus app-claimed links for native builds), `client_uri`,
   `policy_uri`, `tos_uri`, and the theme extension under its one key
   (`https://linked.cm/ns/signin#theme`).
-- **Define the theme schema here** ([contract 3](#3-client-id-document-and-theme-a3--webidemail-w3-w4-cn-c3)):
+- **Define the theme schema here** ([contract 3](#3-client-id-document-and-theme-a3--webidemail-w3-w4-host-app-c3)):
   TypeScript types, a JSON Schema and `validateClientTheme(doc)` that drops invalid values and
   reports them, plus the font allow-list. webid.email imports this definition (W4); it is not
   served as a schema and webid.email does not publish one.
@@ -391,9 +381,8 @@ app that configures nothing is none.
   starts: say in the Outcome which subpath exports it.
 - Tests run against `lib/`: build first.
 
-**Architecture.** [arch-08 §Branding: the Client ID Document](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#branding-the-client-id-document)
-(fields, the theme as a declarative namespaced extension, panel art as `<img>`, no third-party code
-on the issuer page, dev clients), 063 decisions 4 and 5. Parallel track: the route is additive; an
+**Architecture.** The Client ID Document carries the branding (fields, the theme as a declarative namespaced extension, panel art as `<img>`, no third-party code
+on the issuer page, dev clients). Parallel track: the route is additive; an
 app without sign-in config can serve nothing at that path (404) rather than a half-built document.
 
 **Tests**
@@ -461,8 +450,8 @@ any Linked app may)
   same credential; how the two are stored is the first tasks-mode decision, within contract 5.
 - **The dev log is gated on `DEV_AUTH`, not on "no provider".** `devAuthEnabled()` in
   `src/utils/email.ts` requires `DEV_AUTH=true` as well as no `LinkedEmail` provider; contract 5
-  says "with no email provider", and contract 2 deprecates `DEV_AUTH` in CN. webid.email (W1) and
-  CN's `local` mode must set `DEV_AUTH=true` for the log line to appear, or this package needs a
+  says "with no email provider", and contract 2 deprecates `DEV_AUTH` in the host app. webid.email (W1)
+  and the host app's `local` mode must set `DEV_AUTH=true` for the log line to appear, or this package needs a
   separate switch. Reported to the master plan; A5 does not change the gate on its own.
 - **The new user's WebID must come from the configured derivation (A0).** `createAccount` calls
   `emailToWebID` directly today. If A5 lands before A0, it calls the same function and A0 rewires
@@ -478,12 +467,10 @@ any Linked app may)
 - Tests run against `lib/`: build first. The unit tests stub the store with `test/fakeStore.mjs`
   and capture `LinkedEmail` instead of sending (see `test/password-reset.test.mjs`).
 
-**Architecture.** [arch-08 §Verified email decides the WebID](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#verified-email-decides-the-webid)
-(an emailed sign-in link is one of the three ways an email is verified; "sign in as A another way:
-an emailed code"), [§Dev-mode identity](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#dev-mode-identity)
-(links to the server log without a provider), [§webid.email service](https://github.com/Semantu/create-now/blob/main/docs/architecture/08-identity-and-auth.md#webidemail-service)
-(webid.email's own sign-in is a normal `@_linked/auth` session), 063 decision 9 (a short code in
-the same email as the link, so a link opened on one device can be typed on another). Parallel
+**Architecture.** A verified email decides the WebID: an emailed sign-in link is one of the three
+ways an email is verified ("sign in as A another way: an emailed code"); in dev, links go to the
+server log without a provider; webid.email's own sign-in is a normal `@_linked/auth` session; a
+short code goes in the same email as the link, so a link opened on one device can be typed on another). Parallel
 track: password sign-in, reset and verification keep their methods, tokens and rate-limit rules;
 the new kind has its own properties so a reset and a code never consume each other.
 
@@ -511,20 +498,20 @@ sign in from the log line in dev, the readme documents them, and the release car
 ## A6 — Cookie-name prefix
 
 **Depends on:** nothing. **PR:** [#131](https://github.com/linked-fw/auth/pull/131), report [011](../reports/011-cookie-prefix.md). **Size:** small, 2 phases.
-Adds to [contract 2](#2-environment-variables-this-repo-must-know-cn-c0c2a-webidemail-w2).
+Adds to [contract 2](#2-environment-variables-this-repo-must-know-host-app-c0c2a-webidemail-w2).
 
-**Problem.** Two Linked apps on one host (CN on `localhost:4040`, webid.email on
+**Problem.** Two Linked apps on one host (a host app on `localhost:4040`, webid.email on
 `localhost:4050`) share auth's cookies, whose names are fixed, because browsers don't separate
 cookies by port: signing out of one signs out the other, and webid.email's issuer session dies
-with CN's sign-out.
+with the host app's sign-out.
 
 **Scope.** A configurable prefix, `AUTH_COOKIE_PREFIX` (env, read once) or `Auth.cookiePrefix` (a
 static), default empty so existing apps see no change, applied to every cookie auth sets and
 reads, server and client side: `accessToken`, `refreshToken` (and its legacy `/` copy),
 `linkedAuthSession` (the hint webid.email's issuer reads), and express-session's `linked.auth`
 (A2's pending OIDC sign-ins). The client learns it the way it learns the token lifetimes, from
-`process.env` inlined into the bundle. Readme: when to set it. Contract 2: CN `cn_`, webid.email
-`wie_` locally.
+`process.env` inlined into the bundle. Readme: when to set it. Contract 2: the host app `my-app_`,
+webid.email `wie_` locally.
 
 **Verify**
 - Unit tests: every cookie name honours the prefix; an empty prefix gives today's names (existing
@@ -536,7 +523,7 @@ reads, server and client side: `accessToken`, `refreshToken` (and its legacy `/`
 - webid.email: set `AUTH_COOKIE_PREFIX=wie_` locally, and read the hint in
   `src/oidc/provider.ts` with `sessionHintCookieName()` instead of the base `SESSION_HINT_COOKIE`
   (which stays `linkedAuthSession` whatever the prefix).
-- CN: set `AUTH_COOKIE_PREFIX=cn_` locally, and inline it into the client bundle through
+- The host app: set `AUTH_COOKIE_PREFIX=my-app_` locally, and inline it into the client bundle through
   `createViteConfig({define})`.
 - 065 §Contracts 2 gets the two `AUTH_COOKIE_PREFIX` rows above.
 
@@ -548,10 +535,10 @@ prefix, and neither app sets `AUTH_COOKIE_PREFIX`.
 ## A8 — Cookie prefix defaults to `APP_PREFIX`
 
 **Depends on:** A6. **PR:** [#133](https://github.com/linked-fw/auth/pull/133), report [012](../reports/012-cookie-prefix-default.md). **Size:** small, 2 phases.
-Changes [contract 2](#2-environment-variables-this-repo-must-know-cn-c0c2a-webidemail-w2).
+Changes [contract 2](#2-environment-variables-this-repo-must-know-host-app-c0c2a-webidemail-w2).
 
-**Problem.** Several Linked backends often run on one host (CN on 4040, webid.email on 4050, other
-apps), and browsers share one cookie jar per host. With A6 each app had to set
+**Problem.** Several Linked backends often run on one host (a host app on 4040, webid.email on 4050,
+other apps), and browsers share one cookie jar per host. With A6 each app had to set
 `AUTH_COOKIE_PREFIX` itself; an app that didn't still collided.
 
 **Scope.** When `Auth.cookiePrefix` and `AUTH_COOKIE_PREFIX` are unset, the prefix defaults to the
@@ -560,7 +547,7 @@ to none only when `APP_PREFIX` is unset too. Precedence: `Auth.cookiePrefix` >
 `AUTH_COOKIE_PREFIX` > `APP_PREFIX` > `''`. The client resolves it the same way from
 `process.env.AUTH_COOKIE_PREFIX` and `process.env.APP_PREFIX`, inlined by Vite's `define`
 (`resolveCookiePrefix(process.env)` gives an app's Vite config the resolved prefix). Readme: nothing
-to set unless you want a specific name. Contract 2: CN and webid.email set no prefix; their
+to set unless you want a specific name. Contract 2: the host app and webid.email set no prefix; their
 `APP_PREFIX` applies.
 
 **Verify**
@@ -576,7 +563,7 @@ to set unless you want a specific name. Contract 2: CN and webid.email set no pr
   config defines `process.env.AUTH_COOKIE_PREFIX` as `resolveCookiePrefix(process.env)` (today
   `process.env.AUTH_COOKIE_PREFIX ?? ''`, which the client then reads as unset and falls back to an
   undefined `APP_PREFIX`, i.e. no prefix: a mismatch with the server's `webid-email_`).
-- CN: drop `AUTH_COOKIE_PREFIX=cn_` (its `APP_PREFIX=cn` gives the same `cn_`, so no sign-out) and
+- The host app: drop `AUTH_COOKIE_PREFIX=my-app_` (its `APP_PREFIX=my-app` gives the same `my-app_`, so no sign-out) and
   define the resolved prefix the same way in `vite.config.ts`.
 - The Linked CLI's `createViteConfig` could define `process.env.APP_PREFIX` for the client by
   default (as it does `APP_NAME`), so an app with no `define` at all gets the client default too.
@@ -591,7 +578,7 @@ backlog 008 (W5).
 
 **Problem.** webid.email's Google sign-in goes through `signinOAuth`, whose rules refuse Google for
 any existing account with a password (`sign_in_to_link`), and follow a linked Google identity even
-after its email changed. Both disagree with arch-08 §One email, one persona: several sign-in
+after its email changed. Both disagree with the rule "one email, one persona": several sign-in
 methods for the same email reach the same account. And an app's "Continue with Google" needs a
 typed email first, because `startOidcSignin` requires an `input`.
 
@@ -619,7 +606,7 @@ never an unverified one; the email decides, not the provider subject)
 
 **Consumers** (outside this repo; routed by master plan 065)
 - 065 §Contracts 4: the hint-only start (contract 4 here has it).
-- CN: "Continue with Google" calls `startOidcSignin({providerHint: 'google'})` with no email.
+- The host app: "Continue with Google" calls `startOidcSignin({providerHint: 'google'})` with no email.
 - webid.email backlog 008: items 1 and 2 are settled by this release.
 - Peace Game (P1): count the links without a recorded email first ([backlog 007](../backlog/007-oauth-email-rule-edges.md) §2).
 
@@ -627,7 +614,7 @@ never an unverified one; the email decides, not the provider subject)
 
 ## A9 — Email proof by the default issuer, and one account per WebID
 
-**Depends on:** A2, A7. **PR:** [#137](https://github.com/linked-fw/auth/pull/137), report [014](../reports/014-email-proof-default-issuer.md). **Size:** small-to-medium, 2 phases. From CN's backlog 110 §1–2 (step C4):
+**Depends on:** A2, A7. **PR:** [#137](https://github.com/linked-fw/auth/pull/137), report [014](../reports/014-email-proof-default-issuer.md). **Size:** small-to-medium, 2 phases. From the host app's step C4:
 in production no webid.email email proves its WebID to an app (webid.email's HMAC secret never
 leaves it, so `Auth.webIdFor` cannot derive), so email invitations never resolve; and a bypass
 (`signinDev`) sign-in followed by an issuer sign-in of the same WebID leaves two `UserAccount`s.
