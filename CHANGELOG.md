@@ -1,5 +1,11 @@
 # @\_linked/auth
 
+## 3.22.0
+
+### Minor Changes
+
+- [#186](https://github.com/linked-fw/auth/pull/186) [`ef7b1f3`](https://github.com/linked-fw/auth/commit/ef7b1f3223e789d64aedecfeb57801ff53834c6d) Thanks [@flyon](https://github.com/flyon)! - `Auth.signinNames` (`'overwrite' | 'fillEmpty'`, default `'overwrite'`) decides what a sign-in of an existing person does with the names it carries. `'overwrite'` keeps the current behaviour: Solid-OIDC and Google name claims are written over the stored names. `'fillEmpty'`, for an app where people edit their names in the app, only fills an empty name and never replaces one. Apple's unsigned names only fill in either mode, and new people are created with the sign-in's names as before. Any other value throws a `TypeError`.
+
 ## 3.21.0
 
 ### Minor Changes
