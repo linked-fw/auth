@@ -930,10 +930,12 @@ function personNameFields(names: { givenName?: string; familyName?: string }): {
 }
 
 /**
- * Writes the names a sign-in carries over the person's stored ones. Names from a signed ID token
- * (Solid-OIDC, Google) overwrite: the sign-in is the source of a person's name, so a changed name
- * reaches the app at the next sign-in. Names the client sends unsigned (Apple's, on first consent)
- * only fill a name the person does not have (`fillOnly`). A name the sign-in does not carry is left
+ * Writes the names a sign-in carries for an existing person. With `Auth.signinNames` at
+ * `'overwrite'` (the default), names from a signed ID token (Solid-OIDC, Google) overwrite the
+ * stored ones: the sign-in is the source of a person's name, so a changed name reaches the app at
+ * the next sign-in. With `'fillEmpty'` (an app where people edit their names themselves), every
+ * name only fills a name the person does not have. Names the client sends unsigned (Apple's, on
+ * first consent) only fill in either mode (`fillOnly`). A name the sign-in does not carry is left
  * as stored, never cleared. Nothing is written when the names are unchanged or the person does not
  * exist. `current` is the person's stored names when the caller has already read them.
  */
@@ -948,7 +950,8 @@ async function refreshNames(
   const person =
     options.current ?? (await provider.userShape.select((p) => [p.givenName, p.familyName]).for(webId));
   if (!person) return;
-  const fields = options.fillOnly
+  const fillOnly = options.fillOnly === true || Auth.signinNames === 'fillEmpty';
+  const fields = fillOnly
     ? {
         ...(claimed.givenName && !person.givenName ? { givenName: claimed.givenName } : {}),
         ...(claimed.familyName && !person.familyName ? { familyName: claimed.familyName } : {}),
