@@ -18,7 +18,7 @@ const tokens = await import(new URL('utils/issuerTokens.js', libDir));
 const sessions = await import(new URL('utils/sessions.js', libDir));
 
 const ACCOUNT = 'https://app.test/account/ada';
-const URL_ = 'https://cn.test/gateway/call/@_linked/server/readQuery';
+const URL_ = 'https://app.test/gateway/call/@_linked/server/readQuery';
 
 function newGrant({ expiresIn = 300_000 } = {}) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });

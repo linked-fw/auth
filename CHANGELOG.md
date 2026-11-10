@@ -620,7 +620,7 @@
   The declared range was wide enough that the resolved core depended on whatever the
   consumer — or this repo's own CI, via `package-lock.json` — happened to install. Core
   decides how a shape's IRI is minted, so a stale core made this package emit legacy
-  `data.lincd.org` IRIs instead of the arch-02 `linked.cm` scheme. Which IRIs a published
+  `data.lincd.org` IRIs instead of the `linked.cm` naming scheme. Which IRIs a published
   package produces should not be a function of the installer's dependency tree.
 
   Minor rather than patch: this raises the minimum core a consumer must resolve, so it
@@ -772,7 +772,7 @@ RefreshToken}.ts`. The string is the package name stored on the shape
   when they upgrade `@_linked/auth` to this version, to avoid having
   both packages installed side-by-side.
 
-  Context: see create-now plan-011 report (docs/reports/009-legacy-lincd-eradication.md).
+  Context: the host app's legacy-package removal.
 
 ## 1.1.0
 

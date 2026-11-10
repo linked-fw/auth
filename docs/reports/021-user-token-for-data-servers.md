@@ -4,13 +4,13 @@ summary: >
   A Solid-OIDC sign-in keeps the issuer's DPoP-bound JWT access token and its DPoP key server-side
   per session (sealed, dropped with the session or at `exp`); the backend installs the headers hook
   RemoteDataset calls to send `x-linked-user-token` with a fresh DPoP proof; data servers verify
-  both with `verifySolidAccessToken`. Create Now plan 080 step R2b. Minor; adds `jose`.
+  both with `verifySolidAccessToken`. Step R2b of the host app's datasets plan. Minor; adds `jose`.
 ---
 
 # 021 — The user's token for data servers
 
-Create Now plan 080 step R2b (CN report 151, `docs/reports/151-user-token-at-the-gateway.md` in
-the Create Now repo), with `@_linked/server` report 019 and webid.email report 023. Landed on the
+Step R2b of the host app's datasets plan (and its report on the user token at the gateway),
+with `@_linked/server` report 019 and webid.email report 023. Landed on the
 integration branch `dev` together with them.
 
 ## PR
@@ -86,7 +86,7 @@ the same proof twice `replay`:
 ```
 
 `npx changeset status --since=origin/dev`, in a plain clone of this branch (in the worktree,
-changesets finds Create Now's workspace root first):
+changesets finds the host app's workspace root first):
 
 ```
 Packages to be bumped:
@@ -94,7 +94,7 @@ Packages to be bumped:
   - @_linked/auth
 ```
 
-CN's gateway spec and regular set against this checkout: CN report 151 §Verification.
+The host app's gateway spec and regular set against this checkout: its report, §Verification.
 
 ### Deviations
 
@@ -107,7 +107,7 @@ CN's gateway spec and regular set against this checkout: CN report 151 §Verific
 ### Follow-ups
 
 - `offline_access` refresh of the kept token; tokens for sign-ins without an issuer (password,
-  email code, Google, Apple, guest, dev) → Create Now backlog 117 §5, §6.
+  email code, Google, Apple, guest, dev) → a host app backlog item.
 - A persistent `IssuerTokenStore` is the app's choice (`setIssuerTokenStore`); none ships.
 
 ## Details
@@ -119,4 +119,4 @@ the token's own lifetime; reuse detection revokes the session and with it the gr
 
 ## Review addendum
 
-The review fixes of this step are in Create Now report 151 §Review addendum (`docs/reports/151-user-token-at-the-gateway.md`).
+The review fixes of this step are in the host app's report on the user token at the gateway, §Review addendum.

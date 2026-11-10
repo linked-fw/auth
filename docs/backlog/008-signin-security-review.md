@@ -1,7 +1,7 @@
 ---
 summary: >
-  Findings of the security review over the WebID sign-in track (auth #119–#137), run in Create
-  Now's wrap-up (X1 of its plan 065): a custom-scheme redirect lets an attacker who starts a native
+  Findings of the security review over the WebID sign-in track (auth #119–#137), run in the host
+  app's wrap-up (X1 of its sign-in master plan): a custom-scheme redirect lets an attacker who starts a native
   sign-in take the victim's account (medium); no issuer mix-up defence; discovery helpers default
   to an unguarded fetch; the development email-proof relaxation on a public dev server.
 status: Open

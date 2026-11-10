@@ -79,7 +79,7 @@ const hmacWebIdUnchecked = (email: string, { secret, issuer }: HmacWebIdOptions)
 
 /**
  * Derives a WebID from an email with a keyed hash, the rule webid.email mints WebIDs with
- * (arch-08 §WebID derivation):
+ * (§WebID derivation in the host app's identity architecture):
  *
  *   name  : trim(lowercase(email))
  *   h     : first 128 bits of HMAC-SHA256(secret, name), as 32 lowercase hex characters

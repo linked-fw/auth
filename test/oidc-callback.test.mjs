@@ -64,7 +64,7 @@ after(() => {
 beforeEach(() => {
   issuer.reset();
   resetRateLimits();
-  // the issuer mints WebIDs from emails; the app derives the same ones, as CN does with HMAC
+  // the issuer mints WebIDs from emails; the app derives the same ones, as a host app does with HMAC
   Auth.webIdFor = (email) => issuer.webIdFor(email.trim().toLowerCase());
   Auth.signinClient = { clientName: 'Test App' };
   outcomes = [];

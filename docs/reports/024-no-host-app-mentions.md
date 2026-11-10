@@ -19,8 +19,8 @@ host's architecture docs and plans were dropped; plan 001 states their rules inl
 app "the host app" (cookie prefix example `my-app` → `my-app_`). **Verification:** `npx linked
 build` (`✔ Build successful`), `npm test` (`# pass 626`, `# fail 0`). **Deviations:** none.
 **Follow-ups:** `test/` (outside the scanned paths) still uses the app's name and domain as
-fixture data: `client-id-document.test.mjs` (`'Create.Now'`, `https://create.now/…`),
-`cookie-prefix*.test.mjs` (`cn`, `cn_`), `issuer-tokens.test.mjs` (`cn.test`) and a comment in
+fixture data: `client-id-document.test.mjs` (its name and domain), `cookie-prefix*.test.mjs`
+(its abbreviation as a prefix), `issuer-tokens.test.mjs` (a host name) and a comment in
 `oidc-callback.test.mjs`.
 
 ## Details

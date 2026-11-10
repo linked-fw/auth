@@ -6,7 +6,7 @@
  * `refreshToken`, `linkedAuthSession` and the session cookie: signing out of one signs out the
  * other. So each app's cookies carry a prefix of their own, resolved in this order:
  *
- * 1. `Auth.cookiePrefix = 'cn_'` (server) / `setCookiePrefix('cn_')`;
+ * 1. `Auth.cookiePrefix = 'app_'` (server) / `setCookiePrefix('app_')`;
  * 2. `AUTH_COOKIE_PREFIX` in the environment (unset or empty falls through);
  * 3. the app's own `APP_PREFIX`, made a safe cookie-name token plus `_` (`webid-email` →
  *    `webid-email_`, see {@link cookiePrefixFromAppPrefix});
@@ -67,7 +67,7 @@ function checked(prefix: string, source: string): string {
 /**
  * The cookie prefix an app's `APP_PREFIX` gives: every run of characters other than letters,
  * digits, `_`, `.` and `-` becomes `-`, leading and trailing `-`, `_` and `.` are dropped, and `_`
- * is appended. `webid-email` → `webid-email_`, `cn` → `cn_`, `My App!` → `My-App_`; nothing left
+ * is appended. `webid-email` → `webid-email_`, `my-app` → `my-app_`, `My App!` → `My-App_`; nothing left
  * (or no `APP_PREFIX`) gives `''`.
  */
 export function cookiePrefixFromAppPrefix(appPrefix: string | undefined): string {

@@ -59,13 +59,13 @@ installed a nested 2.x copy in every app once `@_linked/server` 3.0 shipped. Dro
 was the plan; it moved to `devDependencies` because the exposure test needs it.
 
 - 3.15.2 (#142): moved to `devDependencies` with the range unchanged; lockfile reflagged only.
-- 3.15.3 (#144): range `^2.0` to `^3.0.0`, because a workspace on `@_linked/server@3` (Create
-  Now) failed `npm install` with ERESOLVE on the dev range. Auth uses neither `BackendAPIStore`
+- 3.15.3 (#144): range `^2.0` to `^3.0.0`, because a workspace on `@_linked/server@3` (the host
+  app) failed `npm install` with ERESOLVE on the dev range. Auth uses neither `BackendAPIStore`
   nor `GatewayStore` (the 3.0 breaking changes), so no source changed.
 - 3.15.5 (#149, below) raised it to `^3.5.0`.
 
-The consumer-side check (`npm ls @_linked/server` shows one copy) is recorded in Create Now's
-plan 068, step R2.
+The consumer-side check (`npm ls @_linked/server` shows one copy) is recorded in the host app's
+plan for this change.
 
 ## 3. Session-gated methods are declared `'signed-in'` (3.15.5, #149)
 

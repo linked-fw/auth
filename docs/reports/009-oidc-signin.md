@@ -21,8 +21,8 @@ method is unchanged.
 
 Step A2 of [plan 001](../plans/001-webid-signin-track.md#a2--the-redirect-and-callback),
 implementing contract 4 against contract 3's public client. PR
-[#127](https://github.com/linked-fw/auth/pull/127). Design: arch-08 §Sign-in, §Protocol
-and §Verified email decides the WebID, plan 063 decisions 1, 2 and 10 (in Create Now). It also
+[#127](https://github.com/linked-fw/auth/pull/127). Design: the host app's identity architecture (§Sign-in, §Protocol
+and §Verified email decides the WebID) and its sign-in plan, decisions 1, 2 and 10. It also
 closes A1's DNS-rebinding follow-up.
 
 ## Public API
@@ -173,7 +173,7 @@ check.
 ## Known limitations and follow-ups
 
 - **Contract 4 changed** (plan 001, Contracts §4): the profile fetch is skipped only for an
-  origin-root issuer, and the token's email is trusted only with `emailProven`. CN's 065
+  origin-root issuer, and the token's email is trusted only with `emailProven`. The host app's sign-in master plan
   §Contracts 4 needs the same wording, and C2b's email-based invitations must use only an email
   with `emailProven`.
 - **Native apps** cannot use the cookie-bound pending state or the redirecting route. This is
@@ -194,6 +194,6 @@ check.
   same origin and root path, so it stays.
 - The check that the token's `iss` equals the pending issuer is defence in depth. openid-client's
   own comparison plus the metadata check already imply it, so no test reaches it.
-- Create Now picks this up after the release. Its root `npm install` brings in `openid-client`
-  and `undici`. Bypass sign-in on 4040 and `tests/e2e/signin.spec.ts` were not run against this
+- The host app picks this up after the release. Its root `npm install` brings in `openid-client`
+  and `undici`. Bypass sign-in and its sign-in end-to-end spec were not run against this
   branch, because the localized checkout stays on `main`.

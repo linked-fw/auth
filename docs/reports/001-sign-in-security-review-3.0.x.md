@@ -19,8 +19,8 @@ releases happened, what each one found, and what was decided, including what was
 left open. The CHANGELOG says what changed; this says why.
 
 The work was part of a wider dependency and checkout maintenance effort across the `linked-fw`
-packages. Create Now keeps the sibling report for it ("Dependency and checkout maintenance",
-report 074 in the Create Now repository's `docs/reports/`), which covers the Renovate backlog
+packages. The host app keeps the sibling report for it ("Dependency and checkout maintenance",
+in its own repository), which covers the Renovate backlog
 and the test breakage described under *Also in this period*.
 
 ## How the fixes were shipped
@@ -95,7 +95,7 @@ plainPassword)` to the backend provider for the re-hash above. It is only called
 is reachable over `/call/@_linked/auth/<method>` unless something says otherwise, and in the
 server's default `warn` exposure mode an undeclared method runs. TypeScript's `protected` does
 nothing at runtime. So anyone could have called it with any credential id and set that
-credential's password. Create Now caught this with its exposure test, which blocks it on its own
+credential's password. The host app caught this with its exposure test, which blocks it on its own
 side, but other consumers had no such list.
 
 `@_linked/server-utils` 1.9 added the mechanism for this: `declareInternal(cls, methods)` (or the
@@ -130,10 +130,10 @@ Left undeclared on purpose (all three resolved in 3.3.0, see *3.3.0: auth declar
 - `checkSignin`, `validateRequestToken`, `refreshSession`, `getTokenFromRequest`,
   `getTokenCandidates` and `getRefreshTokenFromRequest` act on the caller's own request or
   tokens. Reachable, they give a caller nothing it does not already have. A consumer may still
-  declare them internal (Create Now does).
+  declare them internal (the host app does).
 - auth does not yet declare its **callable** methods (`declareCallable` / `@callable`). Until it
   does, a server in `enforce` mode answers 501 for sign-in unless the app declares them, as
-  Create Now does.
+  the host app does.
 
 **`types`.** package.json had `"types": "index.d.ts"`, a file that has never been in the
 tarball. It now points at `lib/esm/index.d.ts`, the same file the `exports` map's `types`
@@ -224,7 +224,7 @@ Decisions:
 
 The three items left undeclared in 3.0.6 are closed. auth now declares every method of both
 providers, callable or internal, so a server in `rpcExposure: 'enforce'` keeps sign-in working
-without the app declaring anything (Create Now had been declaring auth's whole table itself).
+without the app declaring anything (the host app had been declaring auth's whole table itself).
 The table is in the readme (*RPC surface*).
 
 - **Callable.** What auth's frontend calls: sign-in, sign-up, recovery, `validateToken` and
@@ -248,7 +248,7 @@ fails when a provider method is added without a declaration.
 
 - **Set `APPLE_CLIENT_ID` (web) and/or `APPLE_CLIENT_ID_IOS` (iOS) wherever Apple sign-in is
   used.** Without them, from 3.0.1 on, every Apple sign-in fails. The PeaceGame data shows Apple
-  users; Create Now does not use Apple sign-in.
+  users; the host app does not use Apple sign-in.
 - **Facebook sign-in is refused** from 3.0.2 on.
 - **From 3.0.7, handle `action: 'sign_in_to_link'`** from `signinOAuth`: ask the user to sign
   in with their existing method, then call `linkOAuthIdentity`. Apps with an RPC exposure list

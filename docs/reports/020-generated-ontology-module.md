@@ -32,7 +32,7 @@ to core.
 - `test/shapes.test.mjs`: the module namespace and `ns` from `auth.data.js`.
 - Changeset (minor): the object is gone; use `import * as auth`.
 
-Consumers of the old object outside auth: none. A grep of CN (`src`, `packages`, `tests`,
+Consumers of the old object outside auth: none. A grep of the host app (`src`, `packages`, `tests`,
 `scripts`), every `packages-local/*` checkout, app-template and webid-email for
 `@_linked/auth/ontologies/auth` finds nothing.
 
