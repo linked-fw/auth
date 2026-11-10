@@ -17,12 +17,11 @@
  * graph passes go to the store as one SPARQL UPDATE request, which Fuseki applies in a single
  * transaction.
  */
-import { ns } from '../ontologies/auth.data.js';
 
 /** The namespace auth's terms lived in before 2.0. */
 export const LEGACY_AUTH_NAMESPACE = 'http://lincd.org/ont/auth/';
 /** The namespace auth's terms live in now. */
-export const AUTH_NAMESPACE: string = ns('').id;
+export const AUTH_NAMESPACE: string = 'https://linked.cm/ont/auth/';
 
 /**
  * Anything that executes raw SPARQL — every `SparqlDataset`, including `FusekiStore`. The app's
