@@ -37,7 +37,15 @@ const authState = sharedState('@_linked/auth', 'Auth', () => ({
   webIdFor: emailToWebID as (email: string) => string,
   signinClient: undefined as SigninClientConfig | undefined,
   oidcSignin: undefined as OidcSigninConfig | undefined,
+  signinNames: 'overwrite' as SigninNames,
 }));
+
+/**
+ * What a sign-in does with the name claims it carries for a person who already exists:
+ * `'overwrite'` writes them over the stored names, `'fillEmpty'` only fills a name that is empty.
+ */
+export type SigninNames = 'overwrite' | 'fillEmpty';
+const SIGNIN_NAMES: readonly SigninNames[] = ['overwrite', 'fillEmpty'];
 
 export class Auth {
   // define the default user and account types
@@ -95,6 +103,28 @@ export class Auth {
   }
   static set oidcSignin(config: OidcSigninConfig | undefined) {
     authState.oidcSignin = config;
+  }
+
+  /**
+   * What a sign-in of an existing person does with the names it carries (an ID token's
+   * `given_name`/`family_name` from a Solid-OIDC issuer or Google; Apple's names from the client).
+   * `'overwrite'` (the default) writes signed names over the stored ones, so a name changed at the
+   * issuer reaches the app at the next sign-in. `'fillEmpty'`, for an app where people edit their
+   * names in the app, only fills a name that is empty and never replaces one. In both, a name the
+   * sign-in does not carry is left as stored, unchanged names write nothing, Apple's unsigned names
+   * only fill, and a new person is created with the names the sign-in carries. Set it once in the
+   * backend setup, e.g. `Auth.signinNames = 'fillEmpty'`; any other value throws.
+   */
+  static get signinNames(): SigninNames {
+    return authState.signinNames;
+  }
+  static set signinNames(mode: SigninNames) {
+    if (!SIGNIN_NAMES.includes(mode)) {
+      throw new TypeError(
+        `Auth.signinNames must be one of ${SIGNIN_NAMES.map((m) => `'${m}'`).join(', ')}, not ${JSON.stringify(mode)}`
+      );
+    }
+    authState.signinNames = mode;
   }
 
   /**

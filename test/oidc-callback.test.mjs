@@ -94,6 +94,7 @@ afterEach(() => {
   Auth.webIdFor = defaultWebIdFor;
   delete Auth.signinClient;
   delete Auth.oidcSignin;
+  Auth.signinNames = 'overwrite';
 });
 
 /** An app on a real port with the provider's middleware, its callback and a `/start` route. */
@@ -676,6 +677,74 @@ test('a sign-in without name claims keeps the stored names', async () => {
   await signIn(browser(base));
   assert.equal(people.rows[0].givenName, 'Ada');
   assert.equal(people.rows[0].familyName, 'Lovelace');
+});
+
+/** Ada's existing person with these stored names, and her account; counts the person writes. */
+function storedAda(names) {
+  const webId = issuer.webIdFor(ADA);
+  people.rows.push({ id: webId, ...names });
+  accounts.rows.push({ id: 'https://app.test/account/ada', email: ADA, accountOf: { id: webId } });
+  const writes = [];
+  const update = people.update;
+  people.update = (data) => (writes.push(data), update(data));
+  return writes;
+}
+
+test('overwrite: unchanged name claims write nothing', async () => {
+  const writes = storedAda({ givenName: 'Ada', familyName: 'Lovelace' });
+  issuer.claims = (c) => ({ ...c, given_name: 'Ada', family_name: 'Lovelace' });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.deepEqual(writes, []);
+});
+
+test('overwrite: a sign-in without a family_name claim keeps the stored family name', async () => {
+  storedAda({ givenName: 'Ada', familyName: 'Lovelace' });
+  issuer.claims = (c) => ({ ...c, given_name: 'Augusta' });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(people.rows[0].givenName, 'Augusta');
+  assert.equal(people.rows[0].familyName, 'Lovelace');
+});
+
+test('fillEmpty: a changed name claim does not replace the stored name, and fills the empty one', async () => {
+  Auth.signinNames = 'fillEmpty';
+  const writes = storedAda({ givenName: 'Ada' });
+  issuer.claims = (c) => ({ ...c, given_name: 'Augusta', family_name: 'King' });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.equal(people.rows[0].givenName, 'Ada');
+  assert.equal(people.rows[0].familyName, 'King');
+  assert.deepEqual(writes, [{ familyName: 'King' }]);
+});
+
+test('fillEmpty: with both names stored, a sign-in writes nothing', async () => {
+  Auth.signinNames = 'fillEmpty';
+  const writes = storedAda({ givenName: 'Ada', familyName: 'Lovelace' });
+  issuer.claims = (c) => ({ ...c, given_name: 'Augusta', family_name: 'King' });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.deepEqual(writes, []);
+  assert.equal(people.rows[0].givenName, 'Ada');
+  assert.equal(people.rows[0].familyName, 'Lovelace');
+});
+
+test('fillEmpty: a sign-in without name claims leaves the empty names empty', async () => {
+  Auth.signinNames = 'fillEmpty';
+  const writes = storedAda({});
+  const { base } = await startApp();
+  await signIn(browser(base));
+  assert.deepEqual(writes, []);
+  assert.equal(people.rows[0].givenName, undefined);
+});
+
+test('fillEmpty: a new person still gets the name claims', async () => {
+  Auth.signinNames = 'fillEmpty';
+  issuer.claims = (c) => ({ ...c, given_name: 'Ada', family_name: 'Lovelace' });
+  const { base } = await startApp();
+  await signIn(browser(base));
+  const { id, ...fields } = people.created[0];
+  assert.deepEqual(fields, { givenName: 'Ada', familyName: 'Lovelace' });
 });
 
 test('every successful sign-in reaches the onSignedIn listeners with the person', async () => {
