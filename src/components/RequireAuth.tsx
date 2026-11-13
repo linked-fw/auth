@@ -1,6 +1,22 @@
 import { ReactElement, useEffect } from 'react';
 import { useAuth, useAuthRenderLoading } from '../hooks/useAuth.js';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+
+/**
+ * The sign-in URL for a visitor sent away from `from` (path, query and hash of the guarded page):
+ * `signinRoute` with `from=<from>` added to its query, so the sign-in page can return the visitor
+ * there. A `from` already in `signinRoute` is replaced.
+ */
+export function signinUrlFrom(signinRoute: string, from: string): string {
+  const hashAt = signinRoute.indexOf('#');
+  const beforeHash = hashAt === -1 ? signinRoute : signinRoute.slice(0, hashAt);
+  const hash = hashAt === -1 ? '' : signinRoute.slice(hashAt);
+  const queryAt = beforeHash.indexOf('?');
+  const path = queryAt === -1 ? beforeHash : beforeHash.slice(0, queryAt);
+  const params = new URLSearchParams(queryAt === -1 ? '' : beforeHash.slice(queryAt + 1));
+  params.set('from', from);
+  return `${path}?${params.toString()}${hash}`;
+}
 
 interface RequireAuthProps {
   children: ReactElement;
@@ -16,15 +32,18 @@ export const RequireAuth = ({
 }: RequireAuthProps) => {
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const defaultRenderLoading = useAuthRenderLoading();
 
   // Also re-run when validation ends: on a full page load `validating` starts true, so a visitor
   // without a session only becomes "signed out" when it flips to false, with userAccount unchanged.
+  // The guarded page goes along as `from`, so the sign-in page can bring the visitor back to it.
+  const from = location.pathname + location.search + location.hash;
   useEffect(() => {
     if (!auth.userAccount && !auth.validating) {
-      navigate(signinRoute || '/signin');
+      navigate(signinUrlFrom(signinRoute || '/signin', from));
     }
-  }, [auth.userAccount, auth.validating, navigate, signinRoute]);
+  }, [auth.userAccount, auth.validating, navigate, signinRoute, from]);
 
   // If the user is not logged in and we are still validating, we can show a loading state
   if (!auth.userAccount && auth.validating) {

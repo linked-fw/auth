@@ -25,15 +25,23 @@ const React = (await import('react')).default;
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { renderToString } = await import('react-dom/server');
-const { MemoryRouter, Routes, Route } = await import('react-router-dom');
+const { MemoryRouter, Routes, Route, useLocation } = await import('react-router-dom');
 const { AppContext } = await import('@_linked/server-utils/components/AppContext');
 const libDir = new URL('../lib/esm/', import.meta.url);
 const { ProvideAuth } = await import(new URL('hooks/useAuth.js', libDir));
-const { RequireAuth } = await import(new URL('components/RequireAuth.js', libDir));
+const { RequireAuth, signinUrlFrom } = await import(
+  new URL('components/RequireAuth.js', libDir)
+);
 
 const h = React.createElement;
 let root;
-async function render(signinRoute) {
+// The sign-in page shows the URL it was opened with, so a test can read the `from` it got.
+function SigninPage() {
+  const location = useLocation();
+  return h('p', null, `signin page at ${location.pathname}${location.search}${location.hash}`);
+}
+
+async function render(signinRoute, entry = '/') {
   await act(async () => {
     root.render(
       h(
@@ -44,15 +52,18 @@ async function render(signinRoute) {
           null,
           h(
             MemoryRouter,
-            { initialEntries: ['/'] },
+            { initialEntries: [entry] },
             h(
               Routes,
               null,
               h(Route, {
-                path: '/',
+                path: '/*',
                 element: h(RequireAuth, { signinRoute }, h('p', null, 'private page')),
               }),
-              h(Route, { path: signinRoute || '/signin', element: h('p', null, 'signin page') })
+              h(Route, {
+                path: (signinRoute || '/signin').split('?')[0],
+                element: h(SigninPage),
+              })
             )
           )
         )
@@ -89,6 +100,32 @@ test('a visitor with no session is redirected to /signin once validation ends', 
 test('the redirect goes to the given signinRoute', async () => {
   await render('/login');
   await waitFor(() => document.body.textContent.includes('signin page'), 'the signin route');
+  assert.match(document.body.textContent, /signin page at \/login\?/);
+});
+
+test('the redirect carries the guarded page, query and hash included, as from', async () => {
+  await render(undefined, '/projects/p1/ontology?tab=classes&q=a%20b#term');
+  await waitFor(() => document.body.textContent.includes('signin page'), 'the signin page');
+  const shown = document.body.textContent.replace('signin page at ', '');
+  const url = new URL(shown, 'http://localhost');
+  assert.equal(url.pathname, '/signin');
+  assert.equal(url.searchParams.get('from'), '/projects/p1/ontology?tab=classes&q=a%20b#term');
+});
+
+test("from is added to the signinRoute's own query", async () => {
+  await render('/login?mode=code', '/deep/page');
+  await waitFor(() => document.body.textContent.includes('signin page'), 'the signin route');
+  const url = new URL(document.body.textContent.replace('signin page at ', ''), 'http://localhost');
+  assert.equal(url.pathname, '/login');
+  assert.equal(url.searchParams.get('mode'), 'code');
+  assert.equal(url.searchParams.get('from'), '/deep/page');
+});
+
+test('signinUrlFrom merges from into the query, replaces an old from and keeps a hash', () => {
+  assert.equal(signinUrlFrom('/signin', '/a?b=1'), '/signin?from=%2Fa%3Fb%3D1');
+  assert.equal(signinUrlFrom('/signin?x=1', '/a'), '/signin?x=1&from=%2Fa');
+  assert.equal(signinUrlFrom('/signin?from=%2Fold&x=1', '/new'), '/signin?from=%2Fnew&x=1');
+  assert.equal(signinUrlFrom('/signin#top', '/a'), '/signin?from=%2Fa#top');
 });
 
 // A server render never finishes validating, so it shows the loading state
