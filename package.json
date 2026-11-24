@@ -10,7 +10,7 @@
     "type": "git",
     "url": "git+https://github.com/linked-fw/auth.git"
   },
-  "version": "3.22.0",
+  "version": "4.0.0",
   "packageManager": "npm@12.2.0",
   "linked": {
     "kind": "library"

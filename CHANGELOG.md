@@ -1,5 +1,17 @@
 # @\_linked/auth
 
+## 4.0.0
+
+### Major Changes
+
+- [#191](https://github.com/linked-fw/auth/pull/191) [`ae1582a`](https://github.com/linked-fw/auth/commit/ae1582a28400c02bf46cb5da9426911904ba9e81) Thanks [@flyon](https://github.com/flyon)! - The ontology is registered by `src/ontologies/index.ts` (core's `registerOntologies`), which the package entry imports; the package registers no prefix (an app's prefix map, `linked.app.json`, holds the prefixes; the ontology's data suggests one). `src/package.ts` exports `registerOntologies` instead of `linkedOntology`. Requires the `@_linked/core` major with `registerOntologies`. Removed: `ontologies/auth.data` (`ns`, `dataFiles`, `loadData`) and `ontologies/auth.register`; the terms module `ontologies/auth` holds the terms as `{id}` literals.
+
+### Patch Changes
+
+- [#191](https://github.com/linked-fw/auth/pull/191) [`9f31f67`](https://github.com/linked-fw/auth/commit/9f31f679635de2778fd960b60c6bec7dbc6d2d5b) Thanks [@flyon](https://github.com/flyon)! - Comments and docs describe the host app generically.
+
+- [#191](https://github.com/linked-fw/auth/pull/191) [`9857b63`](https://github.com/linked-fw/auth/commit/9857b63537694572f464f0af5c9ccf4d0e54fea4) Thanks [@flyon](https://github.com/flyon)! - The ontology data states its suggested prefix and namespace (`vann:preferredNamespacePrefix`, `vann:preferredNamespaceUri`), which `linked build` now requires. The generated modules are unchanged.
+
 ## 3.22.0
 
 ### Minor Changes
