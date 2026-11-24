@@ -4,7 +4,7 @@ import { createLinkedComponentFn } from '@_linked/react/utils/LinkedComponent';
 const {
   linkedShape,
   linkedUtil,
-  linkedOntology,
+  registerOntologies,
   registerPackageExport,
   registerPackageModule,
   getPackageShape,
@@ -21,7 +21,7 @@ export {
   linkedComponent,
   linkedShape,
   linkedUtil,
-  linkedOntology,
+  registerOntologies,
   registerPackageExport,
   registerPackageModule,
   getPackageShape,

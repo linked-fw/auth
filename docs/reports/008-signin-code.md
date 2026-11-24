@@ -14,11 +14,11 @@ Any Linked app can sign users in without a password: the user types their email,
 eight-digit code and a link carrying it, and signs in with either the link or the typed code (the
 code lets a link opened on one device be used on another). It is a method next to password; the
 existing methods, their tokens and rate limits are unchanged. webid.email's sign-in pages (W4)
-and Create Now's `local`-mode test (C1) use it, reading the code from the dev log line.
+and the host app's `local`-mode test (C1) use it, reading the code from the dev log line.
 
 Step A5 of [plan 001](../plans/001-webid-signin-track.md#a5--emailed-sign-in-code-and-link),
-implementing its contract 5. PR [#123](https://github.com/linked-fw/auth/pull/123). Design: arch-08 §Verified email decides the WebID and §Dev-mode identity, and
-plan 063 decision 9, in Create Now.
+implementing its contract 5. PR [#123](https://github.com/linked-fw/auth/pull/123). Design: the host app's identity architecture (§Verified email decides the WebID, §Dev-mode
+identity) and its sign-in plan, decision 9.
 
 ## Public API
 

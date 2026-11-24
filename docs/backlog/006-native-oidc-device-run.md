@@ -11,7 +11,7 @@ status: Open
 Recorded from step A4 (report [010](../reports/010-native-oidc-signin.md)). A4 shipped the server
 and client sides and verified them against the mock issuer with synthetic callback URLs; the
 device run in [plan 001 §A4](../plans/001-webid-signin-track.md#a4--native-apps-capacitor)'s
-Verify was deferred to Peace Game's migration (Create Now's plan 064, step P1), which owns the
+Verify was deferred to Peace Game's migration (step P1), which owns the
 first native app and its signing identities.
 
 ## What P1 does here

@@ -6,12 +6,15 @@
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 @prefix schema: <http://schema.org/> .
+@prefix vann: <http://purl.org/vocab/vann/> .
 
 auth:
     a owl:Ontology ;
     dcterms:description "Terms of sign-in: credentials, identity tokens, refresh tokens and used nonces."@en ;
     dcterms:title "Linked auth"@en ;
-    owl:versionInfo "3.16.0" .
+    owl:versionInfo "3.16.0" ;
+    vann:preferredNamespacePrefix "auth" ;
+    vann:preferredNamespaceUri "https://linked.cm/ont/auth/" .
 
 auth:AuthCredential
     a owl:Class ;

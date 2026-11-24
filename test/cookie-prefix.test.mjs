@@ -12,7 +12,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 
-const PREFIX = 'cn_';
+const PREFIX = 'app_';
 process.env.NODE_ENV = 'test';
 process.env.SITE_ROOT = 'https://app.test';
 process.env.JWT_SECRET = 'prefix-test-secret-prefix-test-secret';
@@ -103,10 +103,10 @@ async function rpc(method, args = [], cookie) {
 
 test('the prefix comes from AUTH_COOKIE_PREFIX, and every cookie name carries it', () => {
   assert.equal(Auth.cookiePrefix, PREFIX);
-  assert.equal(cookies.accessCookieName(), 'cn_accessToken');
-  assert.equal(cookies.refreshCookieName(), 'cn_refreshToken');
-  assert.equal(cookies.sessionHintCookieName(), 'cn_linkedAuthSession');
-  assert.equal(cookieNames.sessionCookieName(), 'cn_linked.auth');
+  assert.equal(cookies.accessCookieName(), 'app_accessToken');
+  assert.equal(cookies.refreshCookieName(), 'app_refreshToken');
+  assert.equal(cookies.sessionHintCookieName(), 'app_linkedAuthSession');
+  assert.equal(cookieNames.sessionCookieName(), 'app_linked.auth');
   // the exported base names are unchanged
   assert.equal(cookies.ACCESS_COOKIE, 'accessToken');
   assert.equal(cookieNames.SESSION_COOKIE_NAME, 'linked.auth');
@@ -115,25 +115,25 @@ test('the prefix comes from AUTH_COOKIE_PREFIX, and every cookie name carries it
 test('sign-in sets only prefixed cookies', async () => {
   const { jar } = await rpc('signinFixture');
   assert.deepEqual(Object.keys(jar).sort(), [
-    'cn_accessToken',
-    'cn_linkedAuthSession',
-    'cn_refreshToken',
+    'app_accessToken',
+    'app_linkedAuthSession',
+    'app_refreshToken',
   ]);
 });
 
 test('the session cookie (express-session) carries the prefix', async () => {
   const res = await fetch(`${url}/remember`);
-  assert.deepEqual(Object.keys(setCookies(res)), ['cn_linked.auth']);
+  assert.deepEqual(Object.keys(setCookies(res)), ['app_linked.auth']);
 });
 
 test('a page load is authenticated by the prefixed access cookie, not by an unprefixed one', async () => {
   const { jar } = await rpc('signinFixture');
   const prefixed = await fetch(`${url}/page`, {
-    headers: { cookie: `cn_accessToken=${jar.cn_accessToken}` },
+    headers: { cookie: `app_accessToken=${jar.app_accessToken}` },
   });
   assert.deepEqual(await prefixed.json(), { account: ACCOUNT.id });
   const other = await fetch(`${url}/page`, {
-    headers: { cookie: `accessToken=${jar.cn_accessToken}` },
+    headers: { cookie: `accessToken=${jar.app_accessToken}` },
   });
   assert.deepEqual(await other.json(), { account: null });
 });
@@ -144,16 +144,16 @@ test('a refresh reads the prefixed refresh cookie and ignores an unprefixed one'
     'validateToken',
     [null, { forceRefresh: true }],
     // as a browser sends it: with the hint, so the refresh cookie is not taken for a legacy one
-    `cn_refreshToken=${jar.cn_refreshToken}; cn_linkedAuthSession=1`
+    `app_refreshToken=${jar.app_refreshToken}; app_linkedAuthSession=1`
   );
   assert.equal(refreshed.body.error, undefined);
-  assert.ok(refreshed.jar.cn_refreshToken && refreshed.jar.cn_refreshToken !== jar.cn_refreshToken);
+  assert.ok(refreshed.jar.app_refreshToken && refreshed.jar.app_refreshToken !== jar.app_refreshToken);
 
   const second = await rpc('signinFixture');
   const other = await rpc(
     'validateToken',
     [null, { forceRefresh: true }],
-    `refreshToken=${second.jar.cn_refreshToken}`
+    `refreshToken=${second.jar.app_refreshToken}`
   );
   assert.equal(other.body.error, 'No token found');
 });
@@ -163,13 +163,13 @@ test('sign-out clears the prefixed cookies and leaves unprefixed names alone', a
   const out = await rpc(
     'signout',
     [],
-    `cn_refreshToken=${jar.cn_refreshToken}; refreshToken=other-app; linkedAuthSession=1`
+    `app_refreshToken=${jar.app_refreshToken}; refreshToken=other-app; linkedAuthSession=1`
   );
   assert.equal(out.body, true);
   for (const name of Object.keys(out.jar)) assert.ok(name.startsWith(PREFIX), name);
   assert.deepEqual(
     Object.keys(out.jar).sort(),
-    ['cn_accessToken', 'cn_linkedAuthSession', 'cn_refreshToken']
+    ['app_accessToken', 'app_linkedAuthSession', 'app_refreshToken']
   );
   for (const value of Object.values(out.jar)) assert.equal(value, '');
 });
@@ -178,7 +178,7 @@ test('the client session hint honours the prefix', (t) => {
   t.after(() => delete globalThis.document);
   globalThis.document = { cookie: 'linkedAuthSession=1; refreshToken=x; accessToken=y' };
   assert.equal(authClient.hasSessionHint(), false, "another app's cookies are not ours");
-  globalThis.document = { cookie: 'theme=dark; cn_linkedAuthSession=1' };
+  globalThis.document = { cookie: 'theme=dark; app_linkedAuthSession=1' };
   assert.equal(authClient.hasSessionHint(), true);
 });
 
@@ -222,7 +222,7 @@ test("no prefix (unset or empty) gives today's names", () => {
 });
 
 test('an invalid AUTH_COOKIE_PREFIX fails loudly', () => {
-  const out = namesIn({ AUTH_COOKIE_PREFIX: 'cn prefix' });
+  const out = namesIn({ AUTH_COOKIE_PREFIX: 'app prefix' });
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /AUTH_COOKIE_PREFIX may only contain/);
 });
@@ -236,12 +236,12 @@ test('the browser bundle can inline the prefix: the module reads process.env.AUT
 test("APP_PREFIX becomes a safe cookie-name token plus '_'", () => {
   const cases = [
     ['webid-email', 'webid-email_'],
-    ['cn', 'cn_'],
+    ['app', 'app_'],
     ['peace.game', 'peace.game_'],
     ['My App!', 'My-App_'],
     ['  spaced  out ', 'spaced-out_'],
     ['a;b=c,d', 'a-b-c-d_'],
-    ['_cn_', 'cn_'],
+    ['_app_', 'app_'],
     ['-x.', 'x_'],
     ['café', 'caf_'],
     ['!!!', ''],
@@ -255,17 +255,17 @@ test("APP_PREFIX becomes a safe cookie-name token plus '_'", () => {
 
 test('resolveCookiePrefix: AUTH_COOKIE_PREFIX, else APP_PREFIX, else none; blank counts as unset', () => {
   const { resolveCookiePrefix } = cookieNames;
-  assert.equal(resolveCookiePrefix({ AUTH_COOKIE_PREFIX: 'cn_', APP_PREFIX: 'webid-email' }), 'cn_');
+  assert.equal(resolveCookiePrefix({ AUTH_COOKIE_PREFIX: 'app_', APP_PREFIX: 'webid-email' }), 'app_');
   assert.equal(resolveCookiePrefix({ APP_PREFIX: 'webid-email' }), 'webid-email_');
   assert.equal(resolveCookiePrefix({ AUTH_COOKIE_PREFIX: '', APP_PREFIX: 'webid-email' }), 'webid-email_');
   assert.equal(resolveCookiePrefix({}), '');
-  assert.throws(() => resolveCookiePrefix({ AUTH_COOKIE_PREFIX: 'a b', APP_PREFIX: 'cn' }), /AUTH_COOKIE_PREFIX/);
+  assert.throws(() => resolveCookiePrefix({ AUTH_COOKIE_PREFIX: 'a b', APP_PREFIX: 'app' }), /AUTH_COOKIE_PREFIX/);
 });
 
 test('precedence in a fresh process: AUTH_COOKIE_PREFIX > APP_PREFIX > none', () => {
   const cases = [
     [{ APP_PREFIX: 'webid-email' }, 'webid-email_'],
-    [{ APP_PREFIX: 'cn' }, 'cn_'],
+    [{ APP_PREFIX: 'app' }, 'app_'],
     [{ APP_PREFIX: 'webid-email', AUTH_COOKIE_PREFIX: '' }, 'webid-email_'],
     [{ APP_PREFIX: 'webid-email', AUTH_COOKIE_PREFIX: 'wie_' }, 'wie_'],
     [{ APP_PREFIX: '!!!' }, ''],

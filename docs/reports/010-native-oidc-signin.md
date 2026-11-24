@@ -18,8 +18,8 @@ URL to auth, which finishes the exchange on the server with the same checks as t
 stores the session's tokens in the app's token storage. The web start and callback are unchanged.
 
 Step A4 of [plan 001](../plans/001-webid-signin-track.md#a4--native-apps-capacitor), on A2's
-exchange ([report 009](009-oidc-signin.md)). Design: arch-08 §Protocol, "Native apps (Capacitor)"
-(in Create Now), RFC 8252.
+exchange ([report 009](009-oidc-signin.md)). Design: the host app's identity architecture, §Protocol, "Native apps (Capacitor)",
+and RFC 8252.
 
 ## Public API
 
@@ -115,10 +115,10 @@ exchange ([report 009](009-oidc-signin.md)). Design: arch-08 §Protocol, "Native
 - Mock-issuer sign-in through the native path with synthetic callback URLs: done (above).
 - iOS simulator and Android emulator through the system browser: **deferred to P1** (Peace Game's
   migration), with the plugin choice: backlog [006](../backlog/006-native-oidc-device-run.md).
-- Bypass sign-in on 4040 and CN's `tests/e2e/signin.spec.ts` were not run against this branch: the
-  localized checkout stays on `main`; Create Now runs them after the release.
+- Bypass sign-in on 4040 and the host app's sign-in end-to-end spec were not run against this branch: the
+  localized checkout stays on `main`; the host app runs them after the release.
 
 ## Follow-ups
 
 - Device run and plugin choice: backlog [006](../backlog/006-native-oidc-device-run.md), for P1.
-- Create Now's 065 §Contracts 4 needs the same native note as plan 001's contract 4.
+- The host app's sign-in master plan §Contracts 4 needs the same native note as plan 001's contract 4.

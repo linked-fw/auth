@@ -79,7 +79,7 @@ const hmacWebIdUnchecked = (email: string, { secret, issuer }: HmacWebIdOptions)
 
 /**
  * Derives a WebID from an email with a keyed hash, the rule webid.email mints WebIDs with
- * (arch-08 §WebID derivation):
+ * (§WebID derivation in the host app's identity architecture):
  *
  *   name  : trim(lowercase(email))
  *   h     : first 128 bits of HMAC-SHA256(secret, name), as 32 lowercase hex characters
@@ -105,7 +105,7 @@ export const hmacWebIdFor = (options: HmacWebIdOptions): ((email: string) => str
 
 /**
  * The published test vector for `hmacWebId`, with the local dev secret and the local webid.email
- * issuer. Every implementation of the rule (webid.email, Create Now's dev sign-in) asserts it.
+ * issuer. Every implementation of the rule (webid.email, a host app's dev sign-in) asserts it.
  * The email has mixed case and surrounding spaces, so the vector covers normalisation too.
  */
 export const HMAC_WEBID_TEST_VECTOR = Object.freeze({

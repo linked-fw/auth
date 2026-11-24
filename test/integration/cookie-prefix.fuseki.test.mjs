@@ -1,4 +1,4 @@
-// Two Linked apps on one host (an app and a local issuer, e.g. CN on :4040 and webid.email on
+// Two Linked apps on one host (an app and a local issuer, e.g. one on :4040 and webid.email on
 // :4050) share cookies, because browsers do not separate cookies by port. Each app's cookies carry
 // a prefix of their own, by default from its APP_PREFIX (neither app sets AUTH_COOKIE_PREFIX), so
 // signing out of one leaves the other signed in.
@@ -97,13 +97,13 @@ function createBrowser() {
   };
 }
 
-let cn;
+let app;
 let wie;
 before(async () => {
-  [cn, wie] = await Promise.all([startApp('cn'), startApp('webid-email')]);
+  [app, wie] = await Promise.all([startApp('app'), startApp('webid-email')]);
 });
 after(() => {
-  cn?.child.kill();
+  app?.child.kill();
   wie?.child.kill();
 });
 
@@ -116,23 +116,23 @@ const newAccount = () => ({
 
 test('two apps in one cookie jar: signing out of one leaves the other signed in', async () => {
   const browser = createBrowser();
-  const inCn = await browser.rpc(cn.url, 'createAccount', [newAccount()]);
+  const inApp = await browser.rpc(app.url, 'createAccount', [newAccount()]);
   const inWie = await browser.rpc(wie.url, 'createAccount', [newAccount()]);
-  assert.ok(inCn.accessToken && inWie.accessToken, JSON.stringify({ inCn, inWie }));
+  assert.ok(inApp.accessToken && inWie.accessToken, JSON.stringify({ inApp, inWie }));
 
   assert.deepEqual(browser.names(), [
-    'cn_accessToken',
-    'cn_linkedAuthSession',
-    'cn_refreshToken',
+    'app_accessToken',
+    'app_linkedAuthSession',
+    'app_refreshToken',
     'webid-email_accessToken',
     'webid-email_linkedAuthSession',
     'webid-email_refreshToken',
   ]);
-  const cnAccount = await browser.page(cn.url);
+  const appAccount = await browser.page(app.url);
   const wieAccount = await browser.page(wie.url);
-  assert.ok(cnAccount && wieAccount && cnAccount !== wieAccount);
+  assert.ok(appAccount && wieAccount && appAccount !== wieAccount);
 
-  assert.equal(await browser.rpc(cn.url, 'signout'), true);
+  assert.equal(await browser.rpc(app.url, 'signout'), true);
   assert.deepEqual(browser.names(), [
     'webid-email_accessToken',
     'webid-email_linkedAuthSession',
@@ -140,8 +140,8 @@ test('two apps in one cookie jar: signing out of one leaves the other signed in'
   ]);
 
   // the signed-out app: no page session, nothing to refresh
-  assert.equal(await browser.page(cn.url), null);
-  assert.equal((await browser.rpc(cn.url, 'validateToken', [null, { forceRefresh: true }])).error, 'No token found');
+  assert.equal(await browser.page(app.url), null);
+  assert.equal((await browser.rpc(app.url, 'validateToken', [null, { forceRefresh: true }])).error, 'No token found');
 
   // the other app: still signed in, and its session still refreshes
   assert.equal(await browser.page(wie.url), wieAccount);

@@ -23,7 +23,7 @@ the app; and every create path wrote `""` literals for names it did not have.
 - `readProfileLiterals(body, contentType, documentUrl, webId, predicate)`
   (`src/utils/issuerDiscovery.ts`): the plain and language-tagged string values of `predicate`
   that a profile document states about the WebID, Turtle or JSON-LD, with the same reader (and the
-  same limits) as `readOidcIssuers`, which now runs through it. Create Now reads `foaf:name` with
+  same limits) as `readOidcIssuers`, which now runs through it. The host app reads `foaf:name` with
   it for its profile-name cache; `createGuardedFetch` was already reachable as
   `@_linked/auth/utils/guardedFetch`.
 
@@ -40,7 +40,7 @@ the app; and every create path wrote `""` literals for names it did not have.
 
 ### Deviations
 
-None from Create Now's plan 226 §NM, which specifies this change; the reader is shared with issuer
+None from the host app's plan (§NM), which specifies this change; the reader is shared with issuer
 discovery instead of copied into the app.
 
 ### Follow-ups
@@ -54,7 +54,7 @@ migration (the only installs are development stores that are reset).
 
 ## Addendum — review fixes
 
-Create Now's independent review of the change (plan 226 §NM) asked for three more things, in a
+The host app's independent review of the change (its plan, §NM) asked for three more things, in a
 second changeset (`sign-in-names-hardening`, minor):
 
 - **Names are cleaned** before they are stored: `cleanPersonName` (`src/utils/personName.ts`,
@@ -66,7 +66,7 @@ second changeset (`sign-in-names-hardening`, minor):
   never overwrite one. Names in a signed ID token (Solid-OIDC, Google) still overwrite.
 - **`onSignedIn(callback)`** (`src/utils/events.ts`) runs with the person's id after every
   successful sign-in, whatever the method (`Auth.onSigninSuccessful` calls the backend's hook,
-  `Auth.signedIn`, so the browser bundle does not load the event bus). Create Now drops its cached
+  `Auth.signedIn`, so the browser bundle does not load the event bus). The host app drops its cached
   name of the person there.
 
 Verification: `npm test` `# pass 626`, `# fail 0` (new: the cleaning, Apple's fill-only names,

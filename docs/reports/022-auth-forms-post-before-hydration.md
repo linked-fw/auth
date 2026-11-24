@@ -8,7 +8,7 @@ summary: >
 
 # 022 — Auth's forms post before hydration
 
-Create Now plan 181 (backlog batch), with `@_linked/server-utils` report 005. Landed on the
+The host app's backlog batch plan, with `@_linked/server-utils` report 005. Landed on the
 integration branch `dev`.
 
 ## PR
@@ -41,9 +41,9 @@ handlers still call `preventDefault`.
 - The new test with the forms reverted (`git stash -- src`, rebuild): `# pass 0`, `# fail 6`;
   with the change: `# pass 6`, `# fail 0`.
 - `npm test`: `# tests 611`, `# pass 611`, `# fail 0` (15.5 s).
-- CN worktree (port 4062) on this build: `POST /signin` with a form body answers `404`, so a
+- A host app worktree on this build: `POST /signin` with a form body answers `404`, so a
   pre-hydration submit sends nothing in the URL.
-- CN `npm run test:regular` in the worktree (`CN_TEST_PORT=4162`, under the shared run lock),
+- The host app's `npm run test:regular` in the worktree (under the shared run lock),
   `real 312.52`:
 
   ```
@@ -64,7 +64,7 @@ handlers still call `preventDefault`.
   own URL, which keeps the credentials in the body over the page's own origin. An explicit action
   would need an endpoint that every app serves.
 - Not done: disabling the forms until hydration. A pre-hydration submit now lands on whatever the
-  app answers for a POST to the page (CN: 404), so the person types again. Recorded as backlog 009.
+  app answers for a POST to the page (the host app: 404), so the person types again. Recorded as backlog 009.
 
 ### Follow-ups
 
@@ -74,7 +74,7 @@ handlers still call `preventDefault`.
 
 ## Details
 
-The CN regular run above covers both this package and `@_linked/server-utils` report 005.
+The host app regular run above covers both this package and `@_linked/server-utils` report 005.
 
 
 The three ways the webid.email backlog named were `method="post"`, disabling until hydrated, or

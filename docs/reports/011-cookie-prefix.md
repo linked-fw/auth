@@ -2,7 +2,7 @@
 summary: >
   A configurable prefix for every cookie @_linked/auth sets and reads (AUTH_COOKIE_PREFIX, or
   Auth.cookiePrefix): accessToken, refreshToken, linkedAuthSession and the express-session cookie
-  linked.auth, on the server and in the client's session hint. Two Linked apps on one host (CN on
+  linked.auth, on the server and in the client's session hint. Two Linked apps on one host (an app on
   :4040, webid.email on :4050) keep separate sessions. Default empty: today's names.
 ---
 
@@ -10,7 +10,7 @@ summary: >
 
 ## Outcome
 
-Browsers share cookies across ports, so CN and a local webid.email signed each other out. Each app
+Browsers share cookies across ports, so an app and a local webid.email signed each other out. Each app
 now sets its own prefix and every auth cookie carries it; an app that sets nothing keeps today's
 names. Step A6 of [plan 001](../plans/001-webid-signin-track.md#a6--cookie-name-prefix).
 
@@ -56,25 +56,25 @@ names. Step A6 of [plan 001](../plans/001-webid-signin-track.md#a6--cookie-name-
 ## Review
 
 - Medium, fixed: the client first read `process.env?.[name]`, which no `define` inlines. Now
-  literal; `esbuild --define:process.env.AUTH_COOKIE_PREFIX="cn_"` emits `return "cn_"`, and a
+  literal; `esbuild --define:process.env.AUTH_COOKIE_PREFIX="app_"` emits `return "app_"`, and a
   unit test guards the token.
 - No other cookie is set or read by auth.
 
 ## Tests
 
 - Unit: every name carries the prefix; sign-in sets only prefixed cookies; express-session sets
-  `cn_linked.auth`; a page load and a refresh use the prefixed cookies and ignore unprefixed ones;
+  `app_linked.auth`; a page load and a refresh use the prefixed cookies and ignore unprefixed ones;
   sign-out clears only prefixed names; `hasSessionHint` honours it; the static wins and validates;
   unset or empty env gives `accessToken`/`refreshToken`/`linkedAuthSession`; invalid env throws.
-- Integration: two app processes (`cn_`, `wie_`) on one Fuseki dataset, one port-blind cookie jar;
-  sign out of `cn_` → `cn_` has no page session and nothing to refresh, `wie_` still renders signed
+- Integration: two app processes (`app_`, `wie_`) on one Fuseki dataset, one port-blind cookie jar;
+  sign out of `app_` → `app_` has no page session and nothing to refresh, `wie_` still renders signed
   in and refreshes. A control run with both prefixes empty fails.
 
 ## Follow-ups
 
 Recorded in [plan 001 §A6 Consumers](../plans/001-webid-signin-track.md#a6--cookie-name-prefix),
-routed by CN's master plan 065:
+routed by the host app's sign-in master plan:
 - webid.email sets `wie_` locally and reads the hint with `sessionHintCookieName()` in
   `src/oidc/provider.ts` (today the base `SESSION_HINT_COOKIE`).
-- CN sets `cn_` locally and inlines it through `createViteConfig({define})`.
-- 065 §Contracts 2 gets the two `AUTH_COOKIE_PREFIX` rows.
+- The host app sets `app_` locally and inlines it through `createViteConfig({define})`.
+- The master plan's §Contracts 2 gets the two `AUTH_COOKIE_PREFIX` rows.

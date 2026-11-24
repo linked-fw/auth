@@ -12,7 +12,7 @@ summary: >
 Every sign-in method that starts from an email now gets the user's WebID from one configurable
 function, `Auth.webIdFor`. The default is today's `emailToWebID`, so an app that sets nothing keeps
 its WebIDs. The keyed rule that webid.email mints WebIDs with is exported for webid.email itself and
-for Create Now's dev sign-in, together with a test vector both of them assert.
+for the host app's dev sign-in, together with a test vector both of them assert.
 
 Step A0 of [plan 001](../plans/001-webid-signin-track.md).
 
@@ -38,7 +38,7 @@ Step A0 of [plan 001](../plans/001-webid-signin-track.md).
 - **The issuer's trailing slash is refused, not trimmed.** The contract says the issuer has none;
   refusing makes a misconfiguration fail at startup instead of passing silently.
 - **`node:crypto` is loaded at call time** through `process.getBuiltinModule` (Node ≥ 22.3), not
-  imported. Create Now's browser components import `utils/webID` for `emailToWebID`; a static import
+  imported. The host app's browser components import `utils/webID` for `emailToWebID`; a static import
   would put `node:crypto` into their bundle. The built `webID.js` imports only `uuid`; in a browser
   `hmacWebId` throws "runs only on the server".
 - Exports stay on the subpath, not the package root, which has no named exports.
@@ -53,7 +53,7 @@ and issuer; refusals; the built `backend.js` has five `Auth.webIdFor(` calls and
 
 ## Follow-ups
 
-- Create Now C2a switches its dev derivation to `hmacWebIdFor` (`DEV_WEBID_SECRET`,
+- The host app (C2a) switches its dev derivation to `hmacWebIdFor` (`DEV_WEBID_SECRET`,
   `DEV_WEBID_ISSUER`) and asserts the vector; webid.email W2 mints with it.
-- Create Now C2b removes the browser-side `emailToWebID` imports (invitations by email); after that
+- The host app (C2b) removes the browser-side `emailToWebID` imports (invitations by email); after that
   `utils/webID` no longer needs to stay browser-safe, though nothing requires changing it.

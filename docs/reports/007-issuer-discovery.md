@@ -11,7 +11,7 @@ summary: >
 ## Outcome
 
 A server-side module answers "which issuer signs this user in?" for whatever they typed on the
-sign-in page, as arch-08 §Sign-in → Flow draws it. A typed WebID gives the issuers its profile
+sign-in page, as the host app's identity architecture (§Sign-in → Flow) draws it. A typed WebID gives the issuers its profile
 asserts. An email asks its domain's WebFinger, and when the domain gives no usable answer it goes to
 the default issuer (webid.email) with the email as `login_hint`. The module is self-contained:
 `backend.ts` and `src/index.ts` do not import it, and no existing sign-in method changed. A2

@@ -29,7 +29,7 @@ Default lifetimes: the access token lasts **15 minutes** (1 hour in development)
 
 ### Two Linked apps on one host: a cookie prefix
 
-Browsers do not separate cookies by port, so two Linked apps on one host (for example an app on `localhost:4040` developed against a local issuer on `localhost:4050`) would share `accessToken`, `refreshToken`, `linkedAuthSession` and the session cookie `linked.auth`: signing out of one would sign out the other. So every auth cookie carries a prefix of the app's own, and **by default there is nothing to set**: the prefix comes from the app's `APP_PREFIX` (every Linked app's `.env` has one), made a safe cookie-name token with `_` appended. `APP_PREFIX=webid-email` gives `webid-email_accessToken`, `webid-email_refreshToken`, `webid-email_linkedAuthSession` and `webid-email_linked.auth`; `APP_PREFIX=cn` gives `cn_…`. The token keeps letters, digits, `_`, `.` and `-`, turns every other run of characters into `-`, and trims `-`, `_` and `.` from both ends (`My App!` → `My-App_`).
+Browsers do not separate cookies by port, so two Linked apps on one host (for example an app on `localhost:4040` developed against a local issuer on `localhost:4050`) would share `accessToken`, `refreshToken`, `linkedAuthSession` and the session cookie `linked.auth`: signing out of one would sign out the other. So every auth cookie carries a prefix of the app's own, and **by default there is nothing to set**: the prefix comes from the app's `APP_PREFIX` (every Linked app's `.env` has one), made a safe cookie-name token with `_` appended. `APP_PREFIX=webid-email` gives `webid-email_accessToken`, `webid-email_refreshToken`, `webid-email_linkedAuthSession` and `webid-email_linked.auth`; `APP_PREFIX=my-app` gives `my-app_…`. The token keeps letters, digits, `_`, `.` and `-`, turns every other run of characters into `-`, and trims `-`, `_` and `.` from both ends (`My App!` → `My-App_`).
 
 The prefix in effect, first match wins:
 
@@ -659,17 +659,17 @@ style the sign-in page. Set `Auth.signinClient` once in the backend setup, befor
 import { Auth } from '@_linked/auth/utils/auth';
 
 Auth.signinClient = {
-  clientName: 'Create.Now',
-  logoUri: 'https://create.now/logo.svg',
-  policyUri: 'https://create.now/privacy', // also clientUri (default SITE_ROOT) and tosUri
+  clientName: 'My App',
+  logoUri: 'https://example.org/logo.svg',
+  policyUri: 'https://example.org/privacy', // also clientUri (default SITE_ROOT) and tosUri
   redirectUris: ['com.example.app:/callback'], // optional, e.g. app-claimed links of native builds
   theme: {
     layout: 'two-column', // or 'card'
     colors: { primary: '#1a73e8', accent: '#ff8000', background: 'white', panel: '#0b1020', text: '#222' },
     font: 'Inter',
     scheme: 'light', // or 'dark'
-    brand: { name: 'Create.Now', logoUri: 'https://create.now/logo.svg' },
-    panelArt: 'https://create.now/art/bow.svg', // an image or animated SVG, shown as an <img>
+    brand: { name: 'My App', logoUri: 'https://example.org/logo.svg' },
+    panelArt: 'https://example.org/art/bow.svg', // an image or animated SVG, shown as an <img>
   },
 };
 ```
@@ -711,7 +711,7 @@ below); nothing else of the issuer's is kept. Opt in with `Auth.oidcSignin`, nex
 ```ts
 import { Auth } from '@_linked/auth/utils/auth';
 
-Auth.signinClient = { clientName: 'Create.Now' };
+Auth.signinClient = { clientName: 'My App' };
 Auth.oidcSignin = {
   // all optional:
   defaultIssuer: 'https://webid.email', // for emails whose domain names no issuer

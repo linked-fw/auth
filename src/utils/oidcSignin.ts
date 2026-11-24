@@ -1,6 +1,6 @@
 /**
  * The Solid-OIDC relying party: the redirect to an issuer and the exchange on the way back
- * (arch-08 §Protocol, in the Create Now repo). The app starts its own session from the verified
+ * (Solid-OIDC). The app starts its own session from the verified
  * identity. The issuer's access token is handed back with its DPoP key (`IssuerGrant`) when it is
  * one a data server can verify (a DPoP-bound JWT), for the app to keep server-side and send to
  * data servers on the user's behalf (`issuerTokens.ts`); any other access token is discarded.

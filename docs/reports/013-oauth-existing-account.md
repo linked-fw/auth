@@ -12,7 +12,7 @@ summary: >
 
 Step A7 of [plan 001](../plans/001-webid-signin-track.md#a7--oauth-into-an-existing-account-and-a-provider-start-without-an-email),
 from webid.email's backlog 008 (W5). The owner's decision: same verified email = same account
-(arch-08 §One email, one persona); never a different email, never an unverified one; the email
+(§One email, one persona, in the host app's identity architecture); never a different email, never an unverified one; the email
 decides, not the provider's subject. Needed before Peace Game's migration (P1), where every
 migrated user has a password and may sign in with Google.
 
@@ -110,8 +110,8 @@ unlinked account runs no `dropUnprovenAccess` (auth cannot create that state tod
 
 ## Follow-ups
 
-- CN master plan 065 §Contracts 4: add the hint-only start (plan 001 contract 4 has it).
-- CN (C3 follow-up): "Continue with Google" can call `startOidcSignin({providerHint: 'google'})`
+- The host app's sign-in master plan §Contracts 4: add the hint-only start (plan 001 contract 4 has it).
+- The host app (C3 follow-up): "Continue with Google" can call `startOidcSignin({providerHint: 'google'})`
   with no email.
 - webid.email backlog 008: items 1 and 2 are settled by this release (no "Connect Google" needed);
   items 3 and 4 are webid.email's own.

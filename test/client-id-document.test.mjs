@@ -44,32 +44,32 @@ const validTheme = {
   },
   font: 'Inter',
   scheme: 'dark',
-  brand: { name: 'Create.Now', logoUri: 'https://create.now/logo.svg' },
-  panelArt: 'https://create.now/art/bow.svg',
+  brand: { name: 'Example App', logoUri: 'https://example.org/logo.svg' },
+  panelArt: 'https://example.org/art/bow.svg',
 };
 
 const config = {
-  clientName: 'Create.Now',
-  logoUri: 'https://create.now/logo.svg',
-  policyUri: 'https://create.now/privacy',
-  tosUri: 'https://create.now/terms',
+  clientName: 'Example App',
+  logoUri: 'https://example.org/logo.svg',
+  policyUri: 'https://example.org/privacy',
+  tosUri: 'https://example.org/terms',
   theme: validTheme,
 };
 
 const themeOf = (theme) => ({ [SIGNIN_THEME_KEY]: theme });
 
 test('the document is built from the configuration and SITE_ROOT', () => {
-  const { document, problems } = buildClientIdDocument(config, 'https://create.now');
+  const { document, problems } = buildClientIdDocument(config, 'https://example.org');
   assert.deepEqual(problems, []);
   assert.deepEqual(document, {
     '@context': ['https://www.w3.org/ns/solid/oidc-context.jsonld'],
-    client_id: 'https://create.now/.well-known/linked-client.jsonld',
-    client_name: 'Create.Now',
-    redirect_uris: ['https://create.now/auth/oidc/callback'],
-    client_uri: 'https://create.now',
-    logo_uri: 'https://create.now/logo.svg',
-    policy_uri: 'https://create.now/privacy',
-    tos_uri: 'https://create.now/terms',
+    client_id: 'https://example.org/.well-known/linked-client.jsonld',
+    client_name: 'Example App',
+    redirect_uris: ['https://example.org/auth/oidc/callback'],
+    client_uri: 'https://example.org',
+    logo_uri: 'https://example.org/logo.svg',
+    policy_uri: 'https://example.org/privacy',
+    tos_uri: 'https://example.org/terms',
     grant_types: ['authorization_code'],
     response_types: ['code'],
     scope: 'openid webid email',
@@ -361,8 +361,8 @@ test('a configured app serves its document as cacheable JSON-LD, without invalid
   let url;
   const warnings = await captureWarnings(async () => {
     url = await startApp({
-      signinClient: { clientName: 'Create.Now', theme: { ...validTheme, font: 'Comic Sans MS' } },
-      siteRoot: 'https://create.now/',
+      signinClient: { clientName: 'Example App', theme: { ...validTheme, font: 'Comic Sans MS' } },
+      siteRoot: 'https://example.org/',
     });
   });
   assert.ok(
@@ -375,8 +375,8 @@ test('a configured app serves its document as cacheable JSON-LD, without invalid
   assert.match(res.headers.get('content-type'), /^application\/ld\+json/);
   assert.equal(res.headers.get('cache-control'), 'public, max-age=600');
   const document = await res.json();
-  assert.equal(document.client_id, 'https://create.now/.well-known/linked-client.jsonld');
-  assert.deepEqual(document.redirect_uris, ['https://create.now/auth/oidc/callback']);
+  assert.equal(document.client_id, 'https://example.org/.well-known/linked-client.jsonld');
+  assert.deepEqual(document.redirect_uris, ['https://example.org/auth/oidc/callback']);
   const { font, ...rest } = validTheme;
   assert.deepEqual(document[SIGNIN_THEME_KEY], rest);
 });

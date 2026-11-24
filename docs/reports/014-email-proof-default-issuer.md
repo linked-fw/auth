@@ -11,7 +11,7 @@ summary: >
 ## Outcome
 
 Step A9 of [plan 001](../plans/001-webid-signin-track.md#a9--email-proof-by-the-default-issuer-and-one-account-per-webid),
-from Create Now's backlog 110 §1–2 (found by step C4, `WEBID_MODE=production`): no webid.email
+from a host app backlog item (found by its step C4, `WEBID_MODE=production`): no webid.email
 email proved its WebID in production, and a dev sign-in followed by an issuer sign-in left two
 `UserAccount`s for one WebID.
 
@@ -79,7 +79,7 @@ production refusals pass either way, as they should.
 ## Deviations
 
 - **The dev guard is an allow-list** (`development`, `test`), not "anything but `production`": the
-  owner's decision says both "outside production" and "development and test only", and CN's
+  owner's decision says both "outside production" and "development and test only", and the host app's
   staging runs with `NODE_ENV=staging`, which must not trust any issuer's email. An unset
   `NODE_ENV` is strict too.
 - **Code sign-in and signup** get the account reuse too (the owner's "every method"); OAuth needed
@@ -90,15 +90,15 @@ production refusals pass either way, as they should.
 
 ## Contracts
 
-001 §Contracts 4 updated (the email rule, and one account per WebID). CN's 065 §Contracts 4 needs
+001 §Contracts 4 updated (the email rule, and one account per WebID). The host app's master plan §Contracts 4 needs
 the same text: the master-plan agent copies it.
 
 ## Follow-ups
 
-- **CN** (backlog 110 §1–2, routed by master plan 065): after the release and its Renovate bump,
+- **The host app** (its backlog item, routed by its master plan): after the release and its Renovate bump,
   C4's production run should log `email proven: yes` for webid.email sign-ins, and email
-  invitations resolve there; CN needs no new option (its default issuer is webid.email). Close §1
-  and §2.
+  invitations resolve there; the host app needs no new option (its default issuer is
+  webid.email). Close the backlog item.
 - Existing duplicate accounts in developer data are not merged (dev only; no production data).
 
 ## Known limitations (from the independent review)

@@ -9,7 +9,7 @@
  * - When the domain gives no answer, the email goes to the default issuer (webid.email) with the
  *   email as `login_hint`. Consumer domains that never answer are skipped without a request.
  *
- * See arch-08 §Sign-in → Flow in the Create Now repo. Server-only: every lookup fetches URLs that
+ * Server-only: every lookup fetches URLs that
  * come from user input, so only `https://` is fetched (`http://` and loopback only with
  * `allowLocalhost`), IP literals in private ranges are refused, redirects are checked hop by hop,
  * each request has a deadline (redirects included) and response bodies are capped.

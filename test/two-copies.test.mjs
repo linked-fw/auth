@@ -67,9 +67,9 @@ describe('a second copy of auth shares its state', () => {
     process.env.AUTH_COOKIE_PREFIX = 'changed_';
     assert.equal(b.getCookiePrefix(), 'env_');
     try {
-      authA.Auth.cookiePrefix = 'cn_';
-      assert.equal(b.getCookiePrefix(), 'cn_');
-      assert.equal(b.sessionCookieName(), 'cn_linked.auth');
+      authA.Auth.cookiePrefix = 'app_';
+      assert.equal(b.getCookiePrefix(), 'app_');
+      assert.equal(b.sessionCookieName(), 'app_linked.auth');
       b.setCookiePrefix(undefined);
       assert.equal(a.authCookieName('accessToken'), 'env_accessToken');
     } finally {

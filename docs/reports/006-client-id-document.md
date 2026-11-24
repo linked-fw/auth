@@ -57,7 +57,7 @@ characters; unknown keys dropped. The document additionally declares a public cl
   Content-Type: application/ld+json; charset=utf-8
   Cache-Control: public, max-age=600
 
-  {"@context":["https://www.w3.org/ns/solid/oidc-context.jsonld"],"client_id":"http://localhost:4077/.well-known/linked-client.jsonld","client_name":"Create.Now","redirect_uris":["http://localhost:4077/auth/oidc/callback"],"client_uri":"http://localhost:4077","logo_uri":"http://localhost:4077/logo.svg","grant_types":["authorization_code"],"response_types":["code"],"scope":"openid webid email","token_endpoint_auth_method":"none","https://linked.cm/ns/signin#theme":{"layout":"two-column","font":"Inter","colors":{"primary":"#1a73e8"},"panelArt":"http://localhost:4077/art.svg"}}
+  {"@context":["https://www.w3.org/ns/solid/oidc-context.jsonld"],"client_id":"http://localhost:4077/.well-known/linked-client.jsonld","client_name":"Example App","redirect_uris":["http://localhost:4077/auth/oidc/callback"],"client_uri":"http://localhost:4077","logo_uri":"http://localhost:4077/logo.svg","grant_types":["authorization_code"],"response_types":["code"],"scope":"openid webid email","token_endpoint_auth_method":"none","https://linked.cm/ns/signin#theme":{"layout":"two-column","font":"Inter","colors":{"primary":"#1a73e8"},"panelArt":"http://localhost:4077/art.svg"}}
   ```
 
   Server log: `[auth] Client ID Document: dropped theme value colors.panel = "url(https://evil.example/x.png)": not a plain CSS colour`

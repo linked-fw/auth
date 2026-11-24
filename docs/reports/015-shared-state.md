@@ -101,7 +101,7 @@ memos, the JWT verification cache, warn-once flags, and the stub-able `UsedNonce
 ## Review notes
 
 An independent review of [#150](https://github.com/linked-fw/auth/pull/150) found no high or medium
-issues, and confirmed every consumer (Create Now, webid.email, auth itself) only assigns the `Auth`
+issues, and confirmed every consumer (the host app, webid.email, auth itself) only assigns the `Auth`
 statics, so the accessors are safe. Known limits it recorded:
 
 1. **The two-copy tests load auth twice, but core, server-utils and React once.** They do not prove

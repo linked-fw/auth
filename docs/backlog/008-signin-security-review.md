@@ -1,7 +1,7 @@
 ---
 summary: >
-  Findings of the security review over the WebID sign-in track (auth #119–#137), run in Create
-  Now's wrap-up (X1 of its plan 065): a custom-scheme redirect lets an attacker who starts a native
+  Findings of the security review over the WebID sign-in track (auth #119–#137), run in the host
+  app's wrap-up (X1 of its sign-in master plan): a custom-scheme redirect lets an attacker who starts a native
   sign-in take the victim's account (medium); no issuer mix-up defence; discovery helpers default
   to an unguarded fetch; the development email-proof relaxation on a public dev server.
 status: Open
@@ -10,7 +10,7 @@ status: Open
 # 008 — Security review of the WebID sign-in track
 
 A read-only review of `b7ae16d..90a0f6b -- src` (the merged PRs #119, #121–#123, #127, #129, #131,
-#133, #135, #137), from Create Now's report 088. No critical or high finding. Checked and sound:
+#133, #135, #137), from a host app's security review. No critical or high finding. Checked and sound:
 the pending web sign-in (bound to the session, single use, 10 min), `state`/`nonce`/PKCE S256 and
 `dpop_jkt`, the issuer check and its origin-root skip, `safeReturnTo`, the guarded fetch (connect-
 time address check, mapped IPv6, redirects per hop, size and time caps), the A9 proof rule, the

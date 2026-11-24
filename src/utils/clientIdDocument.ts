@@ -1,6 +1,6 @@
 /**
  * The app's Solid-OIDC Client ID Document and the sign-in theme extension it carries
- * (arch-08 §Branding: the Client ID Document).
+ * (§Branding: the Client ID Document, in the host app's identity architecture).
  *
  * The theme is defined here once: its types, its JSON Schema, the font allow-list and
  * `validateClientTheme`. webid.email imports this module to read the themes of the documents it
