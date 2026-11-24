@@ -10,7 +10,7 @@
     "type": "git",
     "url": "git+https://github.com/linked-fw/auth.git"
   },
-  "version": "3.22.0",
+  "version": "4.0.0",
   "packageManager": "npm@12.2.0",
   "linked": {
     "kind": "library"
@@ -43,13 +43,13 @@
     "web3"
   ],
   "dependencies": {
-    "@_linked/core": "^2.41.0",
-    "@_linked/primitives": "^1.9.0",
-    "@_linked/react": "^2.0.0",
-    "@_linked/schema": "^1.8.0",
-    "@_linked/server-utils": "^1.16.1",
-    "@_linked/sioc": "^1.6.0",
-    "@_linked/xsd": "^1.4.0",
+    "@_linked/core": "^3.0.0",
+    "@_linked/primitives": "^2.0.0",
+    "@_linked/react": "^3.0.0",
+    "@_linked/schema": "^2.0.0",
+    "@_linked/server-utils": "^2.0.0",
+    "@_linked/sioc": "^2.0.0",
+    "@_linked/xsd": "^2.0.0",
     "@capacitor/dialog": "^7.0.2",
     "@tolgee/react": "^5.16.2",
     "@types/bcrypt": "^6.0.0",
@@ -76,8 +76,8 @@
   },
   "devDependencies": {
     "@_linked/cli": "^1.57.1",
-    "@_linked/fuseki": "^3.7.0",
-    "@_linked/server": "^3.9.0",
+    "@_linked/fuseki": "^4.0.0",
+    "@_linked/server": "^4.0.0",
     "@changesets/changelog-github": "^1.0.0",
     "@changesets/cli": "^3.0.0",
     "@types/n3": "^1.26.4",
