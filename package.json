@@ -75,7 +75,7 @@
     "react-router-dom": "^6.14.2"
   },
   "devDependencies": {
-    "@_linked/cli": "^1.57.1",
+    "@_linked/cli": "^2.0.0",
     "@_linked/fuseki": "^4.0.0",
     "@_linked/server": "^4.0.0",
     "@changesets/changelog-github": "^1.0.0",
