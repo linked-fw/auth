@@ -11,7 +11,7 @@
     "url": "git+https://github.com/linked-fw/auth.git"
   },
   "version": "4.0.0",
-  "packageManager": "npm@12.2.0",
+  "packageManager": "npm@12.2.3",
   "linked": {
     "kind": "library"
   },
