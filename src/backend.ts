@@ -1433,7 +1433,7 @@ export default class AuthBackendProvider extends BackendProvider {
 
       // we get the user by email, if catch the user from here
       // we can say the user signup with temporary signin
-      const account = await UserAccount.select((ua) => {
+      const account = await this.accountShape.select((ua) => {
         return [ua.email, ua.accountOf];
       })
         .where((ua) => {
